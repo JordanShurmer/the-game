@@ -25,8 +25,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	defer delete(data, allocator)
 
 	text := string(data)
-	lines := strings.split_lines(text, allocator)
-	defer delete(lines, allocator)
 
 	materials := make([dynamic]Material, allocator)
 	names     := make([dynamic]string, allocator)
@@ -40,7 +38,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	current_name:  string
 	has_current := false
 
-	for line in lines {
+	for line in strings.split_lines_iterator(&text) {
 		trimmed := strings.trim_space(line)
 		if len(trimmed) == 0 || trimmed[0] == '#' do continue
 
@@ -59,12 +57,11 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		if !has_current do continue
 
 		// key = value
-		parts := strings.split_n(trimmed, "=", 2, allocator)
-		defer delete(parts, allocator)
-		if len(parts) != 2 do continue
+		eq := strings.index_byte(trimmed, '=')
+		if eq < 0 do continue
 
-		key   := strings.trim_space(parts[0])
-		value := strings.trim_space(parts[1])
+		key   := strings.trim_space(trimmed[:eq])
+		value := strings.trim_space(trimmed[eq+1:])
 		// strip inline comment
 		if idx := strings.index_byte(value, '#'); idx >= 0 {
 			value = strings.trim_space(value[:idx])
@@ -116,8 +113,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 
 parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {
 	result: bit_set[Contact_Effect; u32]
-	parts := strings.fields(s) // no allocation for common case
-	for part in parts {
+	s := s
+	for part in strings.fields_iterator(&s) {
 		switch part {
 		case "Burns":       result += {.Burns}
 		case "Wets":        result += {.Wets}
@@ -133,8 +130,8 @@ parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {
 
 parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u32] {
 	result: bit_set[Immersion_Effect; u32]
-	parts := strings.fields(s)
-	for part in parts {
+	s := s
+	for part in strings.fields_iterator(&s) {
 		switch part {
 		case "Drowns":     result += {.Drowns}
 		case "Burns":      result += {.Burns}
@@ -150,8 +147,8 @@ parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u32] {
 
 parse_reaction_tags :: proc(s: string) -> bit_set[Reaction_Tag; u32] {
 	result: bit_set[Reaction_Tag; u32]
-	parts := strings.fields(s)
-	for part in parts {
+	s := s
+	for part in strings.fields_iterator(&s) {
 		switch part {
 		case "Fuel":     result += {.Fuel}
 		case "Oxidizer": result += {.Oxidizer}
