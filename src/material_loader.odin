@@ -1,6 +1,5 @@
 package game
 
-import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -37,14 +36,9 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		delete(names)
 	}
 
-	current: Material
-	current_name: string
+	current:       Material
+	current_name:  string
 	has_current := false
-
-	flush :: proc(materials: ^[dynamic]Material, names: ^[dynamic]string, mat: Material, name: string, allocator: runtime.Allocator) {
-		append(materials, mat)
-		append(names, strings.clone(name, allocator))
-	}
 
 	for line in lines {
 		trimmed := strings.trim_space(line)
@@ -53,7 +47,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		// New material block
 		if trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']' {
 			if has_current {
-				flush(&materials, &names, current, current_name, allocator)
+				append(&materials, current)
+				append(&names, strings.clone(current_name, allocator))
 			}
 			current_name = trimmed[1:len(trimmed)-1]
 			current = Material{lifetime = -1} // sensible default
@@ -110,7 +105,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	}
 
 	if has_current {
-		flush(&materials, &names, current, current_name, allocator)
+		append(&materials, current)
+		append(&names, strings.clone(current_name, allocator))
 	}
 
 	table.materials = materials[:]
@@ -120,7 +116,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 
 parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u16] {
 	result: bit_set[Contact_Effect; u16]
-	for part in strings.split(s, " ") {
+	parts := strings.fields(s) // no allocation for common case
+	for part in parts {
 		switch part {
 		case "Burns":       result += {.Burns}
 		case "Wets":        result += {.Wets}
@@ -136,7 +133,8 @@ parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u16] {
 
 parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u16] {
 	result: bit_set[Immersion_Effect; u16]
-	for part in strings.split(s, " ") {
+	parts := strings.fields(s)
+	for part in parts {
 		switch part {
 		case "Drowns":     result += {.Drowns}
 		case "Burns":      result += {.Burns}
@@ -151,7 +149,8 @@ parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u16] {
 
 parse_reaction_tags :: proc(s: string) -> bit_set[Reaction_Tag; u16] {
 	result: bit_set[Reaction_Tag; u16]
-	for part in strings.split(s, " ") {
+	parts := strings.fields(s)
+	for part in parts {
 		switch part {
 		case "Fuel":     result += {.Fuel}
 		case "Oxidizer": result += {.Oxidizer}
@@ -173,7 +172,7 @@ find_material_index :: proc(table: Material_Table, name: string) -> (idx: int, f
 }
 
 // ------------------------------------------------------------
-// Data-driven tests (run with: odin test src)
+// Data-driven tests (run with: odin test src  from repo root)
 // ------------------------------------------------------------
 
 @(test)
