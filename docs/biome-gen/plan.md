@@ -1,6 +1,6 @@
 # Plan: Biome Generation in Odin
 
-Status: revision 5. The geometry is now derived and checked. See
+Status: revision 6. The geometry is now derived and checked. See
 "Revision notes" at the end.
 
 This plan follows the research in `noita-research.md`.
@@ -11,9 +11,11 @@ Three different things were all called "slot" in earlier
 revisions. They are now separate:
 
 - **Template slot**: one painted tile image in the template PNG.
-- **Edge kind**: one of the 6 lattice edge classes in D3.
+- **Edge kind**: one of the 6 lattice edge kinds in D3.
 - **Fill slot**: one of the 8 gray shades that a biome maps to a
   material in D5.
+- **Paint class**: what one template pixel compiles to. It is Air,
+  a fill slot 0..7, or a material ID. It is biome independent.
 
 ## The ladder audit
 
@@ -84,9 +86,11 @@ depth-based variation; world edges; parallel worlds.
   no use here.
 - `Material_ID :: distinct u16` indexes the material table. It does
   not exist in `material.odin` yet. P1 adds it.
-- **A region is the unit of biome ownership.** `REGION_SIZE :: 512`
-  world cells. One biome-map pixel is one region. This is fixed and
-  independent of how generation is cut into pieces.
+- **A region is the unit of biome ownership.** One biome-map pixel
+  is one region. The default is 512 world cells, and the `[Map]`
+  key `cells_per_pixel` overrides it per map. Region size is
+  independent of how generation is cut into pieces, but it is a
+  terrain input, so the golden test pins it.
 - **A chunk is only a cut.** It is how much the caller asks for at
   once. Generation writes into a caller-owned `[]Material_ID` with
   an explicit width, height, and world origin. There is no chunk
@@ -94,21 +98,25 @@ depth-based variation; world edges; parallel worlds.
 - Generation signature intent:
   `generate(dest: []Material_ID, w, h: int, world_origin: [2]i32,
   seed: u64)`. It iterates the regions that overlap the rectangle
-  and clips each. The caller does not split by region.
+  and clips each. The caller does not split by region. It checks
+  `len(dest) >= w * h`.
+- **All world-to-lattice and world-to-region conversion uses
+  floored division**, not Odin's `/`, which truncates toward zero.
+  Without this, cells -511..-1 land in region 0 instead of region
+  -1, and the lattice shifts by one across both axes at the origin.
+  Half the world sits on the far side of that bug, so a seam test
+  straddles the origin.
 - Future simulation needs per-cell flags, shade, and sparse
   velocity. Those become parallel arrays, not a fat per-cell
   struct. Most cells are static, so a fat cell would move unused
   bytes through cache.
 
 **On the chunk-size control.** The owner asked for a chunk-size UI
-control. It is kept, and it is now honest, because regions and
-chunks are separate. Chunk size changes only how the same world is
-cut into pieces. It changes seam behavior and per-call cost. It
-does not change the terrain. `n` and `REGION_SIZE` change terrain.
-Revision 4 claimed chunk size never changes terrain while also
-saying one map pixel is one chunk; those two statements
-contradicted each other. Separating regions from chunks removes the
-contradiction.
+control. It is kept, and it now matches what it does, because
+regions and chunks are separate. Chunk size changes only how the
+same world is cut into pieces. It changes seam behavior and
+per-call cost. It does not change the terrain. `n` and region size
+change terrain.
 
 ### D2. Biome map and biome table
 
@@ -140,8 +148,11 @@ fill_2    = Air
 
 - All data files use `0xAARRGGBB`, as in `materials.txt`. The PNG
   decoder gives RGBA bytes. One tested procedure converts them.
-- A future `cells_per_pixel` key in `[Map]` changes `REGION_SIZE`
-  per map, for finer biome shapes.
+- `cells_per_pixel` in `[Map]` sets the region size, default 512.
+- **Biome key colors must be unique.** A duplicate is a hard load
+  error naming both biomes. The color is also the biome's hash salt
+  (D4), so a duplicate would make two biomes generate identically.
+- `Map` is a reserved section name. A biome may not use it.
 
 ### D3. The herringbone lattice, derived
 
@@ -217,7 +228,10 @@ vertical formula passed unnoticed at `1 1 1 1` and `2 2 2 2`.
 
 **Per-class counts are the art-cost ramp.** This is why they stay:
 
-| `colors` | Horizontal | Vertical | Total |
+Counts below are **per variant**. Painted images are the total
+multiplied by `vary`.
+
+| `colors` | Horizontal | Vertical | Total per variant |
 | --- | --- | --- | --- |
 | 1 1 1 1 | 1 | 1 | 2 |
 | 2 1 1 1 | 2 | 4 | 6 |
@@ -231,17 +245,47 @@ and 20 slots for {0,3} and {1,2}.
 
 **Our own slot layout.** We do not keep stb compatibility. We write
 the slicer either way, and no stb-authored or Noita-authored asset
-could load here. The layout is: a horizontal block, then a vertical
-block. Inside a block, the index is mixed-radix. The digits are the
-corner colors in the order `a,b,c,d,e,f`, each with the radix given
-by its class in the corner class table. `variant` is the most
-significant digit, with radix `vary`, so each orientation block
-repeats `vary` times.
+could load here. The layout below is ours, and it must be written
+down because it becomes the on-disk art format.
+
+Each orientation forms a 2D grid of slots. The six corner digits
+split into three that index the column and three that index the
+row. The split follows the tile's own shape:
+
+| Orientation | Column digits (`a,b,c`) | Row digits (`d,e,f`) |
+| --- | --- | --- |
+| Horizontal (top row, then bottom row) | radices `nc1, nc2, nc3` | radices `nc0, nc1, nc2` |
+| Vertical (left column, then right column) | radices `nc0, nc3, nc2` | radices `nc1, nc0, nc3` |
+
+Within each group the first corner is the most significant digit.
+The column and row counts multiply to the slot counts above, which
+is the check that the split is correct.
+
+- Horizontal block: `nc1*nc2*nc3` columns by `nc0*nc1*nc2` rows,
+  each cell `2n` by `n`.
+- Vertical block: `nc0*nc3*nc2` columns by `nc1*nc0*nc3` rows, each
+  cell `n` by `2n`.
+- The image holds, for each variant in order, the horizontal block
+  and then the vertical block, stacked downward. There is no
+  padding.
+
+Image size follows, and this is the formula the dimension check
+uses:
+
+```
+width  = max(2n * nc1*nc2*nc3, n * nc0*nc3*nc2)
+height = vary * (n * nc0*nc1*nc2 + 2n * nc1*nc0*nc3)
+```
+
+At `colors = 2 2 2 2`, `vary = 1`, `n = 64` that is 1024 by 1536.
+At `colors = 2 2 1 1` it is 256 by 768.
 
 One procedure,
-`slot_rect(colors: [6]u8, orientation, variant) -> Rect`, lives in
-the game package. The engine and the tool both call it. A unit test
-pins known indices.
+`slot_rect(cfg: Tileset_Config, colors: [6]u8, orientation, variant)
+-> Rect`, lives in the game package. It needs `cfg` because the
+radices come from `colors` and the geometry from `n` and `vary`.
+The engine and the tool both call it. A unit test pins known
+indices at both uniform and non-uniform color counts.
 
 **Tileset sidecar:**
 
@@ -254,13 +298,19 @@ vary   = 2         # interior alternatives per template slot
 ```
 
 - Expected template slot count is `(horizontal + vertical) * vary`.
-  The loader hard-errors if the PNG dimensions disagree with `n`,
-  `colors`, and `vary`, and it reports both sizes. Omitting `vary`
-  here was a revision 4 error that would have made a memory-safety
-  check compute the wrong size.
-- A template slot whose pixels are all alpha 0 is a load error. An
-  all-Air tile is legal art, so the artist marks it with an
-  explicit Air wang color rather than leaving it blank.
+  The loader hard-errors if the PNG dimensions disagree with the
+  formula above, and it reports both sizes. Omitting `vary` here
+  was a revision 4 error that would have made a memory-safety check
+  compute the wrong size.
+- **Template slot coverage**: a template slot whose pixels are all
+  alpha 0 is a load error. An all-Air tile is legal art, so the
+  artist marks it with an explicit Air wang color rather than
+  leaving it blank.
+- **Required keys and ranges.** `n`, `colors`, and `vary` must be
+  present. `n >= 1`, `vary >= 1`, and each `colors` entry in 1..8,
+  which is stb's bound. A zero would divide by zero in
+  `%% nc[class(p)]` or `%% vary`. Each violation is a hard load
+  error naming the file and line.
 - `n` and `chunk_size` need no relation. Alignment
   (`chunk_size %% n == 0`) is a preference that reduces partial
   tiles. Correctness comes from clipping, so a tile that meets 4
@@ -274,18 +324,28 @@ tile per cell. We keep that structure and replace both random
 streams with position hashes, so any region computes any lattice
 value locally and neighbors agree by construction.
 
-- **Corner colors.** `color(p) = mix(seed, p.x, p.y, SALT_CORNER)
-  %% nc[class(p)]`, with `p` in n-units and floored modulo.
+- **Corner colors.** `color(p) = mix(seed, biome_salt, p.x, p.y,
+  SALT_CORNER) %% nc[class(p)]`, with `p` in n-units and floored
+  modulo.
 - **Tile choice.** The six corner colors and the variant index
   select the image through `slot_rect`. The variant is
-  `mix(seed, c.x, c.y, SALT_TILE) %% vary`. The cell ID is the
-  tile's origin corner in n-units. Orientation is a pure function
-  of position: class 1 points are horizontal tile origins, and
-  class 0 points are vertical tile origins.
-- **`mix`** is splitmix64's finalizer with constants copied and
-  pinned in our source. The input encoding is documented and
-  tested: `seed` as little-endian `u64`, then `x` and `y`
-  sign-extended from `i32` to `u64`, then the salt.
+  `mix(seed, biome_salt, c.x, c.y, SALT_TILE) %% vary`. The cell ID
+  is the tile's origin corner in n-units. Orientation is a pure
+  function of position: class 1 points are horizontal tile origins,
+  and class 0 points are vertical tile origins.
+- **`biome_salt` is the biome's key color from `biomes.txt`.** Two
+  biomes that share a tileset then differ in shape, instead of
+  being identical everywhere in the world. The salt must never come
+  from the biome's index in the table: adding a biome would
+  renumber the rest and regenerate every world, which is the
+  failure the golden test exists to catch. Key colors are already
+  unique, because D2 requires it.
+- **`mix`** copies splitmix64's finalizer, with its constants
+  pinned in our source. It folds its inputs one at a time:
+  `h = seed; for v in inputs { h = finalize(h ~ v) }`. Inputs are
+  `u64` values in a fixed order, with `x` and `y` sign-extended
+  from `i32`. Nothing is serialized to bytes, so endianness does
+  not apply. A unit test pins the output for known inputs.
 - **One enumeration procedure.** `tiles_overlapping(rect, n)` is an
   iterator over a caller-held state struct, not a returned slice,
   so generation allocates nothing. It yields origin, orientation,
@@ -335,7 +395,9 @@ define every fill slot that its tileset uses.
 **Compilation and the blit.** Each template slot compiles once into
 a flat `[]u16`. Fill slots compile to reserved IDs
 `0xFFF8..0xFFFF` and resolve during the blit through the biome's
-8-entry table. That is one predictable branch per cell. Revision 3
+8-entry table. The loader asserts the material table holds fewer
+than `0xFFF8` entries, so a material ID can never collide with a
+reserved ID. That is one predictable branch per cell. Revision 3
 replaced this with per-(biome, tileset) resolved copies to reach a
 pure memcpy. That is reverted as premature: it multiplies memory by
 the number of biomes sharing a tileset, adds a bind cache and an
@@ -383,11 +445,17 @@ it arrives.**
 
 **Preview mode (P1).** Generates a region through the real pipeline
 and draws it with material display colors. Overlays on toggle:
-region borders, chunk borders, the lattice with corner colors and
-classes, biome map regions. Click a pixel to see the material name,
-tile ID, and source template slot, so a bad seam identifies the
-slot that produced it. Steppers for `n` and chunk size, with the D1
-note that chunk size changes only the cut. Reseed key.
+region borders, chunk borders, biome map regions, and, from P2, the
+lattice with corner colors and classes. Click a pixel to see the
+material name and, from P2, the tile ID and source template slot,
+so a bad seam identifies the slot that produced it. A chunk-size
+stepper, with the D1 note that chunk size changes only the cut.
+Reseed key.
+
+`n` is shown, not edited. From P2 the loader hard-errors whenever
+the PNG dimensions disagree with `n`, so a stepper could only
+produce a load error at every value except the sidecar's. Changing
+`n` means editing the sidecar and re-composing.
 
 **Tileset mode (P4).** The painting mode, built when authoring
 starts. Its purpose is the part an image editor cannot do, which is
@@ -396,8 +464,9 @@ applying the constraint rules.
 - Paint with squares that map to single pixels, at a chosen zoom.
 - The palette is constrained by construction: material wang colors
   by name, and the 8 gray fills labeled with the material each
-  currently resolves to. Off-palette colors and anti-aliased edges
-  become impossible without relying on editor settings.
+  currently resolves to. The palette prevents off-palette colors
+  and anti-aliased edges. The artist does not need to configure the
+  image editor.
 - Info panel: template slot index, its six corner colors and their
   classes, slot counts, and memory cost of the current `n`,
   `colors`, and `vary`.
@@ -473,34 +542,54 @@ because the tests read `data/` by relative path.
   including variants; slot count formulas against the ramp table;
   `tiles_overlapping` counts, orientations, and sub-rectangles;
   paint semantics and every error case; color disjointness; fill
-  coverage; template dimension mismatch; all-alpha-0 slot.
+  coverage; template dimension mismatch; all-alpha-0 slot; missing
+  required keys and out-of-range values; duplicate biome key color.
+- Negative fixture for the seam lint: a tileset with one
+  deliberately broken boundary line must fail it. Without this, a
+  lint that always reports "clean" looks identical to a correct
+  one.
 - Determinism: one seed gives `mem.compare`-identical output. A
   different call order gives an identical world.
 - Seam tests: two adjacent rectangles generated independently share
   identical border cells. A biome-border case checks that clipping
-  is stable.
+  is stable. A case straddling the world origin checks the floored
+  division in D1.
 - **Seam lint.** For each edge kind and endpoint color pair, every
   template slot that carries that edge must present the same
-  `n`-long Air mask on the line of pixels next to the edge. This
-  covers both sides of the seam, both orientations, and every
-  variant. The mask is the property that makes seams continuous.
-  Revision 4 asked instead for identical pixels across
-  orientations, which is impossible: two tiles that share a lattice
-  edge own disjoint pixels, one on each side. The mask version
-  needs no strip width, runs at P2 on hand art with only the
-  provisional paint mapping, and enforces the rule that variants
-  differ only in interiors. This procedure lives in the game
-  package and runs from both tests and forge.
+  `n`-long sequence of **paint classes** on the line of pixels next
+  to the edge. This covers both sides of the seam, both
+  orientations, and every variant. Read the line along increasing x
+  for horizontal segments and increasing y for vertical segments,
+  which matches the class-`t`-end rule used for strips. Only the 6
+  edge kinds are linted; the tile-interior lines h(3,0) and v(2,1)
+  are not edges and are excluded by definition.
+  - Revision 4 asked for identical pixels across orientations,
+    which is impossible: two tiles sharing a lattice edge own
+    disjoint pixels, one on each side.
+  - Revision 5 asked for an Air mask, which is unsound from P3.
+    `fill_2 = Air` in the `[Coalmine]` example is not alpha 0, so
+    the mask reads it as solid. One slot could carry fill 2 and its
+    neighbor could carry Rock at the same column, pass the lint,
+    and still stop a cave dead at the seam.
+  - Paint classes are biome independent, so the check needs no
+    biome. It is strictly stronger than the mask, needs no strip
+    width, and still runs at P2, where the provisional mapping
+    makes it degenerate to the Air mask.
+  - It lives in the game package and runs from both tests and
+    forge.
 - **Dead-end warning (forge only).** For each template slot, every
-  boundary port's Air component must touch at least one other
+  boundary port's open component must reach at least one other
   boundary port. This catches caves that stop at a tile center.
   Revision 4 asked for "the ports it should reach", which needs the
   same connect policy that justified cutting the carver. This
-  version needs no policy. It is a warning in `tools/forge`, not a
-  test, because a sealed pocket is often deliberate.
-- Golden test: a fixed seed and a committed tileset give a known
-  hash. Regenerate it only on purpose. It is the only check against
-  silently regenerating every player's world.
+  version needs no policy. Openness is biome dependent, so the
+  warning resolves fill slots through the biome currently selected
+  in forge. It is a warning in `tools/forge`, not a test, because a
+  sealed pocket is often deliberate.
+- Golden test: a fixed seed, a committed tileset, and a pinned
+  region size give a known hash. Regenerate it only on purpose. It
+  is the only check against silently regenerating every player's
+  world.
 - Performance: a benchmark prints generation time. It does not
   assert, because a loaded machine would fail it for unrelated
   reasons. 1 ms per 512x512 chunk at n=64 is a recorded target.
@@ -511,26 +600,47 @@ because the tests read `data/` by relative path.
 format. P1 extracts the section, key, value, and comment tokenizer
 from `material_loader.odin` into one procedure that all three use.
 
-This is also a bug fix. The current key switch has no default case,
-and `material_loader.odin:61` skips malformed lines with
-`if eq < 0 do continue`. A typo such as `tilesett = ...` would load
-a biome with no tileset and no error, which is a wrong world with
-no message. The shared tokenizer reports unknown keys and malformed
-lines with the file name and line number. Silent config failure is
-a correctness problem. All twelve keys in the current
-`data/materials.txt` are handled, so the change does not break it.
+This is also a bug fix. The current loader fails silently in five
+places, not one, and a tokenizer alone fixes only the first two:
+
+1. The key switch has no default case, so an unknown key is
+   dropped. A typo such as `tilesett = ...` would load a biome with
+   no tileset and no message.
+2. `material_loader.odin:61` skips malformed lines with
+   `if eq < 0 do continue`.
+3. The `state` switch has no default, so `state = Liquidd` yields
+   `.Solid`.
+4. Every numeric and color parse uses `if v, ok := ...; ok do ...`,
+   so `density = 1..4` yields 0.0.
+5. Unknown flag names in `contact`, `immersion`, and `tags` are
+   dropped.
+
+**Rule: a parse failure or an unknown enum name is an error, not a
+default.** The shared tokenizer reports the file name, line number,
+and offending text. Silent config failure produces a wrong world
+with no message, which is a correctness problem and outside the
+skip-it calculus.
+
+The tokenizer strips inline comments before it tests for a section
+header. The current detector requires the line to end with `]`, so
+`[Coalmine]  # comment` falls through to the key path and is
+skipped.
+
+All twelve keys in the current `data/materials.txt` are handled and
+every value parses, so this change does not break it.
 
 ## The authoring workflow, end to end
 
-1. Write a `[Tileset]` sidecar. Start at `colors = 1 1 1 1`, which
-   is 2 template slots and proves the pipeline.
+1. Write a `[Tileset]` sidecar. Start at `colors = 1 1 1 1` and
+   `vary = 1`, which is 2 template slots and proves the pipeline.
 2. Paint the boundary vocabulary in forge Tileset mode. forge
    composes every template slot.
 3. Open Preview. The stitched world appears at once.
 4. Paint detail into weak slots. The seam lint and the dead-end
    warning run on every reload and mark problems in place.
-5. Raise `colors` one class at a time: `2 1 1 1` is 6 slots,
-   `2 2 1 1` is 16, `2 2 2 1` is 48, `2 2 2 2` is 128. Stop where
+5. Raise `colors` one class at a time: `2 1 1 1` is 6 slots per
+   variant, `2 2 1 1` is 16, `2 2 2 1` is 48, `2 2 2 2` is 128.
+   Multiply by `vary` for the number of painted images. Stop where
    the variety is good enough for the art budget. Prefer the class
    pairs that cost 16 over {0,3} and {1,2}, which cost 20.
 
@@ -550,7 +660,8 @@ Each phase ends with passing tests and a demonstration in forge.
   generator, and generation into a caller-owned slice. Demo:
   Preview shows biome regions from `biome_map.png` with hot reload.
 - **P2 — Herringbone core.** Sidecar parsing with dimension
-  validation, `class`, the corner class tables, `slot_rect`, `mix`,
+  validation and range checks, `class` with floored division,
+  the corner class tables, the block layout and `slot_rect`, `mix`,
   `tiles_overlapping`, template slicing, generation with
   cross-border blitting, slot coverage, and the seam lint.
   Provisional paint mapping: alpha 0 gives Air, and any other pixel
@@ -575,6 +686,30 @@ Each phase ends with passing tests and a demonstration in forge.
   the chunk store, and the chunk pool.
 
 ## Revision notes
+
+Revision 6 (holes, not errors). Specified the template block
+layout: each orientation is a grid whose column and row indices
+come from three corner digits each, with the split and radices
+given in a table, blocks stacked per variant, and an image-size
+formula that the dimension check uses. Corrected `slot_rect` to
+take the tileset config, because the radices and geometry come from
+it. Redefined the seam lint over paint classes rather than an Air
+mask: `fill_2 = Air` is not alpha 0, so the mask read a fill as
+solid and would pass a seam that stops a cave. Stated the lint's
+read direction and that tile-interior lines are excluded. Made the
+dead-end warning resolve fills through the selected biome. Recorded
+all five silent-failure sites in the current loader, not one, and
+set the rule that a parse failure or unknown enum name is an error.
+Added required keys, value ranges, biome key color uniqueness, the
+reserved `Map` section, the material table size assert, and a
+negative fixture for the seam lint. Added `biome_salt` from the
+biome key color, so re-skins differ in shape, and forbade deriving
+it from the table index. Specified `mix`'s combining rule and
+removed the misleading endianness note. Required floored division
+for world-to-lattice and world-to-region conversion, with a seam
+test across the origin. Labeled slot counts per variant. Made `n`
+read-only in Preview, because the dimension check would reject any
+other value. Marked which Preview overlays arrive at P2.
 
 Revision 5 (arithmetic and definitions). Corrected the vertical
 slot formula: the vertical corner classes are (0,3,2,1,0,3), so the
