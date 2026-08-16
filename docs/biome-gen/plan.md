@@ -1,8 +1,7 @@
 # Plan: Biome Generation in Odin
 
 Status: revision 8, reviewed and settled. The geometry is derived
-and checked. See
-"Revision notes" at the end.
+and checked. See "Revision notes" at the end.
 
 This plan follows the research in `noita-research.md`.
 
