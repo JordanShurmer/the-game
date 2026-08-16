@@ -91,7 +91,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		case "lifetime":
 			if v, vok := strconv.parse_i64(value); vok do current.lifetime = i32(v)
 		case "color":
-			if v, vok := strconv.parse_u64_of_base(value, 16); vok do current.color = u32(v)
+			// Values carry a 0x prefix, so the parser must accept it.
+			if v, vok := strconv.parse_u64_maybe_prefixed(value); vok do current.color = u32(v)
 		case "contact":
 			current.contact = parse_contact_effects(value)
 		case "immersion":
@@ -109,6 +110,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.materials = materials[:]
 	table.names     = names[:]
 	return table, true
+}
+
+destroy_material_table :: proc(table: Material_Table, allocator := context.allocator) {
+	for n in table.names do delete(n, allocator)
+	delete(table.materials, allocator)
+	delete(table.names, allocator)
 }
 
 parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {
@@ -249,6 +256,27 @@ test_fire_lifetime_and_rise :: proc(t: ^testing.T) {
 	testing.expect(t, m.fall_speed == 1)
 	testing.expect(t, .Burns in m.contact)
 	testing.expect(t, .Oxidizer in m.tags)
+}
+
+@(test)
+test_colors_parse :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer {
+		for n in table.names do delete(n)
+		delete(table.materials)
+		delete(table.names)
+	}
+	testing.expect(t, ok)
+
+	idx, found := find_material_index(table, "Gold")
+	testing.expect(t, found)
+	// 0xAARRGGBB. The world view renders this value, so it must survive
+	// the 0x prefix in the data file.
+	testing.expect(t, table.materials[idx].color == 0xFFFFD700, "Gold color must parse")
+
+	air, air_found := find_material_index(table, "Air")
+	testing.expect(t, air_found)
+	testing.expect(t, table.materials[air].color == 0x00000000, "Air is transparent")
 }
 
 @(test)
