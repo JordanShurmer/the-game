@@ -1,6 +1,7 @@
 # Plan: Biome Generation in Odin
 
-Status: revision 7. The geometry is now derived and checked. See
+Status: revision 8, reviewed and settled. The geometry is derived
+and checked. See
 "Revision notes" at the end.
 
 This plan follows the research in `noita-research.md`.
@@ -96,9 +97,11 @@ depth-based variation; world edges; parallel worlds.
   an explicit width, height, and world origin. There is no chunk
   struct and no chunk store until streaming exists.
 - Generation signature intent:
-  `generate(dest: []Material_ID, w, h: int, world_origin: [2]i32,
-  seed: u64)`. It iterates the regions that overlap the rectangle
-  and clips each. The caller does not split by region. It checks
+  `generate(world: ^World, dest: []Material_ID, w, h: int,
+  world_origin: [2]i32, seed: u64)`, where `World` holds the loaded
+  biome table, the biome map, and the compiled tilesets. It
+  iterates the regions that overlap the rectangle and clips each.
+  The caller does not split by region. It checks
   `len(dest) >= w * h`.
 - **All world-to-lattice and world-to-region conversion uses
   floored division**, not Odin's `/`, which truncates toward zero.
@@ -174,14 +177,21 @@ stay silent. All of these are hard load errors:
   enum names, not unresolved table lookups.
 - **Names and key colors are unique**: no duplicate biome section
   name, no duplicate material name, no duplicate biome key color.
-  A duplicate key color would also make two biomes generate
-  identically, because the color is the `biome_salt` in D4.
+  A duplicate key color makes the map lookup ambiguous and leaves
+  one section unreachable. The two biomes would also share a
+  `biome_salt`, so they would share the lattice and corner colors,
+  though different tilesets or fills would still differ.
+- **`[Map]` required keys**: `image`, `origin_pixel`, and
+  `biome_off_map`. `biome_above` is optional and
+  `cells_per_pixel` defaults to 512. A missing `biome_off_map`
+  would otherwise leave every off-map region with no biome and no
+  message.
 - `Map` is a reserved section name. A biome may not use it.
 
 **The biome key color is a terrain input**, not only a lookup key,
 because D4 uses it as `biome_salt`. Changing it reshapes every
-region of that biome. Treat it as pinned once art ships, and record
-it among the golden test's inputs.
+region of that biome. Do not change a key color after art ships,
+and record it among the golden test's inputs.
 
 ### D3. The herringbone lattice, derived
 
@@ -296,8 +306,8 @@ is the check that the split is correct.
 - Vertical block: `nc0*nc3*nc2` columns by `nc1*nc0*nc3` rows, each
   cell `n` by `2n`.
 - The image holds, for each variant in order, the horizontal block
-  and then the vertical block, stacked downward. There is no
-  padding.
+  and then the vertical block, stacked downward. Every block starts
+  at `x = 0`. There is no padding.
 
 Image size follows, and this is the formula the dimension check
 uses:
@@ -434,8 +444,10 @@ Color keys must have alpha `0xFF`. Air is the exception, covered by
 rule 1.
 
 Validation at load: gray fill shades and material wang colors must
-be disjoint, and a collision names both owners. Every biome must
-define every fill slot that its tileset uses.
+all be distinct from each other, and no two materials may share a
+wang color. One color-to-owner map catches both cases, and a
+collision names both owners. Every biome must define every fill
+slot that its tileset uses.
 
 **Compilation and the blit.** Each template slot compiles once into
 a flat `[]u16`. Fill slots compile to reserved IDs
@@ -680,19 +692,19 @@ and offending text. Silent config failure produces a wrong world
 with no message, which is a correctness problem and outside the
 skip-it calculus.
 
-Item 6 is load bearing for the rest of the plan. D2 says every data
-file uses `0xAARRGGBB`, so the same parse reads biome key colors,
-which are also `biome_salt` in D4, and material wang colors in D5.
-The shared tokenizer therefore parses a `0x` prefix explicitly. A
-unit test pins one material's parsed color against the file, which
-is the test whose absence hid this. P0 verifies the behavior of
+Item 6 affects more than materials. D2 says every data file uses
+`0xAARRGGBB`, so the same parse reads biome key colors, which are
+also `biome_salt` in D4, and material wang colors in D5. The shared
+tokenizer therefore parses a `0x` prefix explicitly. A unit test
+pins one material's parsed color against the file, which is the
+test whose absence hid this. P0 verifies the behavior of
 `parse_u64_of_base` on a prefixed literal, because P0 is the first
 step with a compiler.
 
-Item 6 also means the D9 rule cannot land silently: once a parse
-failure is an error, the current `data/materials.txt` produces
-twelve load errors until the prefix handling is fixed. Fix both in
-the same commit at P1.
+Item 6 also sets the order of work. Once a parse failure is an
+error, the current `data/materials.txt` produces twelve load errors
+until the prefix handling is fixed. Change both in the same commit
+at P1.
 
 The tokenizer strips inline comments before it tests for a section
 header. The current detector requires the line to end with `]`, so
@@ -723,7 +735,8 @@ Each phase ends with passing tests and a demonstration in forge.
 
 - **P0 — Toolchain spike, half a day.** On a machine with Odin,
   because this container has none. Verify: `core:image/png` decodes
-  RGBA and indexed PNGs; `vendor:stb/image` writes PNGs;
+  RGBA, indexed, and RGB-without-alpha PNGs, since the Air rule in
+  D5 depends on the alpha channel; `vendor:stb/image` writes PNGs;
   `core:math/noise` runs; `vendor:raylib` opens a window, blits a
   texture, and reads file modification times; whether raygui ships
   with the distribution; and how `strconv.parse_u64_of_base`
@@ -761,6 +774,14 @@ Each phase ends with passing tests and a demonstration in forge.
   the chunk store, and the chunk pool.
 
 ## Revision notes
+
+Revision 8 (final gate). The review loop ended here: the gate found
+no blocking issue and confirmed the geometry by independent
+derivation. Applied the remaining small items: required `[Map]`
+keys, duplicate wang color validation, block x-origin, the loaded
+data parameter on `generate`, a corrected reason for unique key
+colors, an RGB-without-alpha case in P0, and plainer wording in
+three places.
 
 Revision 7 (validation and a live bug). Recorded a sixth
 silent-failure site in the current loader:
