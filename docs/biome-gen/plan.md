@@ -1,6 +1,6 @@
 # Plan: Biome Generation in Odin
 
-Status: revision 6. The geometry is now derived and checked. See
+Status: revision 7. The geometry is now derived and checked. See
 "Revision notes" at the end.
 
 This plan follows the research in `noita-research.md`.
@@ -104,8 +104,8 @@ depth-based variation; world edges; parallel worlds.
   floored division**, not Odin's `/`, which truncates toward zero.
   Without this, cells -511..-1 land in region 0 instead of region
   -1, and the lattice shifts by one across both axes at the origin.
-  Half the world sits on the far side of that bug, so a seam test
-  straddles the origin.
+  Every region with a negative coordinate is affected, so a seam
+  test straddles the origin.
 - Future simulation needs per-cell flags, shade, and sparse
   velocity. Those become parallel arrays, not a fat per-cell
   struct. Most cells are static, so a fat cell would move unused
@@ -148,11 +148,40 @@ fill_2    = Air
 
 - All data files use `0xAARRGGBB`, as in `materials.txt`. The PNG
   decoder gives RGBA bytes. One tested procedure converts them.
+  D9 item 6 explains why this literal needs explicit prefix
+  handling.
 - `cells_per_pixel` in `[Map]` sets the region size, default 512.
-- **Biome key colors must be unique.** A duplicate is a hard load
-  error naming both biomes. The color is also the biome's hash salt
-  (D4), so a duplicate would make two biomes generate identically.
+
+**Validation.** The sidecar got required keys and ranges in D3, and
+every template pixel gets an error in D5. The biome table and the
+map need the same treatment, or the most likely authoring mistakes
+stay silent. All of these are hard load errors:
+
+- **A map pixel whose color matches no biome key**, reported with
+  the pixel position and its color. This is the most likely
+  mistake, because World Map mode arrives after P4 and the interim
+  workflow paints the map in an image editor, where one soft-brush
+  pixel or one wrong channel produces an unmatched color. D5 rule 4
+  already does this for template pixels.
+- **Required biome keys**: `color` and `generator`. A `wang` biome
+  also requires `tileset`. A section with no `color` never matches
+  any pixel and is silently dead, while the regions painted for it
+  hit the unmatched-color error above. A `noise` biome requires the
+  D6 parameters.
+- **Name cross-references resolve**: `biome_off_map`,
+  `biome_above`, every `fill_N`, and the noise material names must
+  name an existing biome or material. The D9 rule covers unknown
+  enum names, not unresolved table lookups.
+- **Names and key colors are unique**: no duplicate biome section
+  name, no duplicate material name, no duplicate biome key color.
+  A duplicate key color would also make two biomes generate
+  identically, because the color is the `biome_salt` in D4.
 - `Map` is a reserved section name. A biome may not use it.
+
+**The biome key color is a terrain input**, not only a lookup key,
+because D4 uses it as `biome_salt`. Changing it reshapes every
+region of that biome. Treat it as pinned once art ships, and record
+it among the golden test's inputs.
 
 ### D3. The herringbone lattice, derived
 
@@ -250,7 +279,8 @@ down because it becomes the on-disk art format.
 
 Each orientation forms a 2D grid of slots. The six corner digits
 split into three that index the column and three that index the
-row. The split follows the tile's own shape:
+row. Each digit's radix is the count of its own corner class, taken
+from the corner class table above:
 
 | Orientation | Column digits (`a,b,c`) | Row digits (`d,e,f`) |
 | --- | --- | --- |
@@ -277,15 +307,28 @@ width  = max(2n * nc1*nc2*nc3, n * nc0*nc3*nc2)
 height = vary * (n * nc0*nc1*nc2 + 2n * nc1*nc0*nc3)
 ```
 
-At `colors = 2 2 2 2`, `vary = 1`, `n = 64` that is 1024 by 1536.
-At `colors = 2 2 1 1` it is 256 by 768.
+At `n = 64` and `vary = 1`: `colors = 2 2 2 2` gives 1024 by 1536,
+and `colors = 2 2 1 1` gives 256 by 768.
+
+Pixels outside every slot rectangle are ignored: compilation, slot
+coverage, and D5 rule 4 all skip them. Whenever `nc0` differs from
+`2 * nc1` one block is narrower than the image, so at the
+recommended `2 2 2 2` a 512 by 1024 area is unused. Without this
+rule an implementer who walks the whole decoded image, rather than
+the slot rectangles, would turn an editor's background color into a
+load error.
 
 One procedure,
-`slot_rect(cfg: Tileset_Config, colors: [6]u8, orientation, variant)
--> Rect`, lives in the game package. It needs `cfg` because the
-radices come from `colors` and the geometry from `n` and `vary`.
-The engine and the tool both call it. A unit test pins known
-indices at both uniform and non-uniform color counts.
+`slot_rect(cfg: Tileset_Config, corner_colors: [6]u8, orientation,
+variant) -> Rect`, lives in the game package. It needs `cfg`
+because the radices are the per-class counts and the geometry comes
+from `n`. The `cfg` field holding those counts is named
+`class_counts`, not `colors`, so it cannot be confused with the six
+corner colors. The engine and the tool both call it. A unit test
+pins known indices at uniform and non-uniform counts, including one
+case where the vertical block is wider than the horizontal block,
+which is the only case that exercises the `max()` in the
+non-obvious direction.
 
 **Tileset sidecar:**
 
@@ -307,10 +350,12 @@ vary   = 2         # interior alternatives per template slot
   artist marks it with an explicit Air wang color rather than
   leaving it blank.
 - **Required keys and ranges.** `n`, `colors`, and `vary` must be
-  present. `n >= 1`, `vary >= 1`, and each `colors` entry in 1..8,
-  which is stb's bound. A zero would divide by zero in
-  `%% nc[class(p)]` or `%% vary`. Each violation is a hard load
-  error naming the file and line.
+  present. `n >= 1`, `vary >= 1`, and each `colors` entry in 1..8.
+  A zero would divide by zero in `%% nc[class(p)]` or `%% vary`.
+  The upper bound is about art cost and image size, not stb
+  compatibility, which D3 disclaims: uniform `c = 8` at `n = 64`
+  needs a template over 65000 pixels wide. Each violation is a hard
+  load error naming the file and line.
 - `n` and `chunk_size` need no relation. Alignment
   (`chunk_size %% n == 0`) is a preference that reduces partial
   tiles. Correctness comes from clipping, so a tile that meets 4
@@ -586,10 +631,13 @@ because the tests read `data/` by relative path.
   warning resolves fill slots through the biome currently selected
   in forge. It is a warning in `tools/forge`, not a test, because a
   sealed pocket is often deliberate.
-- Golden test: a fixed seed, a committed tileset, and a pinned
-  region size give a known hash. Regenerate it only on purpose. It
-  is the only check against silently regenerating every player's
-  world.
+- Golden test: a fixed seed, a committed tileset, a pinned region
+  size, and pinned biome key colors give a known hash. Key colors
+  are inputs because D4 uses them as `biome_salt`. Regenerate the
+  hash only on purpose. This is the only check against silently
+  regenerating every player's world.
+- A unit test pins one material's parsed color against
+  `data/materials.txt`. Its absence hid D9 item 6.
 - Performance: a benchmark prints generation time. It does not
   assert, because a loaded machine would fail it for unrelated
   reasons. 1 ms per 512x512 chunk at n=64 is a recorded target.
@@ -615,19 +663,44 @@ places, not one, and a tokenizer alone fixes only the first two:
 5. Unknown flag names in `contact`, `immersion`, and `tags` are
    dropped.
 
+6. **Color literals do not parse at all.**
+   `material_loader.odin:94` calls
+   `strconv.parse_u64_of_base(value, 16)`. That procedure takes an
+   explicit base and does not strip a prefix; stripping is what
+   `parse_u64_maybe_prefixed` does. On `0xFF5C4033` it reads the
+   leading `0`, then `x`, whose digit value is 33 and therefore
+   out of base 16, so it returns `ok = false` and the color keeps
+   its zero default. **Every material in the repository currently
+   has color 0**, and no test asserts a color, so nothing reports
+   it.
+
 **Rule: a parse failure or an unknown enum name is an error, not a
 default.** The shared tokenizer reports the file name, line number,
 and offending text. Silent config failure produces a wrong world
 with no message, which is a correctness problem and outside the
 skip-it calculus.
 
+Item 6 is load bearing for the rest of the plan. D2 says every data
+file uses `0xAARRGGBB`, so the same parse reads biome key colors,
+which are also `biome_salt` in D4, and material wang colors in D5.
+The shared tokenizer therefore parses a `0x` prefix explicitly. A
+unit test pins one material's parsed color against the file, which
+is the test whose absence hid this. P0 verifies the behavior of
+`parse_u64_of_base` on a prefixed literal, because P0 is the first
+step with a compiler.
+
+Item 6 also means the D9 rule cannot land silently: once a parse
+failure is an error, the current `data/materials.txt` produces
+twelve load errors until the prefix handling is fixed. Fix both in
+the same commit at P1.
+
 The tokenizer strips inline comments before it tests for a section
 header. The current detector requires the line to end with `]`, so
 `[Coalmine]  # comment` falls through to the key path and is
 skipped.
 
-All twelve keys in the current `data/materials.txt` are handled and
-every value parses, so this change does not break it.
+All twelve keys in the current `data/materials.txt` are handled,
+but the color values do not parse today. See item 6.
 
 ## The authoring workflow, end to end
 
@@ -653,7 +726,9 @@ Each phase ends with passing tests and a demonstration in forge.
   RGBA and indexed PNGs; `vendor:stb/image` writes PNGs;
   `core:math/noise` runs; `vendor:raylib` opens a window, blits a
   texture, and reads file modification times; whether raygui ships
-  with the distribution. Any failure changes D7 before code exists.
+  with the distribution; and how `strconv.parse_u64_of_base`
+  handles a `0x` prefix, which D9 item 6 says silently zeroes every
+  material color today. Any failure changes D7 before code exists.
 - **P1 — World skeleton, forge Preview, shared tokenizer.**
   `Material_ID`, the D9 tokenizer with its error reporting, the
   biome table with `[Map]`, biome map loading, the `uniform`
@@ -686,6 +761,23 @@ Each phase ends with passing tests and a demonstration in forge.
   the chunk store, and the chunk pool.
 
 ## Revision notes
+
+Revision 7 (validation and a live bug). Recorded a sixth
+silent-failure site in the current loader:
+`strconv.parse_u64_of_base` does not strip a `0x` prefix, so every
+material color in the repository is 0 today and no test reports it.
+The same parse feeds biome key colors and wang colors, so the
+shared tokenizer handles the prefix and a test pins a parsed color.
+P0 verifies the procedure's behavior. Gave the biome table and the
+biome map the validation the sidecar already had: an unmatched map
+pixel color, required biome keys, name cross-reference resolution,
+and unique names and key colors. Recorded that the biome key color
+is a terrain input through `biome_salt`, and added it to the golden
+test's pinned inputs. Stated that pixels outside every slot
+rectangle are ignored, so an editor background does not become a
+load error. Renamed the `slot_rect` parameters to `corner_colors`
+and `class_counts`, which were both called `colors`. Justified the
+1..8 bound by art cost rather than stb compatibility.
 
 Revision 6 (holes, not errors). Specified the template block
 layout: each orientation is a grid whose column and row indices
