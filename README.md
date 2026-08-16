@@ -22,3 +22,46 @@ Physics, chemistry, alchemy, adventure, beauty, sacrifice, tinkering, exploratio
 - Prefer fat structs and data-oriented design focused on CPU and cache behavior.
 
 See `AGENTS.md` for the short form of the project vision.
+
+## Build and run
+
+The game uses Odin and the raylib package that ships with it. Run
+every command from the repository root, because the data paths are
+relative to it.
+
+```sh
+odin run src        # play
+odin test src       # run the tests
+```
+
+## Biome generation, phase 1
+
+Phase 1 is one complete loop: paint a biome map, watch the world
+change, then save.
+
+- `data/materials.txt` holds the materials.
+- `data/biomes.txt` holds the biomes. Each biome has a key color and
+  one fill material.
+- `data/biome_map.png` is the world layout. One pixel is one region
+  of 512x512 world cells. The game writes a starter map if the file
+  is absent.
+
+Every biome fills its regions with one material, so borders are hard
+cuts. Wang tiles arrive in a later phase.
+
+### Controls
+
+| Key | Action |
+| --- | --- |
+| `WASD` or arrows | Pan the camera |
+| Mouse wheel, `-`, `=` | Zoom out and in |
+| `TAB` | Open and close the world editor |
+| Left mouse | Paint the selected biome |
+| Right mouse | Erase a map pixel |
+| `1` to `9` | Select a biome |
+| `M` or middle mouse | Look at the region under the cursor |
+| `S` | Save the map image |
+
+The world regenerates as you paint. Save is blocked while the painted
+map falls into more than one connected region, and the editor outlines
+the stranded pixels in red.
