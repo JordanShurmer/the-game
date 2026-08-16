@@ -1,0 +1,67 @@
+# Biome table for the Noita-like game
+# Format matches materials.txt, so one small parser reads both.
+#
+# Rules:
+#   - Lines starting with # are comments
+#   - Blank lines are ignored
+#   - A biome starts with [Name]
+#   - Fields are key = value
+#   - [Map] is a reserved section that holds the world map settings
+#
+# Every key color must be unique. The loader reports a duplicate as a
+# hard error. Each key color must also appear in data/biome_map.png,
+# where one pixel is one region of the world.
+
+[Map]
+image           = data/biome_map.png
+origin_pixel    = 8 8         # map pixel that holds world cell (0,0)
+cells_per_pixel = 512         # world cells along one edge of a region
+biome_off_map   = Deep_Rock   # biome used outside the map image
+
+# Phase 1 fills each region with one material, so every biome below
+# uses a different fill. That makes the layout easy to read on screen.
+
+[Sky]
+color     = 0xFF87CEEB
+generator = uniform
+fill_0    = Air
+
+[Coalmine]
+color     = 0xFFD57917
+generator = uniform
+fill_0    = Dirt
+
+[Sandcave]
+color     = 0xFFC2B280
+generator = uniform
+fill_0    = Sand
+
+[Lake]
+color     = 0xFF3A7CA5
+generator = uniform
+fill_0    = Water
+
+[Magma]
+color     = 0xFFFF4500
+generator = uniform
+fill_0    = Lava
+
+[Oilfield]
+color     = 0xFF6B5A2E
+generator = uniform
+fill_0    = Oil
+
+[Acidpool]
+color     = 0xFF39FF14
+generator = uniform
+fill_0    = Acid
+
+[Vault]
+color     = 0xFFFFD700
+generator = uniform
+fill_0    = Gold
+
+[Deep_Rock]
+color     = 0xFF6B6B6B
+generator = uniform
+fill_0    = Rock
