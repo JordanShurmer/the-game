@@ -2,9 +2,9 @@
 
 This plan follows the research in `noita-research.md`.
 
-The work is ordered as a series of end-to-end experiences. Each
-slice delivers a complete, runnable loop that you can see and test.
-Later slices deepen the same path. Nothing is built in isolation.
+Work is ordered as end-to-end experiences. Each phase leaves a
+complete loop you can open, see, and change. Later phases deepen
+the same path.
 
 Priorities: simplicity, ease of change, end-to-end performance,
 testability. Use the ponytail complexity ladder. Write prose in
@@ -19,270 +19,161 @@ Simplified Technical English.
 5. Any region generates alone, in any order, deterministically.
 6. Authoring is fast, and mistakes are reported at load.
 
-Non-goals: background wall layer; spawn points and entities until
-needed; biome blending (borders are hard cuts); chunk persistence
-and streaming; depth-based variation; world edges; parallel worlds.
+Non-goals for early phases: background wall layer; spawn points and
+entities until needed; biome blending (borders are hard cuts);
+chunk persistence and streaming; depth-based variation.
 
-## Terms
+## Phase 1 — In-game world editor, solid biome fills
 
-- **Template slot**: one painted tile image in the template PNG.
-- **Edge kind**: one of the 6 lattice edge kinds.
-- **Fill slot**: one of the 8 gray shades that a biome maps to a
-  material.
-- **Paint class**: what one template pixel compiles to. It is Air,
-  a fill slot 0..7, or a material ID. It is biome independent.
+**Experience**
 
-## Shared foundation (done once, used by every slice)
+You are in the game. You open the world editor.
 
-- One shared config tokenizer for `materials.txt`, `biomes.txt`, and
-  tileset sidecars. A parse failure or unknown name is an error that
-  names the file, line, and text. Color literals use explicit `0x`
-  prefix handling.
-- `Material_ID :: distinct u16`.
-- Generation writes into a caller-owned `[]Material_ID` with width,
-  height, and world origin. Signature intent:
+- The editor shows a grid of biome placements.
+- Each biome type has a distinct color.
+- You paint biomes onto the map.
+- The world map is a PNG: each pixel is one placed biome.
+- As you paint, the live world regenerates in real time. You do not
+  need to press Save to see the change.
+- Save writes the PNG. Save is blocked while any biome region is
+  disconnected (a placed biome must form one connected component,
+  or the rule the design settles on for connectivity).
+- World generation reads that PNG. Each biome-map pixel becomes a
+  region filled entirely with that biome’s `fill_material`.
 
-  `generate(world: ^World, dest: []Material_ID, w, h: int,
-  world_origin: [2]i32, seed: u64)`
+That is the whole vertical path for Phase 1: paint → live regen →
+save (when connected) → solid fill world.
 
-- All world-to-region and world-to-lattice conversion uses floored
-  division.
-- `tools/forge` is one raylib binary. Modes are added when a slice
-  needs them. Hot-reload by file modification time. Load errors are
-  drawn in the window.
+**What is built**
 
-## Slice 1 — World editor with solid biomes
+- Biome table (`biomes.txt` or equivalent): name, key color, and one
+  fill material per biome.
+- Biome map PNG load and save.
+- Uniform generator: for a requested world rectangle, fill every
+  cell from the biome that owns its region, using that biome’s fill
+  material only.
+- In-game world editor overlay:
+  - Palette of biome types by color and name.
+  - Paint / erase on the map grid.
+  - Live call into the same `generate` path the game uses.
+  - Connectivity check; Save disabled (or blocked with a clear
+    message) while any biome is disconnected.
+  - Optional: highlight disconnected components.
+- Hard load errors for unmatched map colors and missing required
+  biome data.
 
-**Experience:** Open forge. See a solid square of one biome’s fill
-material. Change the fill in a text file, hot-reload, and watch the
-square change color. Click a pixel to read the material name.
-Reseed and change the viewed region size.
+**Rules for Phase 1**
 
-What is built:
+- One biome-map pixel is one region (default size pinned, e.g. 512
+  cells; overridable later).
+- Generation writes into a caller-owned material buffer. No chunk
+  store yet.
+- World-to-region conversion uses floored division so negative
+  coordinates work.
+- The editor and the game share one generate path. Live regen and
+  load-from-disk use the same code.
+- Connectivity is checked on the biome map (pixel graph), not on
+  world cells.
 
-- Minimal `biomes.txt` with `[Map]` and one biome that uses
-  `generator = uniform` and a single fill material.
-- Tiny `biome_map.png` (even 1×1 is enough).
-- Biome table and map loading with hard errors for unmatched map
-  colors, missing required keys, duplicate names or key colors, and
-  unresolved name references.
-- Uniform generator that fills the requested rectangle with the
-  biome’s material.
-- Forge Preview mode: render the generated region with material
-  display colors, chunk-size stepper, reseed, pixel inspect, hot
-  reload.
+**Tests**
 
-Tests: determinism, off-map and above-map rules, validation errors.
+- Determinism: same map + seed → identical buffer.
+- Unmatched map colors and missing biome keys are hard errors.
+- Connectivity: connected maps may save; a disconnected placement
+  fails the gate.
+- Live regen path matches generate-from-disk path for the same map.
 
-This is the first complete vertical path: data → load → generate →
-render → interact.
+**Demo**
 
-## Slice 2 — Biome tile editor (basic)
+Open the game, open the editor, paint two biomes, watch solid
+regions appear in the world as you paint, connect them, save, quit,
+reload, and see the same layout.
 
-**Experience:** Switch to a simple tile editor. Paint a solid or
-simple patterned rectangle for the biome. Save. Return to Preview
-and see that pattern fill the biome region instead of the solid
-color.
+## Phase 2 — Biome tile editor (basic)
 
-What is built:
+**Experience**
 
-- Minimal tileset sidecar and PNG.
-- Basic Tileset mode in forge: load the image, constrained palette
-  from materials and the eight gray fills, paint pixels, save.
-- Preview uses the tile when present; otherwise falls back to the
-  solid fill from Slice 1.
+Open a simple tile editor for one biome. Paint a solid or simple
+pattern. The world editor still works. Regions of that biome now
+show the tile pattern instead of a flat fill.
 
-No herringbone lattice yet. The vertical path is now: paint a tile
-→ it appears in the world editor.
+No herringbone lattice yet. The path is: paint a tile → it appears
+in the live world for that biome.
 
-## Slice 3 — Herringbone tiles on the same path
+## Phase 3 — Herringbone tiles
 
-**Experience:** The same world editor now shows seamless herringbone
-terrain for the biome. Change the seed and the arrangement changes,
-still seamless. Toggle lattice overlays. Click a pixel and see the
-tile and source template slot that produced it.
+**Experience**
 
-What is built:
+The same world and editor now show seamless herringbone terrain for
+wang biomes. Change seed; arrangement changes; seams stay clean.
 
-- Tileset sidecar parsing with dimension validation and range
-  checks.
-- Lattice geometry: `class`, corner class tables per orientation,
-  edge kinds, `slot_rect`, image layout formula.
-- Position-hash determinism (`mix` from splitmix64 finalizer with
-  pinned constants). Corner colors and tile choice from seed +
-  biome key color (as `biome_salt`) + position.
-- `tiles_overlapping` iterator (no allocation).
-- Template slicing, cross-border blit, slot coverage check, seam
-  lint over paint classes.
-- Provisional paint mapping: alpha 0 → Air, any other pixel → one
-  test material.
+Lattice geometry, position-hash determinism, seam lint, and the
+shared tileset format land here. Start art at the cheapest counts
+(`colors = 1 1 1 1`).
 
-Start art at `colors = 1 1 1 1`, `vary = 1` (two slots). Raise counts
-only after the pipeline is proven.
+## Phase 4 — Full paint semantics
 
-Tests: determinism, seams (including across world origin and biome
-borders), dimension mismatch, all-alpha-0 slots, seam-lint negative
-fixture.
+**Experience**
 
-## Slice 4 — Full paint semantics and multi-fill
+One tileset re-skinned by two biomes with different fill mappings.
+Gray fill slots and material wang colors. Golden test locks a fixed
+seed.
 
-**Experience:** One tileset is re-skinned by two biomes with
-different fill mappings. The same shapes appear with different
-materials. Invalid colors report the exact pixel. A golden test
-locks the output of a fixed seed.
+## Phase 5 — Advanced tileset tools
 
-What is built:
+**Experience**
 
-- `wang_color` in the cold material table (separate from display
-  color).
-- Gray fill shades 0..7 resolve through the biome’s fill table at
-  blit time (reserved IDs `0xFFF8..0xFFFF`).
-- Color disjointness, fill coverage, load errors with positions.
-- Golden test pinned to seed, region size, and biome key colors.
-- Blit benchmark (target ~1 ms for 512×512 at n=64). Measure before
-  any extra compilation cache.
+Paint boundary vocabulary (edge strips, corner hubs). Compose a
+full template. Seam lint and dead-end warnings mark problems.
+Composition does not overwrite newer hand work unless forced.
 
-## Slice 5 — Advanced tileset authoring tools
+## Phase 6 — First real biome and noise biomes
 
-**Experience:** Open the tileset editor and paint a proper boundary
-vocabulary (edge strips and corner hubs). Compose a full template
-from those parts. Seam lint and dead-end warnings mark problems in
-place. You can still hand-edit any slot afterward. Composition does
-not overwrite newer hand work unless forced.
+**Experience**
 
-What is built:
+Author a coherent Coalmine. Add Sky and Deep_Rock (uniform or
+noise). The same in-game editor and generate path still work.
 
-- Full Tileset mode: constrained palette, info panel (slot index,
-  corners, classes, memory cost), edge strips keyed on lattice edge
-  kind + endpoint colors, corner hubs, join rule, composition
-  scaffold with timestamp check and `--force`.
-- Dead-end warning (forge only) that resolves fills through the
-  selected biome.
-- Optional: World Map mode (palette of biomes, large squares per
-  region) once more than one biome exists. Until then export a
-  `.gpl` palette for external editors.
-
-Composition writes a normal template PNG. The engine format does
-not change. This slice is pure tooling; no finished biome is
-required yet.
-
-## Slice 6 — First real biome and noise biomes
-
-**Experience:** Author a coherent Coalmine using the tools from
-Slice 5. Add Sky and Deep_Rock (uniform or noise). The world map
-now has multiple biomes. The same Preview and generation path still
-work. Raise color counts only as far as the art budget allows.
-
-What is built:
-
-- First real Coalmine-like biome.
-- Noise generator (OpenSimplex2 + short fBm, or integer value-noise
-  built on `mix` if cross-platform float determinism is required).
-  Decide the float question before this slice ships.
-- Uniform and noise biomes on the existing map.
-- Pixel scenes and spawn markers only when the entity system needs
-  them.
-
-## Design rules that every slice obeys
+## Design rules that every phase obeys
 
 ### World grid and regions
 
-- A cell holds a `Material_ID`.
-- One biome-map pixel is one region (default 512 cells;
-  `cells_per_pixel` overrides).
-- A chunk is only a cut: how much the caller asks for. There is no
-  chunk store until streaming exists.
-- Chunk size changes only the cut, never the terrain.
+- A cell holds a material id.
+- One biome-map pixel is one region.
+- A chunk is only a cut: how much the caller asks for. No chunk
+  store until streaming exists.
 
 ### Biome map and table
 
 ```
 [Map]
 image         = data/biome_map.png
-origin_pixel  = 35 12
+origin_pixel  = 0 0
 biome_off_map = Deep_Rock
-biome_above   = Sky          # optional
+cells_per_pixel = 512
 
 [Coalmine]
 color     = 0xFFD57917
-generator = wang             # wang | noise | uniform
-tileset   = data/tiles/coalmine.png
+generator = uniform          # later: wang | noise
 fill_0    = Rock
-fill_1    = Dirt
-fill_2    = Air
 ```
 
-Hard load errors for: unmatched map pixel colors, missing required
-keys, unresolved names, duplicate names or key colors. The biome
-key color is also `biome_salt` (terrain input). Do not change it
-after art ships.
+Hard load errors for unmatched map colors, missing required keys,
+unresolved names, and duplicate key colors.
 
-### Herringbone lattice (Slice 3+)
+### Determinism (from Phase 3)
 
-- Horizontal tiles 2n×n, vertical tiles n×2n.
-- Six corner points and six boundary segments per tile.
-- Only six edge kinds are boundaries.
-- Corner class tables (horizontal origin class 1, vertical origin
-  class 0) set the radices for slot indexing.
-- Edges belong to the lattice, not to a tile orientation.
-- Slot counts and image size formula are derived and checked.
-- Our own block layout (no stb compatibility required).
-
-Tileset sidecar:
-
-```
-[Tileset]
-n      = 64
-colors = 2 2 1 1
-vary   = 2
-```
-
-### Determinism
-
-- Every random-looking decision is a position hash with its own
-  salt. No PRNG streams.
-- `biome_salt` = biome key color.
-- Neighbors agree by construction; generation never reads a
-  neighbor region.
-
-### Paint semantics (Slice 4+)
-
-1. Alpha 0 → Air.
-2. Exact gray fill shades → fill slot 0..7.
-3. Material `wang_color` → that material.
-4. Anything else → load error with pixel position.
+Every random-looking decision is a position hash. Neighbors agree
+by construction. Generation never reads a neighbor region.
 
 ### What is cut until needed
 
 - Spawn tables and entity markers.
 - Chunk pool / store.
-- Per-(biome, tileset) resolved tile copies (measure first).
+- Wang lattice and tileset composition before Phase 3 / 5.
 - Procedural interior carver.
-- Avalanche test for `mix`.
-
-## Authoring workflow (once Slice 5 exists)
-
-1. Write a `[Tileset]` sidecar. Start at `colors = 1 1 1 1`,
-   `vary = 1`.
-2. Paint the boundary vocabulary. Compose every template slot.
-3. Open Preview. The stitched world appears.
-4. Paint detail into weak slots. Seam lint and dead-end warnings
-   mark problems on reload.
-5. Raise `colors` one class at a time only as far as the art budget
-   allows.
-
-## Testing (accumulated across slices)
-
-- Unit tests for tokenizer, geometry tables, `slot_rect`, paint
-  rules, validation cases.
-- Determinism and seam tests (including origin and biome borders).
-- Seam-lint negative fixture.
-- Golden test for world regeneration safety.
-- Performance print (not assert) for generation time.
-
-All tests run with `odin test src` from the repository root.
 
 ## Later
 
-World Map mode refinement, background layer, streaming, chunk
-store, and pool when the game needs them.
+Background layer, streaming, and deeper authoring tools when the
+game needs them.
