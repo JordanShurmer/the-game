@@ -33,6 +33,7 @@ Immersion_Effect :: enum u8 {
 	Burns,
 	Freezes,
 	Poisons,
+	Dissolves,
 	Heals,
 	Transforms,
 }
@@ -47,24 +48,29 @@ Reaction_Tag :: enum u8 {
 	Magical,
 }
 
+// Fields are ordered largest-first so the struct has no interior
+// padding. Bit sets are u32 to leave room for up to 32 flags each.
 Material :: struct {
 	// Visual
 	color:          u32, // RGBA or palette index
 
 	// Physical behaviour (hot path)
-	state:          Material_State,
 	density:        f32, // higher sinks
+	lifetime:       i32, // ticks; -1 = permanent
+
+	// Effects as bit sets
+	contact:        bit_set[Contact_Effect; u32],
+	immersion:      bit_set[Immersion_Effect; u32],
+	tags:           bit_set[Reaction_Tag; u32],
+
+	// Small scalars last
+	state:          Material_State,
 	fall_speed:     u8,  // pixels per tick; 0 = static
 	hardness:       u8,  // dig / penetrate resistance
-
-	// Chemistry / status (hot path)
 	flammability:   u8,  // 0 = none
 	conductivity:   u8,  // heat / electricity
 	toxicity:       u8,  // damage on contact or immersion
-	lifetime:       i16, // ticks; -1 = permanent
-
-	// Effects as bit sets
-	contact:        bit_set[Contact_Effect; u16],
-	immersion:      bit_set[Immersion_Effect; u16],
-	tags:           bit_set[Reaction_Tag; u16],
 }
+
+// Two materials per 64-byte cache line; keep it that way.
+#assert(size_of(Material) == 32)

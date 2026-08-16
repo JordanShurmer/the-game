@@ -92,7 +92,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		case "toxicity":
 			if v, vok := strconv.parse_uint(value, 10); vok do current.toxicity = u8(v)
 		case "lifetime":
-			if v, vok := strconv.parse_i64(value); vok do current.lifetime = i16(v)
+			if v, vok := strconv.parse_i64(value); vok do current.lifetime = i32(v)
 		case "color":
 			if v, vok := strconv.parse_u64_of_base(value, 16); vok do current.color = u32(v)
 		case "contact":
@@ -114,8 +114,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	return table, true
 }
 
-parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u16] {
-	result: bit_set[Contact_Effect; u16]
+parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {
+	result: bit_set[Contact_Effect; u32]
 	parts := strings.fields(s) // no allocation for common case
 	for part in parts {
 		switch part {
@@ -131,8 +131,8 @@ parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u16] {
 	return result
 }
 
-parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u16] {
-	result: bit_set[Immersion_Effect; u16]
+parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u32] {
+	result: bit_set[Immersion_Effect; u32]
 	parts := strings.fields(s)
 	for part in parts {
 		switch part {
@@ -140,6 +140,7 @@ parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u16] {
 		case "Burns":      result += {.Burns}
 		case "Freezes":    result += {.Freezes}
 		case "Poisons":    result += {.Poisons}
+		case "Dissolves":  result += {.Dissolves}
 		case "Heals":      result += {.Heals}
 		case "Transforms": result += {.Transforms}
 		}
@@ -147,8 +148,8 @@ parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u16] {
 	return result
 }
 
-parse_reaction_tags :: proc(s: string) -> bit_set[Reaction_Tag; u16] {
-	result: bit_set[Reaction_Tag; u16]
+parse_reaction_tags :: proc(s: string) -> bit_set[Reaction_Tag; u32] {
+	result: bit_set[Reaction_Tag; u32]
 	parts := strings.fields(s)
 	for part in parts {
 		switch part {
