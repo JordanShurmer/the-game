@@ -160,6 +160,10 @@ and adjacent chunks agree by construction.
   colors select the candidate list (the template slot for that
   combination, `vary` tiles long, in template order). Then
   `tile = mix(seed, c.x, c.y, SALT_TILE) %% len(candidates)`.
+  The canonical cell ID `(c.x, c.y)` is the tile's origin corner in
+  n-grid units. Orientation is a pure function of that position, so
+  it is not a hash input. All lattice coordinates fed to `mix` are
+  in n-units, never cell units.
 - **No PRNG streams anywhere in worldgen.** A seeded stream makes
   results depend on draw order, and draw order differs per chunk.
   Every random-looking decision is a pure position hash with its
@@ -169,11 +173,14 @@ and adjacent chunks agree by construction.
   change between compiler releases and would silently regenerate
   every world.
 - **Chunk rendering.** A chunk intersects its rectangle with the
-  lattice, enumerates every overlapping tile (about 8 whole tiles
-  at n=64 chunk-interior, plus partials), computes each tile's
-  identity from the hashes, and blits the overlapping
+  lattice, enumerates every overlapping tile (at n=64: 28 whole
+  tiles plus 8 border-crossing partials, 36 total), computes each
+  tile's identity from the hashes, and blits the overlapping
   sub-rectangle. A tile crossing a chunk border is computed
-  identically by both chunks; each blits its own part.
+  identically by both chunks; each blits its own part. Because
+  `CHUNK_SIZE %% n == 0`, a chunk border can only pass through a
+  tile's long-axis midpoint: a tile meets at most 2 chunks, never
+  a chunk corner, for every allowed n.
 - **Dropped: stb's repetition-reduction pass.** stb mutates the
   corner-color grid sequentially to break up repeats. A sequential
   global pass cannot run per-chunk. We accept more visible
@@ -188,8 +195,11 @@ and adjacent chunks agree by construction.
   border; the neighbor renders its own biome there. Borders are
   hard cuts by design (see non-goals). Two wang biomes with
   different `n` never interact, because neither renders into the
-  other's chunks. The seam test suite (D8) includes a
-  biome-border case.
+  other's chunks. A chunk never inspects neighbor biomes at all:
+  it only writes cells inside its own rectangle, so clipping at
+  the biome border is the same code path as clipping at the chunk
+  rectangle, and no cell is ever left undefined. The seam test
+  suite (D8) includes a biome-border case.
 
 Requirement created by pre-fixing all six constraints: the tileset
 must cover **every** color combination (a fully painted template
@@ -212,14 +222,32 @@ Priority order per template pixel:
 1. Alpha 0 -> Air.
 2. Spawn marker color (`data/spawns.txt`: color -> spawn name) ->
    record a spawn point, place the biome's fill_0 material.
-3. Gray shades `0xFF101010 ... 0xFF808080` -> biome fill slots 0..7.
+3. Gray fill shades -> biome fill slots 0..7. These are **exactly**
+   the 8 values `0xFF101010, 0xFF202020, ... 0xFF808080` (step
+   `0x10` per channel), not a range. Other grays stay available as
+   wang colors.
 4. Material `wang_color` -> that material.
 5. Anything else -> load error with template pixel position.
+
+Color keys (wang colors, spawn markers, biome map keys) must have
+alpha `0xFF`; the loader rejects others. Air is the exception: its
+display color is `0x00000000`, so rule 1 covers it and it needs no
+wang color.
 
 The loader also validates the tables against each other: spawn
 colors, gray fill shades, and material wang colors must be pairwise
 disjoint. Collisions are load errors that name both owners. Without
-this check, priority order would silently shadow a material.
+this check, priority order would silently shadow a material. Note
+`Smoke (0xFF555555)` and `Rock (0xFF6B6B6B)` already have gray
+display colors; the exact-8-values rule keeps their default wang
+colors legal.
+
+The loader also checks fill coverage: every biome must define every
+fill slot that its tileset's pixels use. An undefined slot is a
+load error, not a silent default.
+
+A spawn marker on a border-crossing tile is recorded once: by the
+chunk whose rectangle contains the marker's world position.
 
 Tile compilation: each tile PNG compiles once at load into a flat
 `[]u16` of material IDs. IDs `0xFFF8..0xFFFF` are reserved to mean
@@ -367,8 +395,10 @@ Each phase ends green-tested and demo-able in biomeview.
   template slicing, lattice + `mix` hashes, per-chunk generation
   with cross-border blitting, coverage validation. Minimal tilegen
   (template skeleton + guides — needed to make the test tileset).
-  Determinism and seam tests. Demo: a c=1 then a 2-color test
-  tileset stitching seamlessly across chunk borders.
+  P2 uses a provisional paint mapping: alpha 0 -> Air, any other
+  pixel -> one fixed test material. The full D5 semantics replace
+  it in P3. Determinism and seam tests. Demo: a c=1 then a 2-color
+  test tileset stitching seamlessly across chunk borders.
 - **P3 — Paint semantics.** wang_color in the cold table, gray
   fills, spawn table and markers, disjointness validation, load
   errors with positions, golden test. Demo: a tiny hand-made biome
@@ -397,6 +427,21 @@ Each phase ends green-tested and demo-able in biomeview.
    noise biomes widely.
 
 ## Revision notes
+
+Round 2 review: one fresh verification pass over the revised plan.
+Verdict: sound; no design decision needed rethinking. Changes made:
+
+- P2 got a provisional paint mapping, because full paint semantics
+  arrive only in P3.
+- Fixed the tile count per chunk at n=64: 28 whole + 8 partial.
+  Verified: a tile meets at most 2 chunks for every allowed n.
+- Pinned the tile-choice hash input: tile origin corner in n-grid
+  units.
+- Gray fills are exactly 8 values, not a range. Color keys require
+  alpha 0xFF. Added fill-slot coverage validation and single-chunk
+  spawn-marker ownership.
+- Recorded the verified simplification: a chunk never inspects
+  neighbor biomes; biome clipping is the chunk-rectangle clip.
 
 Round 1 review: three independent adversarial reviews (algorithmic
 correctness; Odin and performance; scope and pipeline). Main
