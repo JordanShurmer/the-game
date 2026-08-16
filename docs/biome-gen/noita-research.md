@@ -58,8 +58,8 @@ Verified details from the stb source:
 - Tiles are **2:1 rectangles** in two orientations: horizontal
   (2n x n) and vertical (n x 2n), where n is the short side length.
 - Tiles are laid in a **herringbone pattern**, not a square grid.
-  In a square grid, seams line up into long straight lines and the
-  eye catches them. In herringbone, no long seam line exists.
+  In a square grid, seams align into long straight lines that are
+  easy to see. In herringbone, no long seam line exists.
 - Each tile edge carries a **constraint color**. Edge mode uses 6
   edge classes (a-f); corner mode uses 4 corner classes. Each class
   allows 1-8 colors. Two tiles may touch only where their edge
