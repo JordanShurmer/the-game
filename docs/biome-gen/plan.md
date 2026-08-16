@@ -19,9 +19,9 @@ testability, data-oriented design, core/vendor libraries only.
 Non-goals for now, recorded so we do not drift into them:
 
 - **Background wall layer.** Noita's look uses a second layer behind
-  the terrain. We defer it. Migration path: pooled chunks (D1) let
-  us add a parallel `background` array later, and each tileset can
-  gain a companion `<name>_bg.png` with the same slot layout.
+  the terrain. Decided: deferred. Migration path: pooled chunks (D1)
+  let us add a parallel `background` array later, and each tileset
+  can gain a companion `<name>_bg.png` with the same slot layout.
   Cost of deferral: tiles painted before then have no background
   data. We accept this for the first tilesets.
 - **Biome blending.** Biome borders are hard cuts (D4). Noita does
@@ -39,8 +39,12 @@ Non-goals for now, recorded so we do not drift into them:
 - The world is an unbounded grid of cells. A cell holds a material
   ID (`u16`). 256 materials would fit in `u8`, but the saved 256 KiB
   per chunk buys nothing we need.
-- A chunk is 512x512 cells, like Noita. Chunk coordinates are
-  `[2]i32`.
+- A chunk is `chunk_size` x `chunk_size` cells. Chunk coordinates
+  are `[2]i32`. **Generation code takes the size as a parameter**
+  and writes into a plain `[]Material_ID` slice with explicit
+  dimensions. The game binds the default, 512 (like Noita), in one
+  place; biomeview overrides it from a UI control (D7) so we can
+  experiment before the game pins it down.
 - Chunks are plain data: one fixed array, no dynamic fields, no
   pointers. Determinism tests can then compare chunks with
   `mem.compare`.
@@ -61,6 +65,8 @@ Non-goals for now, recorded so we do not drift into them:
   through cache. Pooled heap chunks make adding arrays additive.
 
 ```odin
+// Game-side binding of the size parameter. Generation procs
+// receive the size at runtime; only the game fixes it here.
 CHUNK_SIZE :: 512
 
 Chunk :: struct {
@@ -113,9 +119,11 @@ fill_2    = Air
   replaces (D4), so the substitution is faithful to stb's own
   algorithm.
 - Tiles are 2:1 rectangles: horizontal 2n x n, vertical n x 2n.
-  Default **n = 64**. The loader requires `CHUNK_SIZE % n == 0` and
-  `n <= 256`. This keeps chunk borders on the tile grid, so a tile
-  crosses at most one chunk border (2 chunks, never 4).
+  Default **n = 64**. The loader requires `chunk_size % n == 0` and
+  `n <= chunk_size / 2`. This keeps chunk borders on the tile grid,
+  so a tile crosses at most one chunk border (2 chunks, never 4).
+  biomeview can override n for experiments (D7); painted templates
+  only match their own n, so overrides use debug tiles.
 - The template PNG keeps the **stb slot layout** (all tiles for all
   color combinations, in stb's order), so the geometry is proven
   and documented. We do **not** use stb's pixel-encoded metadata
@@ -173,12 +181,13 @@ and adjacent chunks agree by construction.
   change between compiler releases and would silently regenerate
   every world.
 - **Chunk rendering.** A chunk intersects its rectangle with the
-  lattice, enumerates every overlapping tile (at n=64: 28 whole
-  tiles plus 8 border-crossing partials, 36 total), computes each
+  lattice, enumerates every overlapping tile (at n=64, chunk 512:
+  28 whole tiles plus 8 border-crossing partials, 36 total),
+  computes each
   tile's identity from the hashes, and blits the overlapping
   sub-rectangle. A tile crossing a chunk border is computed
   identically by both chunks; each blits its own part. Because
-  `CHUNK_SIZE %% n == 0`, a chunk border can only pass through a
+  `chunk_size %% n == 0`, a chunk border can only pass through a
   tile's long-axis midpoint: a tile meets at most 2 chunks, never
   a chunk corner, for every allowed n.
 - **Dropped: stb's repetition-reduction pass.** stb mutates the
@@ -283,12 +292,13 @@ vein_cut    = 0.75
 
 - Noise input is absolute world position; the seed offsets the
   noise domain. Same determinism rule as D4.
-- Caveat, recorded: `noise_2d` is float math. Cross-platform
-  bit-identity is not guaranteed. Wang biomes are pure integer and
-  fully portable. If cross-platform identical worlds become a hard
-  requirement, noise biomes switch to an integer value-noise built
-  on `mix`; until then golden tests for noise biomes are pinned to
-  one platform.
+- Determinism scope, decided: the game ships **one artifact per
+  platform**, with platform differences handled by compile-time
+  checks (`when ODIN_OS == ...`). "Deterministic" means: same seed
+  and same build -> same world. Cross-platform bit-identity is not
+  a requirement. So float `noise_2d` is fine as-is; wang biomes
+  are pure integer math and portable anyway. Golden tests run in
+  each platform's own build.
 
 ### D7. Tools: close the authoring loop, do not build a paint program
 
@@ -331,6 +341,15 @@ code path.
   only as console text.
 - Reseed key. An in-tool pixel brush stays out unless the external
   editor loop proves slow in practice.
+- **UI controls for the size parameters**: tile short side n and
+  chunk size, shown as steppers that snap to
+  `chunk_size %% n == 0`. A change regenerates immediately, so we
+  can feel how the sizes affect structure, seams, and repetition
+  before the game pins its defaults. A painted template only
+  matches its own n; when the override differs, biomeview switches
+  to generated debug tiles (flat colors keyed by the corner
+  constraint colors), so size experiments never need repainted
+  art.
 
 Continuity aid in the loader: corner mode implies every tile edge's
 border pixels should depend only on its two endpoint corner colors.
@@ -358,7 +377,8 @@ All tests run with `odin test src`, like the material tests.
   sanity check so lattice sampling shows no obvious period.
 - Golden test: fixed seed + a small committed test tileset -> hash
   of the output region. Regenerate the golden hash only
-  deliberately. Noise-biome goldens are platform-pinned (D6).
+  deliberately. Goldens hold per platform build (D6); noise-biome
+  goldens may differ between platforms and that is accepted.
 
 ## The authoring workflow, end to end
 
@@ -416,17 +436,27 @@ Each phase ends green-tested and demo-able in biomeview.
   anchor markers in tiles plus a global fixed-position list. Demo:
   a set piece appearing intact across chunk borders.
 
-## Open questions (still open on purpose)
+## Decisions on the former open questions
 
-1. Background layer timing: before or after P4? Painting the first
-   real tileset without backgrounds means repainting cost later.
-2. n = 64 default: revisit after P4 with real authoring experience.
-3. Cross-platform float determinism (D6): does the game ever need
-   identical worlds across platforms (seed sharing between
-   friends)? If yes, plan the integer-noise swap before shipping
-   noise biomes widely.
+All three were decided after review round 2:
+
+1. Background layer: later. The first tilesets accept the repaint
+   cost when it lands.
+2. Tile size n and chunk size: both become biomeview UI controls
+   (D7) so we experiment before the game pins its defaults.
+   Defaults stay n = 64, chunk 512 until the experiments say
+   otherwise.
+3. Cross-platform: one artifact per platform via compile-time
+   checks. No cross-platform world identity requirement. Noise
+   stays float; golden tests run per platform.
 
 ## Revision notes
+
+Post-review decisions (project owner): background layer deferred;
+n and chunk size became runtime generation parameters with
+biomeview UI controls; cross-platform support via compile-time
+checks and per-platform artifacts, so determinism is scoped to
+one build.
 
 Round 2 review: one fresh verification pass over the revised plan.
 Verdict: sound; no design decision needed rethinking. Changes made:
