@@ -1,0 +1,37 @@
+# Build artifacts
+*.exe
+*.out
+*.o
+*.obj
+*.pdb
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+bin/
+build/
+out/
+dist/
+
+# Odin
+odin
+!odin/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Temporary / intermediate
+*.tmp
+*.log
+*.ll
+*.bc
+*.wasm
