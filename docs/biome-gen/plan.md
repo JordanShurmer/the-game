@@ -142,39 +142,40 @@ What is built:
 - Blit benchmark (target ~1 ms for 512×512 at n=64). Measure before
   any extra compilation cache.
 
-## Slice 5 — Real authoring tools and first real biome
+## Slice 5 — Advanced tileset authoring tools
 
-**Experience:** Paint a boundary vocabulary (edge strips and corner
-hubs). Compose a full template. Open Preview and see a coherent
-coalmine-like region. Paint detail into the most-used slots. Seam
-lint and dead-end warnings mark problems in place. Raise color
-counts only as far as the art budget allows.
+**Experience:** Open the tileset editor and paint a proper boundary
+vocabulary (edge strips and corner hubs). Compose a full template
+from those parts. Seam lint and dead-end warnings mark problems in
+place. You can still hand-edit any slot afterward. Composition does
+not overwrite newer hand work unless forced.
 
 What is built:
 
 - Full Tileset mode: constrained palette, info panel (slot index,
   corners, classes, memory cost), edge strips keyed on lattice edge
   kind + endpoint colors, corner hubs, join rule, composition
-  scaffold that does not destroy hand work (timestamp check +
-  `--force`).
+  scaffold with timestamp check and `--force`.
 - Dead-end warning (forge only) that resolves fills through the
   selected biome.
-- First real Coalmine-like biome.
 - Optional: World Map mode (palette of biomes, large squares per
   region) once more than one biome exists. Until then export a
   `.gpl` palette for external editors.
 
 Composition writes a normal template PNG. The engine format does
-not change.
+not change. This slice is pure tooling; no finished biome is
+required yet.
 
-## Slice 6 — Noise biomes and more content
+## Slice 6 — First real biome and noise biomes
 
-**Experience:** Add Sky and Deep_Rock. Some regions use noise caves
-and ore veins. The world map shows multiple biomes. The same
-Preview and generation path continue to work.
+**Experience:** Author a coherent Coalmine using the tools from
+Slice 5. Add Sky and Deep_Rock (uniform or noise). The world map
+now has multiple biomes. The same Preview and generation path still
+work. Raise color counts only as far as the art budget allows.
 
 What is built:
 
+- First real Coalmine-like biome.
 - Noise generator (OpenSimplex2 + short fBm, or integer value-noise
   built on `mix` if cross-platform float determinism is required).
   Decide the float question before this slice ships.
