@@ -1,0 +1,178 @@
+# Materials table for the Noita-like game
+# Format is intentionally simple so Odin can parse it with only core library.
+#
+# Rules:
+#   - Lines starting with # are comments
+#   - Blank lines are ignored
+#   - A material starts with [Name]
+#   - Fields are key = value
+#   - Bit sets are space-separated flag names
+#   - Missing fields use sensible defaults (see loader)
+
+[Air]
+state       = Gas
+density     = 0.0
+fall_speed  = 0
+hardness    = 0
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0x00000000
+contact     =
+immersion   =
+tags        =
+
+[Dirt]
+state       = Powder
+density     = 1.4
+fall_speed  = 2
+hardness    = 2
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF5C4033
+contact     =
+immersion   =
+tags        = Organic
+
+[Rock]
+state       = Solid
+density     = 2.5
+fall_speed  = 0
+hardness    = 8
+flammability= 0
+conductivity= 2
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF6B6B6B
+contact     =
+immersion   =
+tags        =
+
+[Sand]
+state       = Powder
+density     = 1.6
+fall_speed  = 3
+hardness    = 1
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFC2B280
+contact     =
+immersion   =
+tags        =
+
+[Water]
+state       = Liquid
+density     = 1.0
+fall_speed  = 4
+hardness    = 0
+flammability= 0
+conductivity= 3
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF3A7CA5
+contact     = Wets
+immersion   = Drowns
+tags        =
+
+[Lava]
+state       = Liquid
+density     = 2.4
+fall_speed  = 2
+hardness    = 0
+flammability= 0
+conductivity= 4
+toxicity    = 2
+lifetime    = -1
+color       = 0xFFFF4500
+contact     = Burns
+immersion   = Burns
+tags        = Oxidizer
+
+[Fire]
+state       = Special
+density     = 0.1
+fall_speed  = 1          # rises slowly
+hardness    = 0
+flammability= 0
+conductivity= 5
+toxicity    = 1
+lifetime    = 90         # ticks
+color       = 0xFFFF6A00
+contact     = Burns
+immersion   = Burns
+tags        = Oxidizer
+
+[Smoke]
+state       = Gas
+density     = 0.2
+fall_speed  = 1          # rises
+hardness    = 0
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = 180
+color       = 0xFF555555
+contact     =
+immersion   =
+tags        =
+
+[Steam]
+state       = Gas
+density     = 0.3
+fall_speed  = 1
+hardness    = 0
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = 240
+color       = 0xFFD0E0E8
+contact     = Wets
+immersion   =
+tags        =
+
+[Oil]
+state       = Liquid
+density     = 0.85
+fall_speed  = 3
+hardness    = 0
+flammability= 8
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF2F2F1E
+contact     = Wets
+immersion   =
+tags        = Fuel Organic
+
+[Acid]
+state       = Liquid
+density     = 1.2
+fall_speed  = 3
+hardness    = 0
+flammability= 0
+conductivity= 2
+toxicity    = 6
+lifetime    = -1
+color       = 0xFF39FF14
+contact     = Dissolves Poisons
+immersion   = Poisons Dissolves
+tags        = Acid
+
+[Gold]
+state       = Solid
+density     = 19.3
+fall_speed  = 0
+hardness    = 3
+flammability= 0
+conductivity= 8
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFFFD700
+contact     =
+immersion   =
+tags        = Metal
