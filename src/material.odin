@@ -6,9 +6,10 @@ Material definition.
 Fat struct by design. Fields that simulation and status systems
 read together live here so they stay in cache.
 
-Cold data (display name, lore text) can live in a parallel table
-indexed by the same material ID later.
+Cold data (display name, lore text) lives in Material_Table.
 */
+
+Material_ID :: distinct u16
 
 Material_State :: enum u8 {
 	Solid,
@@ -52,7 +53,7 @@ Reaction_Tag :: enum u8 {
 // padding. Bit sets are u32 to leave room for up to 32 flags each.
 Material :: struct {
 	// Visual
-	color:          u32, // RGBA or palette index
+	color:          u32, // 0xAARRGGBB
 
 	// Physical behaviour (hot path)
 	density:        f32, // higher sinks
@@ -74,3 +75,25 @@ Material :: struct {
 
 // Two materials per 64-byte cache line; keep it that way.
 #assert(size_of(Material) == 32)
+
+Material_Table :: struct {
+	materials: []Material,
+	names:     []string, // owned; free with destroy_material_table
+}
+
+destroy_material_table :: proc(table: Material_Table, allocator := context.allocator) {
+	for n in table.names {
+		delete(n, allocator)
+	}
+	delete(table.names, allocator)
+	delete(table.materials, allocator)
+}
+
+find_material_id :: proc(table: Material_Table, name: string) -> (id: Material_ID, found: bool) {
+	for n, i in table.names {
+		if n == name {
+			return Material_ID(i), true
+		}
+	}
+	return 0, false
+}
