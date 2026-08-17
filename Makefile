@@ -3,8 +3,7 @@
 # The Odin compiler must be on the PATH. Run every target from the
 # repository root, because the data paths are relative.
 #
-# The current core:os API changed after the dev-2026-02 release, so
-# build with dev-2026-02 or an older one until the port is done.
+# Built and tested against the dev-2026-08 release.
 
 ODIN ?= odin
 BIN  ?= bin

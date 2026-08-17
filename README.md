@@ -35,9 +35,9 @@ odin test src       # run the tests
 make                # builds both binaries into bin/
 ```
 
-The `core:os` API changed after the Odin dev-2026-02 release. This
-codebase targets the older one, so build with dev-2026-02 or earlier
-until it is ported.
+Built and tested against the Odin dev-2026-08 release. It uses the
+current `core:os`, where a file operation returns an `Error` rather
+than a `bool`.
 
 ## Biome generation, phase 1
 

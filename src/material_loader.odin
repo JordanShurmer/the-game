@@ -24,8 +24,8 @@ Material_Table :: struct {
 }
 
 load_materials :: proc(path: string, allocator := context.allocator) -> (table: Material_Table, ok: bool) {
-	data, read_ok := os.read_entire_file(path, allocator)
-	if !read_ok {
+	data, read_err := os.read_entire_file(path, allocator)
+	if read_err != nil {
 		return {}, false
 	}
 	defer delete(data, allocator)

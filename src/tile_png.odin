@@ -332,7 +332,7 @@ test_load_tile_set_fills_a_missing_tile_with_the_biome_fill :: proc(t: ^testing.
 	body := "[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
 		"[B]\ncolor = 0xFF000002\nfill_0 = Sand\ngenerator = tile\ntile = tile_absent.tmp.png\n"
 	path := "tile_set_missing.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body))
+	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil)
 	defer os.remove(path)
 
 	biomes, err, _ := load_biomes(path, materials)

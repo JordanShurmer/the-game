@@ -74,7 +74,7 @@ mcp_silence_graphics_log :: proc() {
 
 mcp_serve :: proc(s: ^Sim) {
 	reader: bufio.Reader
-	bufio.reader_init(&reader, os.stream_from_handle(os.stdin), 64 * 1024)
+	bufio.reader_init(&reader, os.to_stream(os.stdin), 64 * 1024)
 	defer bufio.reader_destroy(&reader)
 
 	for {

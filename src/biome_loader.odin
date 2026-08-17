@@ -45,8 +45,8 @@ load_biomes :: proc(
 	err: Biome_Load_Error,
 	line_no: int,
 ) {
-	data, read_ok := os.read_entire_file(path, allocator)
-	if !read_ok {
+	data, read_err := os.read_entire_file(path, allocator)
+	if read_err != nil {
 		return {}, .File_Unreadable, 0
 	}
 	defer delete(data, allocator)
@@ -439,7 +439,7 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 
 	for c in cases {
 		path := "biome_error_case.tmp.txt"
-		testing.expect(t, os.write_entire_file(path, transmute([]byte)c.body), "write temp file")
+		testing.expect(t, os.write_entire_file(path, transmute([]byte)c.body) == nil, "write temp file")
 		defer os.remove(path)
 
 		table, err, _ := load_biomes(path, materials)
