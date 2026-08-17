@@ -59,29 +59,87 @@ Editor :: struct {
 	status:          Status,
 }
 
-editor_init :: proc(app: ^App) {
-	app.editor.labels = make([]i32, len(app.world.biome_map.cells))
-	app.editor.brush = 0
-	editor_refresh(app)
+/*
+The model half of the editor.
+
+These procedures know about the world and the editor state, and
+nothing about a mouse, a key, or a screen. The input handler below
+calls them, and so does the MCP server. One path, so what a model
+paints and what a hand paints go through the same code.
+*/
+
+editor_init :: proc(s: ^Sim) {
+	s.editor.labels = make([]i32, len(s.world.biome_map.cells))
+	s.editor.brush = 0
+	editor_refresh(s)
 }
 
-editor_destroy :: proc(app: ^App) {
-	delete(app.editor.labels)
+editor_destroy :: proc(s: ^Sim) {
+	delete(s.editor.labels)
+	s.editor.labels = nil
 }
 
 // Recount the components. This runs after every change to the map.
 // The map is small, so a full recount costs less than tracking edits.
-editor_refresh :: proc(app: ^App) {
-	e := &app.editor
-	e.component_count = biome_map_label_components(app.world.biome_map, e.labels)
+editor_refresh :: proc(s: ^Sim) {
+	s.editor.component_count = biome_map_label_components(s.world.biome_map, s.editor.labels)
 }
 
-editor_can_save :: proc(app: ^App) -> bool {
-	return app.editor.component_count <= 1
+editor_can_save :: proc(s: ^Sim) -> bool {
+	return s.editor.component_count <= 1
 }
 
-editor_set_status :: proc(app: ^App, text: string, ok: bool) {
-	status_set(&app.editor.status, text, ok)
+editor_set_status :: proc(s: ^Sim, text: string, ok: bool) {
+	status_set(&s.editor.status, text, ok)
+}
+
+// Is this map pixel inside the map?
+editor_in_map :: proc(s: ^Sim, px, py: i32) -> bool {
+	m := s.world.biome_map
+	return px >= 0 && py >= 0 && px < m.width && py < m.height
+}
+
+/*
+Paint one map pixel and recount the components.
+
+The result says whether the map changed, so the caller knows whether
+the world behind it has to be generated again.
+*/
+editor_paint_pixel :: proc(s: ^Sim, px, py: i32, id: Biome_Id) -> bool {
+	if !editor_in_map(s, px, py) do return false
+	if biome_map_at(s.world.biome_map, px, py) == id do return false
+
+	biome_map_set(s.world.biome_map, px, py, id)
+	editor_refresh(s)
+	return true
+}
+
+// Clear one map pixel. An empty pixel generates as the off-map biome.
+editor_erase_pixel :: proc(s: ^Sim, px, py: i32) -> bool {
+	return editor_paint_pixel(s, px, py, BIOME_EMPTY)
+}
+
+/*
+Write the map image.
+
+Save is blocked while any painted region is cut off from the rest,
+because a world the player cannot walk across is a mistake, not a
+style. The result carries the reason, so a caller with no screen can
+report it.
+*/
+editor_save_map :: proc(s: ^Sim) -> (message: string, ok: bool) {
+	if !editor_can_save(s) {
+		return fmt.tprintf(
+			"save blocked: %d separate regions, join them first",
+			s.editor.component_count,
+		), false
+	}
+
+	path := s.world.biomes.map_image_path
+	if save_biome_map_png(s.world.biome_map, s.world.biomes, path) {
+		return fmt.tprintf("saved %s", path), true
+	}
+	return fmt.tprintf("cannot write %s", path), false
 }
 
 // The size of one map pixel on screen, and where the map starts.
@@ -126,22 +184,13 @@ editor_handle_input :: proc(app: ^App) {
 		// Paint on press and on drag, so a stroke covers a run of pixels.
 		painted := false
 		if rl.IsMouseButtonDown(.LEFT) {
-			if biome_map_at(app.world.biome_map, px, py) != e.brush {
-				biome_map_set(app.world.biome_map, px, py, e.brush)
-				painted = true
-			}
+			painted = editor_paint_pixel(&app.sim, px, py, e.brush)
 		} else if rl.IsMouseButtonDown(.RIGHT) {
-			if biome_map_at(app.world.biome_map, px, py) != BIOME_EMPTY {
-				biome_map_set(app.world.biome_map, px, py, BIOME_EMPTY)
-				painted = true
-			}
+			painted = editor_erase_pixel(&app.sim, px, py)
 		}
 
-		if painted {
-			editor_refresh(app)
-			// The world behind the overlay follows the stroke at once.
-			app.dirty = true
-		}
+		// The world behind the overlay follows the stroke at once.
+		if painted do app.dirty = true
 
 		// Jump the camera to the region under the cursor, so you can
 		// look at what you just painted.
@@ -177,21 +226,8 @@ editor_look_at_pixel :: proc(app: ^App, px, py: i32) {
 }
 
 editor_save :: proc(app: ^App) {
-	if !editor_can_save(app) {
-		editor_set_status(
-			app,
-			fmt.tprintf("save blocked: %d separate regions, join them first", app.editor.component_count),
-			false,
-		)
-		return
-	}
-
-	path := app.world.biomes.map_image_path
-	if save_biome_map_png(app.world.biome_map, app.world.biomes, path) {
-		editor_set_status(app, fmt.tprintf("saved %s", path), true)
-	} else {
-		editor_set_status(app, fmt.tprintf("cannot write %s", path), false)
-	}
+	message, ok := editor_save_map(&app.sim)
+	editor_set_status(&app.sim, message, ok)
 }
 
 @(private = "file")
@@ -237,7 +273,7 @@ editor_draw :: proc(app: ^App) {
 		rl.GRAY,
 	)
 
-	connected := editor_can_save(app)
+	connected := editor_can_save(&app.sim)
 	gate := connected \
 	? fmt.ctprintf("connected - save allowed") \
 	: fmt.ctprintf("%d separate regions - save blocked", e.component_count)

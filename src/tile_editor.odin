@@ -44,30 +44,85 @@ Tile_Editor :: struct {
 }
 
 /*
+The model half of the tile editor.
+
+Like the world editor, these know the world and the editor state and
+nothing about a mouse. The MCP server calls the same procedures.
+*/
+
+/*
 Open the tile of a biome. A biome with no tile has nothing to paint,
 and says so instead of opening an empty grid.
 */
-tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
-	b := app.world.biomes.biomes[biome]
-	if b.tile == TILE_NONE {
-		editor_set_status(
-			app,
-			fmt.tprintf(
-				"%s fills flat; give it 'generator = tile' in %s to paint one",
-				app.world.biomes.names[biome],
-				BIOMES_PATH,
-			),
-			false,
-		)
-		return
+tile_editor_begin :: proc(s: ^Sim, biome: Biome_Id) -> (message: string, ok: bool) {
+	if int(biome) >= len(s.world.biomes.biomes) {
+		return fmt.tprintf("there is no biome %d", biome), false
 	}
 
-	e := &app.tile_edit
+	b := s.world.biomes.biomes[biome]
+	if b.tile == TILE_NONE {
+		return fmt.tprintf(
+			"%s fills flat; give it 'generator = tile' in %s to paint one",
+			s.world.biomes.names[biome],
+			BIOMES_PATH,
+		), false
+	}
+
+	e := &s.tile_edit
 	e.open = true
 	e.biome = biome
 	e.tile = b.tile
 	e.brush = Cell(b.fill_0)
-	e.saved_step = app.step
+	return fmt.tprintf("editing the %s tile", s.world.biomes.names[biome]), true
+}
+
+// Paint one cell of the open tile. The result says whether it changed.
+tile_editor_paint_cell :: proc(s: ^Sim, x, y: i32, c: Cell) -> bool {
+	e := &s.tile_edit
+	if !e.open do return false
+	if x < 0 || y < 0 || x >= TILE_SIZE || y >= TILE_SIZE do return false
+	if int(c) >= len(s.world.materials.materials) do return false
+	if tile_at(s.world.tiles, e.tile, x, y) == c do return false
+
+	tile_set_cell(s.world.tiles, e.tile, x, y, c)
+	return true
+}
+
+/*
+Write the open tile to the file its biome names.
+
+There is no gate on this. A tile cannot strand a region the way a
+biome map can, so there is nothing here to block a save for.
+*/
+tile_editor_save_tile :: proc(s: ^Sim) -> (message: string, ok: bool) {
+	e := &s.tile_edit
+	if !e.open do return "no tile is open", false
+
+	path := s.world.biomes.tile_paths[e.tile]
+	if save_tile_png(tile_cells(s.world.tiles, e.tile), s.world.materials, path) {
+		return fmt.tprintf("saved %s", path), true
+	}
+	return fmt.tprintf("cannot write %s", path), false
+}
+
+// Air is the material a transparent pixel loads as.
+tile_editor_air :: proc(s: ^Sim) -> Cell {
+	idx, found := find_material_index(s.world.materials, "Air")
+	return found ? Cell(idx) : MATERIAL_AIR
+}
+
+// ------------------------------------------------------------
+// The window half
+// ------------------------------------------------------------
+
+tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
+	message, ok := tile_editor_begin(&app.sim, biome)
+	if !ok {
+		editor_set_status(&app.sim, message, false)
+		return
+	}
+
+	app.tile_edit.saved_step = app.step
 
 	// Show the world at native resolution, so one painted cell is one
 	// pixel on screen instead of one sample in eight.
@@ -140,17 +195,10 @@ tile_editor_handle_input :: proc(app: ^App) {
 		// Paint on press and on drag, so a stroke covers a run of cells.
 		painted := false
 		if rl.IsMouseButtonDown(.LEFT) {
-			if tile_at(app.world.tiles, e.tile, x, y) != e.brush {
-				tile_set_cell(app.world.tiles, e.tile, x, y, e.brush)
-				painted = true
-			}
+			painted = tile_editor_paint_cell(&app.sim, x, y, e.brush)
 		} else if rl.IsMouseButtonDown(.RIGHT) {
 			// Erase is air, the way an empty pixel in the file is air.
-			air := Cell(tile_editor_air(app))
-			if tile_at(app.world.tiles, e.tile, x, y) != air {
-				tile_set_cell(app.world.tiles, e.tile, x, y, air)
-				painted = true
-			}
+			painted = tile_editor_paint_cell(&app.sim, x, y, tile_editor_air(&app.sim))
 		}
 
 		// The world behind the overlay follows the stroke at once.
@@ -167,23 +215,9 @@ tile_editor_handle_input :: proc(app: ^App) {
 	if rl.IsKeyPressed(.M) do tile_editor_look_at_biome(app)
 }
 
-// Air is the material a transparent pixel loads as. The editor looks
-// it up by name once per erase, over a table of a dozen entries.
-@(private = "file")
-tile_editor_air :: proc(app: ^App) -> int {
-	idx, found := find_material_index(app.world.materials, "Air")
-	return found ? idx : 0
-}
-
 tile_editor_save :: proc(app: ^App) {
-	e := &app.tile_edit
-	path := app.world.biomes.tile_paths[e.tile]
-
-	if save_tile_png(tile_cells(app.world.tiles, e.tile), app.world.materials, path) {
-		status_set(&e.status, fmt.tprintf("saved %s", path), true)
-	} else {
-		status_set(&e.status, fmt.tprintf("cannot write %s", path), false)
-	}
+	message, ok := tile_editor_save_tile(&app.sim)
+	status_set(&app.tile_edit.status, message, ok)
 }
 
 /*

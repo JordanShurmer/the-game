@@ -16,17 +16,15 @@ store yet, because nothing needs one.
 WINDOW_W :: 1280
 WINDOW_H :: 720
 
-MATERIALS_PATH :: "data/materials.txt"
-BIOMES_PATH :: "data/biomes.txt"
+/*
+The window state.
 
-// The map starts this big when there is no image on disk yet.
-STARTER_MAP_W :: 16
-STARTER_MAP_H :: 16
-
+Everything the game knows lives in the Sim. The App adds what only a
+window needs: a camera, two buffers, and a texture. The MCP server
+drives the same Sim with none of that, so the two cannot drift apart.
+*/
 App :: struct {
-	world:     World,
-	editor:    Editor,
-	tile_edit: Tile_Editor,
+	using sim: Sim,
 
 	// Camera. cam_x and cam_y are the world cell at the top-left texel.
 	cam_x:     i32,
@@ -84,47 +82,15 @@ main :: proc() {
 }
 
 /*
-Load the data files. Every failure here is fatal and says what is
-wrong, because a half-loaded world is worse than no world.
+Load the data files, then set up what only the window needs.
+
+The load itself is sim_load, because the MCP server loads the same
+world the same way.
 */
 app_load_data :: proc(app: ^App) -> bool {
-	materials, mat_ok := load_materials(MATERIALS_PATH)
-	if !mat_ok {
-		fmt.eprintfln("cannot read %s (run the game from the repo root)", MATERIALS_PATH)
-		return false
-	}
+	if err := sim_load(&app.sim); err != .None do return false
 
-	biomes, err, line := load_biomes(BIOMES_PATH, materials)
-	if err != .None {
-		fmt.eprintfln("%s: %v at line %d", BIOMES_PATH, err, line)
-		destroy_material_table(materials)
-		return false
-	}
-
-	tiles, tiles_ok := load_or_create_tile_set(biomes, materials)
-	if !tiles_ok {
-		destroy_biome_table(biomes)
-		destroy_material_table(materials)
-		return false
-	}
-
-	bmap, ok := load_or_create_biome_map(biomes)
-	if !ok {
-		destroy_tile_set(tiles)
-		destroy_biome_table(biomes)
-		destroy_material_table(materials)
-		return false
-	}
-
-	app.world = World {
-		materials = materials,
-		biomes    = biomes,
-		biome_map = bmap,
-		tiles     = tiles,
-		seed      = 1,
-	}
-
-	for m, i in materials.materials {
+	for m, i in app.world.materials.materials {
 		app.color_lut[i] = rl_from_argb(m.color)
 	}
 
@@ -132,149 +98,11 @@ app_load_data :: proc(app: ^App) -> bool {
 	app.cam_x = -(WINDOW_W / 2) * app.step
 	app.cam_y = -(WINDOW_H / 2) * app.step
 	app.dirty = true
-
-	editor_init(app)
 	return true
 }
 
 app_unload_data :: proc(app: ^App) {
-	editor_destroy(app)
-	destroy_tile_set(app.world.tiles)
-	destroy_biome_map(app.world.biome_map)
-	destroy_biome_table(app.world.biomes)
-	destroy_material_table(app.world.materials)
-}
-
-/*
-Read every authored tile, and write a flat one for any tile the data
-file names but nobody has painted yet.
-
-This is the same bargain load_or_create_biome_map makes: a fresh
-checkout opens on a world you can see, and the files it writes are the
-files the editor saves.
-*/
-load_or_create_tile_set :: proc(
-	biomes: Biome_Table,
-	materials: Material_Table,
-) -> (
-	set: Tile_Set,
-	ok: bool,
-) {
-	loaded, result, id := load_tile_set(biomes, materials, true)
-	if result.err == .None do return loaded, true
-
-	path := biomes.tile_paths[id]
-	switch result.err {
-	case .Unmatched_Color:
-		fmt.eprintfln(
-			"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
-			path,
-			result.x,
-			result.y,
-			result.color,
-			MATERIALS_PATH,
-		)
-	case .Wrong_Size:
-		fmt.eprintfln(
-			"%s: the tile is %dx%d, but every tile must be %dx%d",
-			path,
-			result.x,
-			result.y,
-			i32(TILE_SIZE),
-			i32(TILE_SIZE),
-		)
-	case .File_Unreadable:
-		fmt.eprintfln("cannot read or write %s", path)
-	case .None:
-	}
-	return {}, false
-}
-
-/*
-Read the map image, or paint a starter map and write it. A new
-checkout then opens on a world you can see, and the file it writes is
-the same file the editor saves.
-*/
-load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool) {
-	path := biomes.map_image_path
-
-	if os.exists(path) {
-		loaded, result := load_biome_map_png(path, biomes)
-		if result.err == .Unmatched_Color {
-			fmt.eprintfln(
-				"%s: pixel (%d,%d) has color %08X, which no biome in %s claims",
-				path,
-				result.x,
-				result.y,
-				result.color,
-				BIOMES_PATH,
-			)
-			return {}, false
-		}
-		if result.err != .None {
-			fmt.eprintfln("%s: %v", path, result.err)
-			return {}, false
-		}
-		return loaded, true
-	}
-
-	m = make_starter_biome_map(biomes)
-	if !save_biome_map_png(m, biomes, path) {
-		fmt.eprintfln("cannot write %s", path)
-		destroy_biome_map(m)
-		return {}, false
-	}
-	fmt.printfln("wrote a starter map to %s", path)
-	return m, true
-}
-
-/*
-A layered starter world: sky over a mine, sand and a lake below it,
-then oil, and deep rock at the bottom. Every pixel is painted, so the
-map is connected and can be saved as it is.
-*/
-make_starter_biome_map :: proc(biomes: Biome_Table) -> Biome_Map {
-	m := make_biome_map(STARTER_MAP_W, STARTER_MAP_H)
-
-	id_of :: proc(biomes: Biome_Table, name: string) -> Biome_Id {
-		idx, found := find_biome_index(biomes, name)
-		assert(found, "the starter map names a biome that data/biomes.txt does not define")
-		return Biome_Id(idx)
-	}
-
-	sky := id_of(biomes, "Sky")
-	mine := id_of(biomes, "Coalmine")
-	sand := id_of(biomes, "Sandcave")
-	lake := id_of(biomes, "Lake")
-	oil := id_of(biomes, "Oilfield")
-	acid := id_of(biomes, "Acidpool")
-	magma := id_of(biomes, "Magma")
-	vault := id_of(biomes, "Vault")
-	deep := id_of(biomes, "Deep_Rock")
-
-	band :: proc(m: Biome_Map, y0, y1: i32, id: Biome_Id) {
-		for y in y0 ..= y1 {
-			for x in i32(0) ..< m.width do biome_map_set(m, x, y, id)
-		}
-	}
-	blob :: proc(m: Biome_Map, x0, y0, x1, y1: i32, id: Biome_Id) {
-		for y in y0 ..= y1 {
-			for x in x0 ..= x1 do biome_map_set(m, x, y, id)
-		}
-	}
-
-	band(m, 0, 2, sky)
-	band(m, 3, 6, mine)
-	band(m, 7, 9, sand)
-	band(m, 10, 12, oil)
-	band(m, 13, 15, deep)
-
-	blob(m, 10, 7, 13, 8, lake)
-	blob(m, 2, 11, 4, 12, acid)
-	blob(m, 6, 14, 9, 15, magma)
-	blob(m, 13, 13, 13, 13, vault)
-
-	return m
+	sim_unload(&app.sim)
 }
 
 app_init_view :: proc(app: ^App) {

@@ -32,7 +32,12 @@ relative to it.
 ```sh
 odin run src        # play
 odin test src       # run the tests
+make                # builds both binaries into bin/
 ```
+
+The `core:os` API changed after the Odin dev-2026-02 release. This
+codebase targets the older one, so build with dev-2026-02 or earlier
+until it is ported.
 
 ## Biome generation, phase 1
 
@@ -65,3 +70,52 @@ cuts. Wang tiles arrive in a later phase.
 The world regenerates as you paint. Save is blocked while the painted
 map falls into more than one connected region, and the editor outlines
 the stranded pixels in red.
+
+## Layout
+
+```
+src/       the game, package game, with the tests beside the code
+cmd/mcp/   the MCP server binary
+data/      the materials, the biomes, the biome map, the tiles
+docs/      the design notes
+```
+
+The game is made of three parts. The biome map says which biome owns
+which region. A tile says what one region of a biome is made of. The
+sandbox says what a rectangle of that world does next: sand falls, oil
+burns, smoke climbs.
+
+| File | What it holds |
+| --- | --- |
+| `src/worldgen.odin` | The generator: what a world cell is made of |
+| `src/biome*.odin` | The biome table and the biome map |
+| `src/tile*.odin` | The tiles and their PNG files |
+| `src/editor.odin` | The world editor, model and window |
+| `src/tile_editor.odin` | The tile editor, model and window |
+| `src/sandbox.odin` | The cell grid and the falling sand step |
+| `src/input_queue.odin` | The input queue |
+| `src/sim.odin` | The whole game state, with no window in it |
+| `src/mcp*.odin` | The MCP server |
+| `src/main.odin` | The game window |
+
+## Play and author through MCP
+
+The game also runs as an MCP server, so a model can author the world
+and play it: paint the biome map, paint a tile, open a sandbox on the
+region those edits describe, and run the sand over it.
+
+```sh
+make mcp
+claude mcp add the-game -- ./bin/game-mcp
+```
+
+Every editor tool calls the same procedure the mouse calls, so a model
+and a hand cannot paint different worlds. Saving the biome map meets
+the same connectivity gate either way.
+
+Commands reach the sandbox through an input queue taken from old
+lockstep network code. A command carries an execution tick, not a time,
+so the speed of the client does not change the world that comes out.
+The same seed, region, and commands always give the same checksum.
+
+See `docs/mcp.md` for the tools and the limits.

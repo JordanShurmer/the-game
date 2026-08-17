@@ -8,6 +8,14 @@
 #   - Fields are key = value
 #   - Bit sets are space-separated flag names
 #   - Missing fields use sensible defaults (see loader)
+#
+# Hot fields go in the Material struct. The simulation reads them every tick.
+# Cold fields go in parallel tables. The simulation reads them rarely.
+#
+# Cold fields:
+#   glyph      = one character for the text map
+#   decays_to  = material that replaces this one when the lifetime ends
+#   burns_to   = material that replaces this one when fire reaches it
 
 [Air]
 state       = Gas
@@ -22,6 +30,7 @@ color       = 0x00000000
 contact     =
 immersion   =
 tags        =
+glyph       = .
 
 [Dirt]
 state       = Powder
@@ -36,6 +45,7 @@ color       = 0xFF5C4033
 contact     =
 immersion   =
 tags        = Organic
+glyph       = d
 
 [Rock]
 state       = Solid
@@ -50,6 +60,7 @@ color       = 0xFF6B6B6B
 contact     =
 immersion   =
 tags        =
+glyph       = R
 
 [Sand]
 state       = Powder
@@ -64,6 +75,7 @@ color       = 0xFFC2B280
 contact     =
 immersion   =
 tags        =
+glyph       = s
 
 [Water]
 state       = Liquid
@@ -78,6 +90,7 @@ color       = 0xFF3A7CA5
 contact     = Wets
 immersion   = Drowns
 tags        =
+glyph       = ~
 
 [Lava]
 state       = Liquid
@@ -92,6 +105,7 @@ color       = 0xFFFF4500
 contact     = Burns
 immersion   = Burns
 tags        = Oxidizer
+glyph       = L
 
 [Fire]
 state       = Special
@@ -106,6 +120,8 @@ color       = 0xFFFF6A00
 contact     = Burns
 immersion   = Burns
 tags        = Oxidizer
+glyph       = *
+decays_to   = Smoke
 
 [Smoke]
 state       = Gas
@@ -120,6 +136,7 @@ color       = 0xFF555555
 contact     =
 immersion   =
 tags        =
+glyph       = %
 
 [Steam]
 state       = Gas
@@ -134,6 +151,8 @@ color       = 0xFFD0E0E8
 contact     = Wets
 immersion   =
 tags        =
+glyph       = "
+decays_to   = Water
 
 [Oil]
 state       = Liquid
@@ -148,6 +167,8 @@ color       = 0xFF2F2F1E
 contact     = Wets
 immersion   =
 tags        = Fuel Organic
+glyph       = o
+burns_to    = Fire
 
 [Acid]
 state       = Liquid
@@ -162,6 +183,7 @@ color       = 0xFF39FF14
 contact     = Dissolves Poisons
 immersion   = Poisons Dissolves
 tags        = Acid
+glyph       = a
 
 [Gold]
 state       = Solid
@@ -176,3 +198,4 @@ color       = 0xFFFFD700
 contact     =
 immersion   =
 tags        = Metal
+glyph       = G

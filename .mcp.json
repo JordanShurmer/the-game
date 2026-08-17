@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "the-game": {
+      "command": "./bin/game-mcp",
+      "args": [],
+      "env": {}
+    }
+  }
+}
