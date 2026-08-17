@@ -257,8 +257,19 @@ test_generate_matches_the_plain_version :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_world(world)
 
-	// Views that straddle region edges, the world origin, and the edge
-	// of the painted map.
+	/*
+	Views that straddle region edges, the world origin, and the edge of
+	the painted map.
+
+	The second group sits inside the painted map, where Coalmine owns a
+	tile. Without those, every view here reads off-map, every biome is
+	uniform, and the tile branch of the run fill is never compared with
+	the oracle at all. The unaligned starts matter most: a view whose x
+	is a whole number of tiles would hide an error in the run offset.
+
+	Map pixels (0,1) and (1,1) are Coalmine, so world x -4096 to -3072
+	at y -3584 to -3072 is tiled. Lake starts at x -3072.
+	*/
 	views := []World_View {
 		{x = 0, y = 0, w = 64, h = 64, step = 1},
 		{x = 500, y = 500, w = 64, h = 64, step = 1}, // crosses a region edge
@@ -267,6 +278,15 @@ test_generate_matches_the_plain_version :: proc(t: ^testing.T) {
 		{x = 0, y = 0, w = 200, h = 120, step = 16}, // pulled back, whole regions
 		{x = 511, y = 511, w = 3, h = 3, step = 1}, // corner of four regions
 		{x = 3000, y = 40, w = 40, h = 40, step = 5}, // past the painted map
+
+		// Inside a tile biome.
+		{x = -4096, y = -3584, w = 128, h = 64, step = 1}, // tile-aligned start
+		{x = -4090, y = -3580, w = 200, h = 64, step = 1}, // unaligned start
+		{x = -4091, y = -3577, w = 96, h = 48, step = 3}, // unaligned, strided
+		{x = -3100, y = -3400, w = 128, h = 64, step = 1}, // tiled into flat Lake
+		{x = -4200, y = -3600, w = 256, h = 128, step = 5}, // off-map into tiled
+		{x = -3590, y = -3590, w = 64, h = 64, step = 1}, // corner of four regions
+		{x = -4096, y = -3584, w = 160, h = 80, step = 9}, // pulled back over tiles
 	}
 
 	for view in views {
@@ -436,4 +456,124 @@ test_live_map_matches_saved_map :: proc(t: ^testing.T) {
 	generate(world, view, live)
 	generate(from_disk, view, saved)
 	testing.expect(t, slice.equal(live, saved), "live edit and saved file must generate alike")
+}
+
+/*
+The same bargain one level down.
+
+The tile editor paints into the tile the running world holds, and Save
+writes that tile to disk. If the file and the live tile ever drew
+different worlds, the author would save one thing and the player would
+get another.
+*/
+@(test)
+test_live_tile_edit_matches_saved_tile :: proc(t: ^testing.T) {
+	world, ok := make_test_world(t)
+	if !ok do return
+	defer destroy_test_world(world)
+
+	mine, found := find_biome_index(world.biomes, "Coalmine")
+	if !testing.expect(t, found) do return
+	tile := world.biomes.biomes[mine].tile
+	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+
+	// Paint a block, the way the editor does on a left-drag.
+	acid, _ := find_material_index(world.materials, "Acid")
+	for y in i32(8) ..< i32(16) {
+		for x in i32(8) ..< i32(16) {
+			tile_set_cell(world.tiles, tile, x, y, Cell(acid))
+		}
+	}
+
+	path := "worldgen_tile_edit.tmp.png"
+	defer os.remove(path)
+	testing.expect(t, save_tile_png(tile_cells(world.tiles, tile), world.materials, path))
+
+	// Read the file back into a set of its own, and generate from that.
+	reloaded := make_tile_set(world.tiles.count)
+	defer destroy_tile_set(reloaded)
+	copy(reloaded.cells, world.tiles.cells)
+	r := load_tile_png(path, world.materials, tile_cells(reloaded, tile))
+	testing.expectf(t, r.err == .None, "reload must succeed, got %v", r.err)
+
+	from_disk := world
+	from_disk.tiles = reloaded
+
+	// A view across the Coalmine regions and the biomes beside them.
+	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 4}
+	live := make([]Cell, int(view.w) * int(view.h))
+	saved := make([]Cell, int(view.w) * int(view.h))
+	defer delete(live)
+	defer delete(saved)
+
+	generate(world, view, live)
+	generate(from_disk, view, saved)
+	testing.expect(t, slice.equal(live, saved), "a painted tile must save and reload unchanged")
+}
+
+/*
+Painting a tile changes the biome that owns it, and nothing else.
+
+A tile belongs to a biome, not to a region, so the edit must reach
+every region of that biome and stop at the border of the next one.
+*/
+@(test)
+test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
+	world, ok := make_test_world(t)
+	if !ok do return
+	defer destroy_test_world(world)
+
+	mine, _ := find_biome_index(world.biomes, "Coalmine")
+	tile := world.biomes.biomes[mine].tile
+	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+
+	// The view spans map pixels (0,1) and (1,1), which are both
+	// Coalmine, plus the Lake and the unpainted pixel to their right.
+	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 4}
+	before := make([]Cell, int(view.w) * int(view.h))
+	after := make([]Cell, int(view.w) * int(view.h))
+	defer delete(before)
+	defer delete(after)
+
+	generate(world, view, before)
+
+	acid, _ := find_material_index(world.materials, "Acid")
+	for y in i32(8) ..< i32(16) {
+		for x in i32(8) ..< i32(16) {
+			tile_set_cell(world.tiles, tile, x, y, Cell(acid))
+		}
+	}
+
+	generate(world, view, after)
+
+	changed := 0
+	regions_touched: map[i32]bool
+	defer delete(regions_touched)
+
+	for i in 0 ..< len(before) {
+		if before[i] == after[i] do continue
+		changed += 1
+
+		tx := i32(i % int(view.w))
+		ty := i32(i / int(view.w))
+		wx := view.x + tx * view.step
+		wy := view.y + ty * view.step
+
+		testing.expectf(
+			t,
+			world_biome_at(world, wx, wy) == Biome_Id(mine),
+			"cell %d,%d changed but belongs to %s",
+			wx,
+			wy,
+			world.biomes.names[world_biome_at(world, wx, wy)],
+		)
+		regions_touched[floor_div(wx, world.biomes.cells_per_pixel)] = true
+	}
+
+	testing.expect(t, changed > 0, "the paint must reach the world at all")
+	testing.expect(
+		t,
+		len(regions_touched) > 1,
+		"the tile belongs to the biome, so every region of it must change",
+	)
 }
