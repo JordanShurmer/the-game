@@ -1,0 +1,77 @@
+# Biome table for the Noita-like game
+# Format matches materials.txt, so one small parser reads both.
+#
+# Rules:
+#   - Lines starting with # are comments
+#   - Blank lines are ignored
+#   - A biome starts with [Name]
+#   - Fields are key = value
+#   - [Map] is a reserved section that holds the world map settings
+#
+# Every key color must be unique. The loader reports a duplicate as a
+# hard error. Each key color must also appear in data/biome_map.png,
+# where one pixel is one region of the world.
+
+[Map]
+image           = data/biome_map.png
+origin_pixel    = 8 8         # map pixel that holds world cell (0,0)
+cells_per_pixel = 512         # world cells along one edge of a region
+biome_off_map   = Deep_Rock   # biome used outside the map image
+
+# A biome fills its regions one of two ways.
+#
+#   generator = uniform   the whole region is fill_0
+#   generator = tile      the region repeats the tile named below
+#
+# A tile is a 64x64 PNG painted in material colors. The two keys go
+# together: generator = tile needs a tile, and a tile needs
+# generator = tile. The loader reports either half on its own as a
+# hard error. fill_0 stays required, because a tile with no file yet
+# starts as a flat block of it.
+
+[Sky]
+color     = 0xFF87CEEB
+generator = uniform
+fill_0    = Air
+
+[Coalmine]
+color     = 0xFFD57917
+generator = tile
+fill_0    = Dirt
+tile      = data/tiles/coalmine.png
+
+[Sandcave]
+color     = 0xFFC2B280
+generator = tile
+fill_0    = Sand
+tile      = data/tiles/sandcave.png
+
+[Lake]
+color     = 0xFF3A7CA5
+generator = uniform
+fill_0    = Water
+
+[Magma]
+color     = 0xFFFF4500
+generator = uniform
+fill_0    = Lava
+
+[Oilfield]
+color     = 0xFF6B5A2E
+generator = uniform
+fill_0    = Oil
+
+[Acidpool]
+color     = 0xFF39FF14
+generator = uniform
+fill_0    = Acid
+
+[Vault]
+color     = 0xFFFFD700
+generator = uniform
+fill_0    = Gold
+
+[Deep_Rock]
+color     = 0xFF6B6B6B
+generator = uniform
+fill_0    = Rock

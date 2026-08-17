@@ -1,0 +1,1321 @@
+package game
+
+import "core:encoding/json"
+import "core:fmt"
+import "core:strings"
+import "core:testing"
+
+/*
+The tools that the MCP client can call.
+
+They fall into three groups, which are the three things the game is
+made of:
+
+  the biome map   which biome owns which region of the world
+  the tiles       what one region of a biome is made of
+  the sandbox     what a rectangle of that world does next
+
+The first two are the editors. Every one of their tools calls the same
+procedure the mouse calls, so a model and a hand cannot paint
+different worlds. The third is the physics, and it is reached only
+through the input queue.
+
+Every tool answers in plain text. Text suits a model better than a
+deep JSON tree: the map, the queue, and the counters read in one
+block, and there is no schema to learn.
+*/
+
+// A map is capped so one answer cannot flood the client.
+MCP_MAX_MAP_CELLS :: 20000
+
+MCP_TOOLS_JSON :: `{"tools":[
+{"name":"world_status",
+ "description":"Report the whole state: the biome map, the open tile, the sandbox tick and checksum, the input queue counters, and how many cells hold each material.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"list_materials",
+ "description":"List every material with its index, map glyph, and physical properties. Use these names and glyphs when painting a tile or spawning into the sandbox.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"list_biomes",
+ "description":"List every biome with its id, map glyph, key color, generator, fill material, and tile file. Use these names and glyphs when painting the biome map.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"biome_map_view",
+ "description":"Read the biome map as a character grid. One character is one map pixel, which is one square region of the world. Also reports whether the map is connected, which is what gates saving.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"biome_map_paint",
+ "description":"Paint the biome map, the same way the mouse does in the world editor. Give either a rectangle and a biome, or rows of glyphs to stamp a picture. Painting changes the world at once; call sandbox_open to bring the change into the physics.",
+ "inputSchema":{"type":"object","properties":{
+   "x":{"type":"integer","description":"Left map pixel."},
+   "y":{"type":"integer","description":"Top map pixel."},
+   "width":{"type":"integer","description":"Rectangle width in map pixels. Default 1.","minimum":1},
+   "height":{"type":"integer","description":"Rectangle height in map pixels. Default 1.","minimum":1},
+   "biome":{"type":"string","description":"Biome name to paint. Use \"empty\" to clear a pixel back to the off-map biome. Ignored when rows are given."},
+   "rows":{"type":"array","items":{"type":"string"},"description":"Rows of biome glyphs, stamped with the top-left corner at (x,y). A space or a dot leaves a pixel alone."}},
+  "required":["x","y"],"additionalProperties":false}},
+{"name":"biome_map_save",
+ "description":"Write the biome map image. The save is blocked while the painted map falls into more than one connected region, which is the same gate the world editor applies.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"tile_open",
+ "description":"Open a biome's tile for painting, the same way pressing T does in the world editor. A biome that fills flat has no tile and says so.",
+ "inputSchema":{"type":"object","properties":{
+   "biome":{"type":"string","description":"Biome name whose tile to open."}},
+  "required":["biome"],"additionalProperties":false}},
+{"name":"tile_view",
+ "description":"Read the open tile as a character grid of material glyphs.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"tile_paint",
+ "description":"Paint the open tile, the same way the mouse does in the tile editor. Give either a rectangle and a material, or rows of material glyphs to stamp a picture. Every region of that biome in the world changes at once.",
+ "inputSchema":{"type":"object","properties":{
+   "x":{"type":"integer","description":"Left cell in the tile (0 to 63)."},
+   "y":{"type":"integer","description":"Top cell in the tile (0 to 63)."},
+   "width":{"type":"integer","description":"Rectangle width in cells. Default 1.","minimum":1},
+   "height":{"type":"integer","description":"Rectangle height in cells. Default 1.","minimum":1},
+   "material":{"type":"string","description":"Material name to paint. Ignored when rows are given."},
+   "rows":{"type":"array","items":{"type":"string"},"description":"Rows of material glyphs, stamped with the top-left corner at (x,y). A space leaves a cell alone."}},
+  "required":["x","y"],"additionalProperties":false}},
+{"name":"tile_save",
+ "description":"Write the open tile to the PNG file its biome names. The image is the source, so any pixel editor can open it afterwards.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"sandbox_open",
+ "description":"Fill the sandbox from a rectangle of the authored world and empty the input queue. Call it with no arguments to reload the same rectangle, which is how an edit to the map or a tile reaches the physics.",
+ "inputSchema":{"type":"object","properties":{
+   "x":{"type":"integer","description":"World cell at the left edge. Default: keep the current one."},
+   "y":{"type":"integer","description":"World cell at the top edge. Default: keep the current one."},
+   "width":{"type":"integer","description":"Sandbox width in cells (1 to 1024). Default: keep the current one.","minimum":1,"maximum":1024},
+   "height":{"type":"integer","description":"Sandbox height in cells (1 to 1024). Default: keep the current one.","minimum":1,"maximum":1024},
+   "biome":{"type":"string","description":"Instead of x and y, open on the first region the biome map gives this biome."},
+   "seed":{"type":"integer","description":"Seed for the random source. The same seed repeats a run exactly. Default 1."},
+   "input_delay":{"type":"integer","description":"Ticks between a command arriving and running (0 to 32). Default 2.","minimum":0,"maximum":32}},
+  "additionalProperties":false}},
+{"name":"enqueue_input",
+ "description":"Put one command in the input queue. The command does not run now. It runs at the start of its execution tick, which the reply reports. Call tick to reach that tick. Coordinates are sandbox cells, not world cells.",
+ "inputSchema":{"type":"object","properties":{
+   "kind":{"type":"string","enum":["spawn","erase","ignite","noop"],"description":"spawn fills a disc with a material. erase clears a disc to air. ignite sets light material in a disc alight; it does nothing to empty air. noop holds a tick."},
+   "x":{"type":"integer","description":"Centre column in the sandbox. 0 is the left edge."},
+   "y":{"type":"integer","description":"Centre row in the sandbox. 0 is the top edge and y grows downward."},
+   "radius":{"type":"integer","description":"Disc radius in cells. 0 writes one cell. Default 0.","minimum":0,"maximum":512},
+   "material":{"type":"string","description":"Material name for spawn, as listed by list_materials."},
+   "source":{"type":"integer","description":"Sender number (0 to 7). Commands from different sources run in source order on the same tick. Default 0.","minimum":0,"maximum":7},
+   "tick":{"type":"integer","description":"Exact execution tick. Leave this out to use the input delay. A tick that has already run is moved to the next tick and reported as late."}},
+  "required":["kind","x","y"],"additionalProperties":false}},
+{"name":"tick",
+ "description":"Run the sandbox forward. Commands due on a tick run at the start of that tick, then the physics step runs. Reports the checksum and the material counts afterwards.",
+ "inputSchema":{"type":"object","properties":{
+   "count":{"type":"integer","description":"Ticks to run (1 to 100000). Default 1.","minimum":1,"maximum":100000}},
+  "additionalProperties":false}},
+{"name":"observe",
+ "description":"Read a character map with a coordinate ruler and a legend, either of the sandbox as physics left it, or of the authored world as the generator makes it.",
+ "inputSchema":{"type":"object","properties":{
+   "source":{"type":"string","enum":["sandbox","world"],"description":"sandbox reads the running physics and uses sandbox coordinates. world reads the generator and uses world coordinates. Default sandbox."},
+   "x":{"type":"integer","description":"Left column. Default: the left edge of the sandbox, or its world origin."},
+   "y":{"type":"integer","description":"Top row. Default: the top edge of the sandbox, or its world origin."},
+   "width":{"type":"integer","description":"Region width. Default: the sandbox width.","minimum":1},
+   "height":{"type":"integer","description":"Region height. Default: the sandbox height.","minimum":1},
+   "step":{"type":"integer","description":"World cells per character, for source=world only. Use a large step to see whole regions. Default 1.","minimum":1,"maximum":4096},
+   "sample":{"type":"integer","description":"Cells per character, for source=sandbox only. Use 2 or more to fit a large sandbox in one answer. Default 1.","minimum":1,"maximum":64}},
+  "additionalProperties":false}},
+{"name":"queue_peek",
+ "description":"List the commands that wait in the input queue, by execution tick, without running anything.",
+ "inputSchema":{"type":"object","properties":{
+   "ticks":{"type":"integer","description":"How many ticks ahead to look (1 to 64). Default 16.","minimum":1,"maximum":64}},
+  "additionalProperties":false}}
+]}`
+
+mcp_call_tool :: proc(s: ^Sim, out: ^strings.Builder, id: json.Value, request: json.Object) {
+	params, has_params := json_object_field(request, "params")
+	if !has_params {
+		mcp_write_error(out, id, -32602, "the call needs a params object")
+		return
+	}
+
+	name := json_string_field(params, "name", "")
+	arguments, _ := json_object_field(params, "arguments")
+
+	switch name {
+	case "world_status":
+		mcp_write_tool_text(out, id, tool_world_status(s))
+	case "list_materials":
+		mcp_write_tool_text(out, id, tool_list_materials(s))
+	case "list_biomes":
+		mcp_write_tool_text(out, id, tool_list_biomes(s))
+	case "biome_map_view":
+		mcp_write_tool_text(out, id, tool_biome_map_view(s))
+	case "biome_map_paint":
+		text, failed := tool_biome_map_paint(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "biome_map_save":
+		text, failed := tool_biome_map_save(s)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tile_open":
+		text, failed := tool_tile_open(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tile_view":
+		text, failed := tool_tile_view(s)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tile_paint":
+		text, failed := tool_tile_paint(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tile_save":
+		text, failed := tool_tile_save(s)
+		mcp_write_tool_text(out, id, text, failed)
+	case "sandbox_open":
+		text, failed := tool_sandbox_open(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "enqueue_input":
+		text, failed := tool_enqueue_input(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tick":
+		mcp_write_tool_text(out, id, tool_tick(s, arguments))
+	case "observe":
+		text, failed := tool_observe(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "queue_peek":
+		mcp_write_tool_text(out, id, tool_queue_peek(s, arguments))
+	case:
+		mcp_write_tool_text(out, id, fmt.tprintf("unknown tool: %s", name), true)
+	}
+}
+
+// ------------------------------------------------------------
+// Reading the state
+// ------------------------------------------------------------
+
+tool_world_status :: proc(s: ^Sim) -> string {
+	b := strings.builder_make(context.temp_allocator)
+
+	m := s.world.biome_map
+	fmt.sbprintf(
+		&b, "biome map %dx%d pixels, one pixel is %d world cells\n",
+		m.width, m.height, s.world.biomes.cells_per_pixel,
+	)
+	if editor_can_save(s) {
+		strings.write_string(&b, "the map is connected, so it can be saved\n")
+	} else {
+		fmt.sbprintf(&b, "the map falls into %d separate regions, so a save is blocked\n", s.editor.component_count)
+	}
+
+	if s.tile_edit.open {
+		fmt.sbprintf(
+			&b, "tile open: %s (%s)\n",
+			s.world.biomes.names[s.tile_edit.biome],
+			s.world.biomes.tile_paths[s.tile_edit.tile],
+		)
+	} else {
+		strings.write_string(&b, "no tile is open\n")
+	}
+
+	fmt.sbprintf(
+		&b, "sandbox %dx%d at world (%d,%d), tick %d, seed %d\n",
+		s.sandbox.width, s.sandbox.height, s.sandbox.origin_x, s.sandbox.origin_y,
+		s.sandbox.tick, s.sandbox.seed,
+	)
+	fmt.sbprintf(&b, "input delay %d ticks\n", s.queue.delay)
+	write_queue_line(&b, s)
+	fmt.sbprintf(&b, "checksum 0x%016x\n", sandbox_checksum(&s.sandbox))
+	write_census_line(&b, s)
+	return strings.to_string(b)
+}
+
+tool_list_materials :: proc(s: ^Sim) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	table := s.world.materials
+
+	strings.write_string(&b, "idx glyph name    state    density fall hard flam cond tox life decays_to burns_to\n")
+	for material, i in table.materials {
+		fmt.sbprintf(
+			&b,
+			"% 3d %c     %-7s %-8s % 7.2f % 4d % 4d % 4d % 4d % 3d % 4d %-9s %s\n",
+			i,
+			rune(table.glyphs[i]),
+			table.names[i],
+			material.state,
+			material.density,
+			material.fall_speed,
+			material.hardness,
+			material.flammability,
+			material.conductivity,
+			material.toxicity,
+			material.lifetime,
+			table.names[table.decays_to[i]],
+			table.names[table.burns_to[i]],
+		)
+	}
+	strings.write_string(&b, "\nA denser material sinks through a lighter one that can flow.\n")
+	strings.write_string(&b, "life is the ticks a cell lives before it turns into decays_to. -1 means it lasts.\n")
+	return strings.to_string(b)
+}
+
+tool_list_biomes :: proc(s: ^Sim) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	table := s.world.biomes
+
+	strings.write_string(&b, "id glyph name       key color  generator fill      tile\n")
+	for biome, i in table.biomes {
+		tile_path := biome.tile == TILE_NONE ? "-" : table.tile_paths[biome.tile]
+		fmt.sbprintf(
+			&b,
+			"% 2d %c     %-10s 0x%08X %-9v %-9s %s\n",
+			i,
+			rune(biome_glyph(s, Biome_Id(i))),
+			table.names[i],
+			biome.key_color,
+			biome.generator,
+			s.world.materials.names[biome.fill_0],
+			tile_path,
+		)
+	}
+	fmt.sbprintf(&b, "\nOutside the map every region is %s.\n", table.names[table.off_map_biome])
+	strings.write_string(&b, "A biome with generator = tile repeats its tile. Open it with tile_open.\n")
+	return strings.to_string(b)
+}
+
+// ------------------------------------------------------------
+// The biome map editor
+// ------------------------------------------------------------
+
+tool_biome_map_view :: proc(s: ^Sim) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	m := s.world.biome_map
+
+	fmt.sbprintf(
+		&b, "biome map %dx%d, one pixel is %d world cells\n",
+		m.width, m.height, s.world.biomes.cells_per_pixel,
+	)
+	fmt.sbprintf(
+		&b, "world cell (0,0) is at map pixel (%d,%d)\n",
+		s.world.biomes.origin_pixel_x, s.world.biomes.origin_pixel_y,
+	)
+
+	write_column_ruler(&b, 0, m.width, 1)
+
+	seen: [256]bool
+	empty_seen := false
+	for y in i32(0) ..< m.height {
+		fmt.sbprintf(&b, "% 4d ", y)
+		for x in i32(0) ..< m.width {
+			id := biome_map_at(m, x, y)
+			if id == BIOME_EMPTY {
+				empty_seen = true
+				strings.write_byte(&b, '.')
+			} else {
+				seen[id] = true
+				strings.write_byte(&b, biome_glyph(s, id))
+			}
+		}
+		strings.write_string(&b, "\n")
+	}
+
+	strings.write_string(&b, "legend:")
+	for present, i in seen {
+		if !present do continue
+		fmt.sbprintf(&b, " %c=%s", rune(biome_glyph(s, Biome_Id(i))), s.world.biomes.names[i])
+	}
+	if empty_seen {
+		fmt.sbprintf(&b, " .=empty (generates as %s)", s.world.biomes.names[s.world.biomes.off_map_biome])
+	}
+	strings.write_string(&b, "\n")
+
+	if editor_can_save(s) {
+		strings.write_string(&b, "the map is connected, so it can be saved\n")
+	} else {
+		fmt.sbprintf(
+			&b,
+			"the map falls into %d separate regions, so a save is blocked until they are joined\n",
+			s.editor.component_count,
+		)
+	}
+	return strings.to_string(b)
+}
+
+tool_biome_map_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	x := i32(json_int_field(arguments, "x", 0))
+	y := i32(json_int_field(arguments, "y", 0))
+
+	painted := 0
+
+	if rows, has_rows := json_rows_field(arguments, "rows"); has_rows {
+		// A picture. Each character names a biome by its glyph, and a
+		// space or a dot leaves the pixel alone.
+		for row, dy in rows {
+			for i in 0 ..< len(row) {
+				glyph := row[i]
+				if glyph == ' ' || glyph == '.' do continue
+
+				id, found := biome_by_glyph(s, glyph)
+				if !found {
+					return fmt.tprintf(
+						"row %d holds %q, which is no biome glyph. Call list_biomes to see them.",
+						dy, rune(glyph),
+					), true
+				}
+				if editor_paint_pixel(s, x + i32(i), y + i32(dy), id) do painted += 1
+			}
+		}
+	} else {
+		name := json_string_field(arguments, "biome", "")
+		if name == "" {
+			return "give a biome name, or rows of biome glyphs. Call list_biomes to see them.", true
+		}
+
+		id := BIOME_EMPTY
+		if name != "empty" {
+			idx, found := find_biome_index(s.world.biomes, name)
+			if !found {
+				return fmt.tprintf("unknown biome %q. Call list_biomes to see the names.", name), true
+			}
+			id = Biome_Id(idx)
+		}
+
+		width := i32(max(json_int_field(arguments, "width", 1), 1))
+		height := i32(max(json_int_field(arguments, "height", 1), 1))
+		for py in y ..< y + height {
+			for px in x ..< x + width {
+				if editor_paint_pixel(s, px, py, id) do painted += 1
+			}
+		}
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "painted %d map pixels\n", painted)
+	if editor_can_save(s) {
+		strings.write_string(&b, "the map is connected, so it can be saved\n")
+	} else {
+		fmt.sbprintf(
+			&b,
+			"the map now falls into %d separate regions, so a save is blocked until they are joined\n",
+			s.editor.component_count,
+		)
+	}
+	if painted > 0 {
+		strings.write_string(&b, "the world changed at once; call sandbox_open to bring the change into the physics\n")
+	}
+	return strings.to_string(b), false
+}
+
+tool_biome_map_save :: proc(s: ^Sim) -> (string, bool) {
+	message, ok := editor_save_map(s)
+	return message, !ok
+}
+
+// ------------------------------------------------------------
+// The tile editor
+// ------------------------------------------------------------
+
+tool_tile_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	name := json_string_field(arguments, "biome", "")
+	idx, found := find_biome_index(s.world.biomes, name)
+	if !found {
+		return fmt.tprintf("unknown biome %q. Call list_biomes to see the names.", name), true
+	}
+
+	message, ok := tile_editor_begin(s, Biome_Id(idx))
+	if !ok do return message, true
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%s\n", message)
+	fmt.sbprintf(
+		&b, "the tile is %dx%d cells and lives in %s\n",
+		i32(TILE_SIZE), i32(TILE_SIZE), s.world.biomes.tile_paths[s.tile_edit.tile],
+	)
+	fmt.sbprintf(&b, "every region of %s repeats it\n", s.world.biomes.names[s.tile_edit.biome])
+	return strings.to_string(b), false
+}
+
+tool_tile_view :: proc(s: ^Sim) -> (string, bool) {
+	if !s.tile_edit.open {
+		return "no tile is open. Call tile_open with a biome name first.", true
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(
+		&b, "tile of %s, %dx%d cells\n",
+		s.world.biomes.names[s.tile_edit.biome], i32(TILE_SIZE), i32(TILE_SIZE),
+	)
+	cells := tile_cells(s.world.tiles, s.tile_edit.tile)
+	write_cell_map(&b, s, cells, TILE_SIZE, TILE_SIZE, 0, 0, 1)
+	return strings.to_string(b), false
+}
+
+tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	if !s.tile_edit.open {
+		return "no tile is open. Call tile_open with a biome name first.", true
+	}
+
+	x := i32(json_int_field(arguments, "x", 0))
+	y := i32(json_int_field(arguments, "y", 0))
+
+	painted := 0
+
+	if rows, has_rows := json_rows_field(arguments, "rows"); has_rows {
+		// A picture, in material glyphs. A space leaves a cell alone.
+		for row, dy in rows {
+			for i in 0 ..< len(row) {
+				glyph := row[i]
+				if glyph == ' ' do continue
+
+				material, found := material_by_glyph(s, glyph)
+				if !found {
+					return fmt.tprintf(
+						"row %d holds %q, which is no material glyph. Call list_materials to see them.",
+						dy, rune(glyph),
+					), true
+				}
+				if tile_editor_paint_cell(s, x + i32(i), y + i32(dy), material) do painted += 1
+			}
+		}
+	} else {
+		name := json_string_field(arguments, "material", "")
+		if name == "" {
+			return "give a material name, or rows of material glyphs. Call list_materials to see them.", true
+		}
+		idx, found := find_material_index(s.world.materials, name)
+		if !found {
+			return fmt.tprintf("unknown material %q. Call list_materials to see the names.", name), true
+		}
+
+		width := i32(max(json_int_field(arguments, "width", 1), 1))
+		height := i32(max(json_int_field(arguments, "height", 1), 1))
+		for py in y ..< y + height {
+			for px in x ..< x + width {
+				if tile_editor_paint_cell(s, px, py, Cell(idx)) do painted += 1
+			}
+		}
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "painted %d tile cells\n", painted)
+	if painted > 0 {
+		fmt.sbprintf(
+			&b,
+			"every %s region in the world changed at once; call tile_save to write the file, or sandbox_open to bring the change into the physics\n",
+			s.world.biomes.names[s.tile_edit.biome],
+		)
+	}
+	return strings.to_string(b), false
+}
+
+tool_tile_save :: proc(s: ^Sim) -> (string, bool) {
+	message, ok := tile_editor_save_tile(s)
+	return message, !ok
+}
+
+// ------------------------------------------------------------
+// The sandbox
+// ------------------------------------------------------------
+
+tool_sandbox_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	// Every field defaults to what the sandbox already has, so a call
+	// with no arguments reloads the same rectangle from the world.
+	width := i32(clamp(json_int_field(arguments, "width", i64(s.sandbox.width)), 1, SANDBOX_MAX_WIDTH))
+	height := i32(clamp(json_int_field(arguments, "height", i64(s.sandbox.height)), 1, SANDBOX_MAX_HEIGHT))
+	seed := u64(json_int_field(arguments, "seed", 1))
+	delay := u8(clamp(json_int_field(arguments, "input_delay", SANDBOX_DEFAULT_DELAY), 0, INPUT_DELAY_MAX))
+
+	origin_x := i32(json_int_field(arguments, "x", i64(s.sandbox.origin_x)))
+	origin_y := i32(json_int_field(arguments, "y", i64(s.sandbox.origin_y)))
+
+	// A biome name is easier to aim with than a world coordinate.
+	found_biome := ""
+	if name := json_string_field(arguments, "biome", ""); name != "" {
+		idx, found := find_biome_index(s.world.biomes, name)
+		if !found {
+			return fmt.tprintf("unknown biome %q. Call list_biomes to see the names.", name), true
+		}
+		px, py, painted := biome_first_pixel(s, Biome_Id(idx))
+		if !painted {
+			return fmt.tprintf("%s is not painted on the biome map yet", name), true
+		}
+		cpp := s.world.biomes.cells_per_pixel
+		origin_x = (px - s.world.biomes.origin_pixel_x) * cpp
+		origin_y = (py - s.world.biomes.origin_pixel_y) * cpp
+		found_biome = name
+	}
+
+	if err := sim_open_sandbox(s, width, height, origin_x, origin_y, seed, delay); err != .None {
+		return fmt.tprintf("the sandbox could not be opened: %v", err), true
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "sandbox %dx%d filled from world (%d,%d)", width, height, origin_x, origin_y)
+	if found_biome != "" do fmt.sbprintf(&b, ", the first %s region", found_biome)
+	strings.write_string(&b, "\n")
+	fmt.sbprintf(
+		&b, "seed %d, input delay %d ticks, tick %d, the queue is empty\n",
+		seed, delay, s.sandbox.tick,
+	)
+	fmt.sbprintf(&b, "checksum 0x%016x\n", sandbox_checksum(&s.sandbox))
+	write_census_line(&b, s)
+	return strings.to_string(b), false
+}
+
+tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	kind_name := json_string_field(arguments, "kind", "")
+	kind, kind_ok := parse_command_kind(kind_name)
+	if !kind_ok {
+		return fmt.tprintf("unknown kind %q. Use spawn, erase, ignite, or noop.", kind_name), true
+	}
+
+	command := Input_Command {
+		kind   = kind,
+		x      = i32(json_int_field(arguments, "x", 0)),
+		y      = i32(json_int_field(arguments, "y", 0)),
+		radius = u16(clamp(json_int_field(arguments, "radius", 0), 0, 512)),
+		source = u8(clamp(json_int_field(arguments, "source", 0), 0, 255)),
+	}
+
+	material_name := json_string_field(arguments, "material", "")
+	if kind == .Spawn {
+		if material_name == "" {
+			return "spawn needs a material name. Call list_materials to see the names.", true
+		}
+		index, found := find_material_index(s.world.materials, material_name)
+		if !found {
+			return fmt.tprintf("unknown material %q. Call list_materials to see the names.", material_name), true
+		}
+		command.material = u16(index)
+	}
+
+	at_tick := i64(-1)
+	if json_has_field(arguments, "tick") {
+		at_tick = json_int_field(arguments, "tick", -1)
+	}
+
+	out, status := sim_enqueue(s, command, at_tick)
+
+	switch status {
+	case .Bad_Source:
+		return fmt.tprintf("source must be 0 to %d", INPUT_SOURCES-1), true
+	case .Too_Far:
+		return fmt.tprintf(
+			"tick %d is too far ahead. The queue holds ticks %d to %d.",
+			at_tick, s.sandbox.tick, s.sandbox.tick + INPUT_SLOT_COUNT - 1,
+		), true
+	case .Slot_Full:
+		return fmt.tprintf(
+			"tick %d already holds %d commands, which is the limit. Use another tick.",
+			at_tick, INPUT_PER_SLOT,
+		), true
+	case .Accepted, .Late:
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "queued %v", out.kind)
+	if kind == .Spawn do fmt.sbprintf(&b, " %s", s.world.materials.names[out.material])
+	fmt.sbprintf(&b, " at (%d,%d) radius %d\n", out.x, out.y, out.radius)
+	fmt.sbprintf(
+		&b, "runs on tick %d (now %d, delay %d), source %d, seq %d\n",
+		out.tick, s.sandbox.tick, s.queue.delay, out.source, out.seq,
+	)
+
+	if status == .Late {
+		fmt.sbprintf(&b, "the tick you asked for had already run, so the command moved to tick %d\n", out.tick)
+	}
+	if out.tick > s.sandbox.tick {
+		fmt.sbprintf(&b, "call tick with count %d to reach it\n", out.tick - s.sandbox.tick + 1)
+	}
+	write_queue_line(&b, s)
+	return strings.to_string(b), false
+}
+
+tool_tick :: proc(s: ^Sim, arguments: json.Object) -> string {
+	count := int(clamp(json_int_field(arguments, "count", 1), 1, 100000))
+
+	start := s.sandbox.tick
+	applied := sim_run(s, count)
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "ran %d ticks: %d -> %d\n", count, start, s.sandbox.tick)
+	fmt.sbprintf(&b, "applied %d commands\n", applied)
+	write_queue_line(&b, s)
+	fmt.sbprintf(&b, "checksum 0x%016x\n", sandbox_checksum(&s.sandbox))
+	write_census_line(&b, s)
+	return strings.to_string(b)
+}
+
+tool_observe :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	if json_string_field(arguments, "source", "sandbox") == "world" {
+		return observe_world(s, arguments)
+	}
+	return observe_sandbox(s, arguments)
+}
+
+@(private = "file")
+observe_sandbox :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	sb := &s.sandbox
+	ox := i32(clamp(json_int_field(arguments, "x", 0), 0, i64(sb.width-1)))
+	oy := i32(clamp(json_int_field(arguments, "y", 0), 0, i64(sb.height-1)))
+	sample := i32(clamp(json_int_field(arguments, "sample", 1), 1, 64))
+
+	width := i32(clamp(json_int_field(arguments, "width", i64(sb.width)), 1, i64(sb.width-ox)))
+	height := i32(clamp(json_int_field(arguments, "height", i64(sb.height)), 1, i64(sb.height-oy)))
+
+	columns := (width + sample - 1) / sample
+	rows := (height + sample - 1) / sample
+	if message, ok := check_map_size(columns, rows); !ok do return message, true
+
+	// Copy the region out at the sample rate, so one renderer draws the
+	// sandbox, the world, and a tile.
+	view := make([]Cell, int(columns) * int(rows), context.temp_allocator)
+	for r in 0 ..< rows {
+		for c in 0 ..< columns {
+			view[int(r)*int(columns) + int(c)] = sample_sandbox(s, ox + c*sample, oy + r*sample, sample)
+		}
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(
+		&b, "sandbox at tick %d, region (%d,%d) %dx%d of %dx%d",
+		sb.tick, ox, oy, width, height, sb.width, sb.height,
+	)
+	if sample > 1 do fmt.sbprintf(&b, ", one character per %dx%d cells", sample, sample)
+	fmt.sbprintf(&b, "\nthe sandbox sits at world (%d,%d)\n", sb.origin_x, sb.origin_y)
+
+	write_cell_map(&b, s, view, columns, rows, ox, oy, sample)
+	return strings.to_string(b), false
+}
+
+@(private = "file")
+observe_world :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	step := i32(clamp(json_int_field(arguments, "step", 1), 1, 4096))
+	ox := i32(json_int_field(arguments, "x", i64(s.sandbox.origin_x)))
+	oy := i32(json_int_field(arguments, "y", i64(s.sandbox.origin_y)))
+	columns := i32(clamp(json_int_field(arguments, "width", i64(s.sandbox.width)), 1, 4096))
+	rows := i32(clamp(json_int_field(arguments, "height", i64(s.sandbox.height)), 1, 4096))
+
+	if message, ok := check_map_size(columns, rows); !ok do return message, true
+
+	view := make([]Cell, int(columns) * int(rows), context.temp_allocator)
+	generate(s.world, World_View{x = ox, y = oy, w = columns, h = rows, step = step}, view)
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(
+		&b, "world as the generator makes it, from (%d,%d), %dx%d characters",
+		ox, oy, columns, rows,
+	)
+	if step > 1 do fmt.sbprintf(&b, ", one character per %d world cells", step)
+	strings.write_string(&b, "\n")
+
+	// Which biome the corners belong to, so a reader can place the view.
+	fmt.sbprintf(
+		&b, "top left is %s, bottom right is %s\n",
+		s.world.biomes.names[world_biome_at(s.world, ox, oy)],
+		s.world.biomes.names[world_biome_at(s.world, ox + (columns-1)*step, oy + (rows-1)*step)],
+	)
+
+	write_cell_map(&b, s, view, columns, rows, ox, oy, step)
+	return strings.to_string(b), false
+}
+
+tool_queue_peek :: proc(s: ^Sim, arguments: json.Object) -> string {
+	ticks := int(clamp(json_int_field(arguments, "ticks", 16), 1, INPUT_SLOT_COUNT))
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "tick %d, input delay %d ticks\n", s.sandbox.tick, s.queue.delay)
+
+	total := 0
+	for offset in 0 ..< ticks {
+		when_ := s.sandbox.tick + u64(offset)
+		waiting := input_queue_peek(&s.queue, when_)
+		if len(waiting) == 0 do continue
+
+		fmt.sbprintf(&b, "tick %d:\n", when_)
+		for command in waiting {
+			fmt.sbprintf(&b, "  %v", command.kind)
+			if command.kind == .Spawn do fmt.sbprintf(&b, " %s", s.world.materials.names[command.material])
+			fmt.sbprintf(
+				&b, " at (%d,%d) radius %d, source %d, seq %d\n",
+				command.x, command.y, command.radius, command.source, command.seq,
+			)
+			total += 1
+		}
+	}
+
+	if total == 0 do fmt.sbprintf(&b, "no commands wait in the next %d ticks\n", ticks)
+	write_queue_line(&b, s)
+	return strings.to_string(b)
+}
+
+// ------------------------------------------------------------
+// Shared pieces
+// ------------------------------------------------------------
+
+parse_command_kind :: proc(name: string) -> (Command_Kind, bool) {
+	switch name {
+	case "noop":   return .Noop, true
+	case "spawn":  return .Spawn, true
+	case "erase":  return .Erase, true
+	case "ignite": return .Ignite, true
+	}
+	return .Noop, false
+}
+
+check_map_size :: proc(columns, rows: i32) -> (string, bool) {
+	if int(columns) * int(rows) <= MCP_MAX_MAP_CELLS do return "", true
+	return fmt.tprintf(
+		"the region holds %d characters, and the limit is %d. Ask for a smaller region, or raise sample or step.",
+		int(columns)*int(rows), MCP_MAX_MAP_CELLS,
+	), false
+}
+
+/*
+One character per biome, for the map view and for painting a picture.
+
+The first letter of the name is the obvious choice. Two biomes can
+start with the same letter, so a clash falls back to the id. The
+result depends only on the table, so the glyph a view prints is the
+glyph a paint accepts.
+*/
+biome_glyph :: proc(s: ^Sim, id: Biome_Id) -> u8 {
+	names := s.world.biomes.names
+	if int(id) >= len(names) || len(names[id]) == 0 do return '?'
+
+	wanted := upper_byte(names[id][0])
+	for i in 0 ..< int(id) {
+		if len(names[i]) > 0 && upper_byte(names[i][0]) == wanted {
+			// Taken by an earlier biome, so use the id instead.
+			return int(id) < 10 ? byte('0') + byte(id) : '?'
+		}
+	}
+	return wanted
+}
+
+biome_by_glyph :: proc(s: ^Sim, glyph: u8) -> (Biome_Id, bool) {
+	for _, i in s.world.biomes.biomes {
+		if biome_glyph(s, Biome_Id(i)) == glyph do return Biome_Id(i), true
+	}
+	return BIOME_EMPTY, false
+}
+
+material_by_glyph :: proc(s: ^Sim, glyph: u8) -> (Cell, bool) {
+	for g, i in s.world.materials.glyphs {
+		if g == glyph do return Cell(i), true
+	}
+	return MATERIAL_AIR, false
+}
+
+upper_byte :: proc(c: u8) -> u8 {
+	return c >= 'a' && c <= 'z' ? c - 32 : c
+}
+
+// The first map pixel a biome owns, for aiming the sandbox at it.
+biome_first_pixel :: proc(s: ^Sim, id: Biome_Id) -> (px: i32, py: i32, found: bool) {
+	m := s.world.biome_map
+	for y in i32(0) ..< m.height {
+		for x in i32(0) ..< m.width {
+			if biome_map_at(m, x, y) == id do return x, y, true
+		}
+	}
+	return 0, 0, false
+}
+
+/*
+Pick one material for a block of sandbox cells.
+
+The first cell that is not air wins, so a thin stream stays visible
+when the map is sampled down.
+*/
+sample_sandbox :: proc(s: ^Sim, x, y, sample: i32) -> Cell {
+	if sample == 1 do return sandbox_cell(&s.sandbox, x, y)
+
+	for dy in 0 ..< sample {
+		for dx in 0 ..< sample {
+			material := sandbox_cell(&s.sandbox, x+dx, y+dy)
+			if material != MATERIAL_AIR do return material
+		}
+	}
+	return MATERIAL_AIR
+}
+
+// Two ruler lines carrying the tens and the units of the coordinate.
+write_column_ruler :: proc(b: ^strings.Builder, origin, columns, step: i32) {
+	strings.write_string(b, "     ")
+	for c in 0 ..< columns {
+		x := origin + c*step
+		strings.write_byte(b, x % 10 == 0 ? byte('0') + byte(abs(x/10) % 10) : ' ')
+	}
+	strings.write_string(b, "\n     ")
+	for c in 0 ..< columns {
+		x := origin + c*step
+		strings.write_byte(b, byte('0') + byte(abs(x) % 10))
+	}
+	strings.write_string(b, "\n")
+}
+
+/*
+Draw a rectangle of cells as characters, with a ruler and a legend.
+
+The sandbox, the generated world, and an open tile all reduce to a
+flat slice of cells, so one procedure draws all three.
+*/
+write_cell_map :: proc(
+	b: ^strings.Builder,
+	s: ^Sim,
+	cells: []Cell,
+	columns, rows: i32,
+	origin_x, origin_y, step: i32,
+) {
+	glyphs := s.world.materials.glyphs
+	names := s.world.materials.names
+
+	write_column_ruler(b, origin_x, columns, step)
+
+	seen: [256]bool
+	for r in 0 ..< rows {
+		fmt.sbprintf(b, "% 4d ", origin_y + r*step)
+		for c in 0 ..< columns {
+			material := cells[int(r)*int(columns) + int(c)]
+			if int(material) < len(glyphs) {
+				seen[material] = true
+				strings.write_byte(b, glyphs[material])
+			} else {
+				strings.write_byte(b, '?')
+			}
+		}
+		strings.write_string(b, "\n")
+	}
+
+	strings.write_string(b, "legend:")
+	for present, i in seen {
+		if !present do continue
+		fmt.sbprintf(b, " %c=%s", rune(glyphs[i]), names[i])
+	}
+	strings.write_string(b, "\n")
+}
+
+write_queue_line :: proc(b: ^strings.Builder, s: ^Sim) {
+	fmt.sbprintf(
+		b,
+		"queue: %d waiting, %d accepted, %d late, %d rejected, %d applied\n",
+		input_queue_depth(&s.queue), s.queue.accepted, s.queue.late, s.queue.rejected, s.queue.applied,
+	)
+}
+
+write_census_line :: proc(b: ^strings.Builder, s: ^Sim) {
+	counts := make([]int, len(s.world.materials.materials), context.temp_allocator)
+	sandbox_census(&s.sandbox, counts)
+
+	strings.write_string(b, "cells:")
+	for count, i in counts {
+		if count == 0 do continue
+		fmt.sbprintf(b, " %s %d", s.world.materials.names[i], count)
+	}
+	strings.write_string(b, "\n")
+}
+
+// ------------------------------------------------------------
+// Tests (run with: odin test src  from repo root)
+// ------------------------------------------------------------
+
+@(private = "file")
+tool_sim :: proc(t: ^testing.T) -> Sim {
+	s: Sim
+	err := sim_load(&s)
+	testing.expect(t, err == .None, "the simulation must load")
+	return s
+}
+
+@(private = "file")
+arguments_of :: proc(t: ^testing.T, text: string) -> json.Object {
+	value, err := json.parse_string(text, .JSON, true, context.temp_allocator)
+	testing.expect(t, err == .None, "the test arguments must parse")
+	object, ok := value.(json.Object)
+	testing.expect(t, ok)
+	return object
+}
+
+@(test)
+test_tool_list_is_valid_json :: proc(t: ^testing.T) {
+	value, err := json.parse_string(MCP_TOOLS_JSON, .JSON, true, context.temp_allocator)
+	testing.expect(t, err == .None, "the tool list must be valid JSON")
+
+	object, ok := value.(json.Object)
+	testing.expect(t, ok)
+
+	tools, has_tools := object["tools"]
+	testing.expect(t, has_tools, "the list must hold a tools array")
+
+	array, is_array := tools.(json.Array)
+	testing.expect(t, is_array)
+	testing.expect(t, len(array) == 15, "fifteen tools must be listed")
+
+	for entry in array {
+		tool, tool_ok := entry.(json.Object)
+		testing.expect(t, tool_ok)
+		testing.expect(t, json_string_field(tool, "name", "") != "", "a tool needs a name")
+		testing.expect(t, json_string_field(tool, "description", "") != "", "a tool needs a description")
+		_, has_schema := json_object_field(tool, "inputSchema")
+		testing.expect(t, has_schema, "a tool needs an input schema")
+	}
+}
+
+@(test)
+test_tool_list_fits_on_one_line :: proc(t: ^testing.T) {
+	// The transport puts one message on one line. The tool list is
+	// written across several lines for a reader, so the writer must
+	// fold it back before it goes out.
+	listing := MCP_TOOLS_JSON
+	folded := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< len(listing) {
+		if listing[i] == '\n' do continue
+		strings.write_byte(&folded, listing[i])
+	}
+
+	text := strings.to_string(folded)
+	testing.expect(t, !strings.contains(text, "\n"), "the folded list must hold no newline")
+
+	_, err := json.parse_string(text, .JSON, true, context.temp_allocator)
+	testing.expect(t, err == .None, "the folded list must still be valid JSON")
+}
+
+@(test)
+test_biome_glyphs_round_trip :: proc(t: ^testing.T) {
+	// A view prints these and a paint reads them back, so two biomes
+	// may not share one.
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	for _, i in s.world.biomes.biomes {
+		glyph := biome_glyph(&s, Biome_Id(i))
+		testing.expectf(t, glyph != '.', "%s must not take the empty glyph", s.world.biomes.names[i])
+
+		id, found := biome_by_glyph(&s, glyph)
+		testing.expectf(
+			t, found && int(id) == i,
+			"%s must round trip through its glyph", s.world.biomes.names[i],
+		)
+	}
+}
+
+@(test)
+test_biome_map_paint_and_view :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text, failed := tool_biome_map_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":2,"height":2,"biome":"Lake"}`))
+	testing.expect(t, !failed, "a good paint must be accepted")
+	testing.expect(t, strings.contains(text, "painted 4 map pixels"))
+
+	lake, _ := find_biome_index(s.world.biomes, "Lake")
+	testing.expect(t, int(biome_map_at(s.world.biome_map, 0, 0)) == lake, "the map must hold the paint")
+	testing.expect(t, int(biome_map_at(s.world.biome_map, 1, 1)) == lake)
+
+	view := tool_biome_map_view(&s)
+	testing.expect(t, strings.contains(view, "=Lake"), "the legend must name what is on the map")
+}
+
+@(test)
+test_biome_map_paint_takes_a_picture :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	// Built by hand, not with a format string: fmt reads a brace as a
+	// directive, so a JSON literal cannot go through tprintf.
+	glyph := [2]u8{biome_glyph(&s, Biome_Id(0)), biome_glyph(&s, Biome_Id(0))}
+	row := string(glyph[:])
+	rows := strings.concatenate(
+		{`{"x":2,"y":2,"rows":["`, row, `","`, row, `"]}`},
+		context.temp_allocator,
+	)
+
+	text, failed := tool_biome_map_paint(&s, arguments_of(t, rows))
+	testing.expect(t, !failed)
+	testing.expect(t, strings.contains(text, "painted"))
+	testing.expect(t, biome_map_at(s.world.biome_map, 2, 2) == 0, "the picture must land at x,y")
+	testing.expect(t, biome_map_at(s.world.biome_map, 3, 3) == 0)
+}
+
+@(test)
+test_biome_map_paint_rejects_what_it_cannot_read :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	_, failed := tool_biome_map_paint(&s, arguments_of(t, `{"x":0,"y":0,"rows":["ZZ"]}`))
+	testing.expect(t, failed, "an unknown glyph must fail")
+
+	_, unknown := tool_biome_map_paint(&s, arguments_of(t, `{"x":0,"y":0,"biome":"Atlantis"}`))
+	testing.expect(t, unknown, "an unknown biome must fail")
+}
+
+@(test)
+test_biome_map_save_is_blocked_when_the_map_is_cut_in_two :: proc(t: ^testing.T) {
+	// The same gate the world editor applies, reached through a tool.
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	m := s.world.biome_map
+	for y in i32(0) ..< m.height {
+		for x in i32(0) ..< m.width do editor_erase_pixel(&s, x, y)
+	}
+	editor_paint_pixel(&s, 0, 0, 0)
+	editor_paint_pixel(&s, 5, 5, 0)
+
+	text, failed := tool_biome_map_save(&s)
+	testing.expect(t, failed, "a cut map must not save")
+	testing.expect(t, strings.contains(text, "separate regions"), "the reply must say why")
+}
+
+@(test)
+test_tile_tools_need_an_open_tile :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	_, view_failed := tool_tile_view(&s)
+	testing.expect(t, view_failed, "there is no tile open yet")
+
+	_, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"material":"Gold"}`))
+	testing.expect(t, paint_failed, "painting needs an open tile")
+}
+
+@(test)
+test_tile_open_refuses_a_flat_biome :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	// Sky fills flat, so it has no tile to paint.
+	text, failed := tool_tile_open(&s, arguments_of(t, `{"biome":"Sky"}`))
+	testing.expect(t, failed, "a flat biome has no tile")
+	testing.expect(t, strings.contains(text, "generator = tile"), "the reply must say how to give it one")
+}
+
+@(test)
+test_tile_open_paint_and_view :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	opened, failed := tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+	testing.expect(t, !failed, "Coalmine owns a tile")
+	testing.expect(t, strings.contains(opened, "Coalmine"))
+	testing.expect(t, s.tile_edit.open)
+
+	text, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":4,"height":4,"material":"Gold"}`))
+	testing.expect(t, !paint_failed)
+	testing.expect(t, strings.contains(text, "painted 16 tile cells"))
+
+	gold, _ := find_material_index(s.world.materials, "Gold")
+	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 0, 0)) == gold, "the tile must hold the paint")
+	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 3, 3)) == gold)
+
+	view, view_failed := tool_tile_view(&s)
+	testing.expect(t, !view_failed)
+	testing.expect(t, strings.contains(view, "=Gold"), "the legend must name the paint")
+}
+
+@(test)
+test_tile_paint_takes_a_picture :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+
+	// A space leaves a cell alone, so a picture can be a stencil.
+	before := tile_at(s.world.tiles, s.tile_edit.tile, 1, 0)
+	_, failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"rows":["G G","GGG"]}`))
+	testing.expect(t, !failed)
+
+	gold, _ := find_material_index(s.world.materials, "Gold")
+	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 0, 0)) == gold)
+	testing.expect(t, tile_at(s.world.tiles, s.tile_edit.tile, 1, 0) == before, "a space must leave the cell alone")
+	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 2, 0)) == gold)
+	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 1, 1)) == gold)
+}
+
+@(test)
+test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
+	// The point of the editors: paint once, and every region of that
+	// biome changes with it, right down into the physics.
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+	tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":64,"height":64,"material":"Gold"}`))
+
+	text, failed := tool_sandbox_open(&s, arguments_of(t, `{"biome":"Coalmine","width":32,"height":32}`))
+	testing.expect(t, !failed, "the sandbox must open on a Coalmine region")
+	testing.expect(t, strings.contains(text, "Gold"), "the census must be all gold")
+
+	gold, _ := find_material_index(s.world.materials, "Gold")
+	counts := make([]int, len(s.world.materials.materials))
+	defer delete(counts)
+	sandbox_census(&s.sandbox, counts)
+	testing.expect(t, counts[gold] == 32*32, "every cell must come from the painted tile")
+}
+
+@(test)
+test_sandbox_open_keeps_what_it_is_not_told :: proc(t: ^testing.T) {
+	// A bare call reloads the same rectangle, which is how an edit
+	// reaches the physics.
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	tool_sandbox_open(&s, arguments_of(t, `{"x":100,"y":200,"width":40,"height":24}`))
+	tool_tick(&s, arguments_of(t, `{"count":5}`))
+	testing.expect(t, s.sandbox.tick == 5)
+
+	_, failed := tool_sandbox_open(&s, arguments_of(t, `{}`))
+	testing.expect(t, !failed)
+	testing.expect(t, s.sandbox.origin_x == 100 && s.sandbox.origin_y == 200, "the place must survive")
+	testing.expect(t, s.sandbox.width == 40 && s.sandbox.height == 24, "the size must survive")
+	testing.expect(t, s.sandbox.tick == 0, "the run starts again")
+}
+
+@(test)
+test_enqueue_reports_the_execution_tick :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text, failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":16,"y":0,"radius":2,"material":"Sand"}`))
+	testing.expect(t, !failed, "a good command must be accepted")
+	testing.expect(t, strings.contains(text, "runs on tick 2"), "the reply must name the execution tick")
+	testing.expect(t, strings.contains(text, "Sand"), "the reply must name the material")
+	testing.expect(t, input_queue_depth(&s.queue) == 1, "the command must wait in the queue")
+}
+
+@(test)
+test_enqueue_rejects_bad_arguments :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text, failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":1,"y":1,"material":"Unobtainium"}`))
+	testing.expect(t, failed, "an unknown material must fail")
+	testing.expect(t, strings.contains(text, "list_materials"), "the reply must say how to recover")
+
+	_, kind_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"explode","x":1,"y":1}`))
+	testing.expect(t, kind_failed, "an unknown kind must fail")
+
+	far, far_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"noop","x":0,"y":0,"tick":100000}`))
+	testing.expect(t, far_failed, "a far tick must fail")
+	testing.expect(t, strings.contains(far, "too far ahead"), "the reply must explain the limit")
+
+	_, spawn_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":1,"y":1}`))
+	testing.expect(t, spawn_failed, "spawn without a material must fail")
+
+	_, erase_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"erase","x":1,"y":1,"radius":2}`))
+	testing.expect(t, !erase_failed, "erase needs no material")
+}
+
+@(test)
+test_tick_runs_the_queued_command :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	// Inside the Sky biome, which fills with Air, so the terrain behind
+	// does not hide the sand. Off the map would be Deep_Rock.
+	tool_sandbox_open(&s, arguments_of(t, `{"x":0,"y":-4000,"width":32,"height":24}`))
+	tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":16,"y":0,"radius":1,"material":"Sand"}`))
+
+	early := tool_tick(&s, arguments_of(t, `{"count":1}`))
+	testing.expect(t, strings.contains(early, "applied 0 commands"), "the command must wait for its tick")
+
+	late := tool_tick(&s, arguments_of(t, `{"count":2}`))
+	testing.expect(t, strings.contains(late, "applied 1 commands"), "the command must run on its tick")
+	testing.expect(t, strings.contains(late, "Sand"), "the census must show the sand")
+}
+
+@(test)
+test_observe_reads_the_sandbox_and_the_world :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text, failed := tool_observe(&s, arguments_of(t, `{}`))
+	testing.expect(t, !failed)
+	testing.expect(t, strings.contains(text, "sandbox at tick 0"), "the default source is the sandbox")
+	testing.expect(t, strings.contains(text, "legend:"))
+
+	world, world_failed := tool_observe(&s, arguments_of(t, `{"source":"world","width":40,"height":20,"step":256}`))
+	testing.expect(t, !world_failed)
+	testing.expect(t, strings.contains(world, "world as the generator makes it"))
+	testing.expect(t, strings.contains(world, "one character per 256 world cells"))
+}
+
+@(test)
+test_observe_refuses_a_flood :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+	tool_sandbox_open(&s, arguments_of(t, `{"width":1000,"height":1000}`))
+
+	text, failed := tool_observe(&s, arguments_of(t, `{}`))
+	testing.expect(t, failed, "a huge map must be refused")
+	testing.expect(t, strings.contains(text, "sample"), "the reply must say how to recover")
+
+	sampled, sampled_failed := tool_observe(&s, arguments_of(t, `{"sample":16}`))
+	testing.expect(t, !sampled_failed, "sampling must bring the map inside the limit")
+	testing.expect(t, strings.contains(sampled, "one character per 16x16 cells"))
+}
+
+@(test)
+test_queue_peek_lists_the_waiting_commands :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	empty := tool_queue_peek(&s, arguments_of(t, `{}`))
+	testing.expect(t, strings.contains(empty, "no commands wait"))
+
+	tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":5,"y":6,"radius":1,"material":"Water"}`))
+	listed := tool_queue_peek(&s, arguments_of(t, `{}`))
+	testing.expect(t, strings.contains(listed, "tick 2:"), "the peek must group by tick")
+	testing.expect(t, strings.contains(listed, "Water at (5,6)"), "the peek must describe the command")
+}
+
+@(test)
+test_status_reports_every_part :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text := tool_world_status(&s)
+	testing.expect(t, strings.contains(text, "biome map"))
+	testing.expect(t, strings.contains(text, "no tile is open"))
+	testing.expect(t, strings.contains(text, "sandbox 128x72"))
+	testing.expect(t, strings.contains(text, "input delay 2 ticks"))
+	testing.expect(t, strings.contains(text, "checksum 0x"))
+	testing.expect(t, strings.contains(text, "queue: 0 waiting"))
+}
+
+@(test)
+test_lists_name_everything :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	materials := tool_list_materials(&s)
+	for name in s.world.materials.names {
+		testing.expectf(t, strings.contains(materials, name), "%s must be listed", name)
+	}
+
+	biomes := tool_list_biomes(&s)
+	for name in s.world.biomes.names {
+		testing.expectf(t, strings.contains(biomes, name), "%s must be listed", name)
+	}
+}
+
+@(test)
+test_a_slow_client_and_a_fast_client_agree :: proc(t: ^testing.T) {
+	// This is the point of the queue. One client sends every command
+	// before running any tick. The other sends a command, runs a tick,
+	// and sends the next. Both name the same execution ticks, so both
+	// sandboxes must match.
+	planned := tool_sim(t)
+	defer sim_unload(&planned)
+	sim_open_sandbox(&planned, 32, 24, 0, 0, 5, 0)
+
+	stepped := tool_sim(t)
+	defer sim_unload(&stepped)
+	sim_open_sandbox(&stepped, 32, 24, 0, 0, 5, 0)
+
+	sand, _ := find_material_index(planned.world.materials, "Sand")
+
+	for step in 0 ..< 8 {
+		command := Input_Command{kind = .Spawn, x = i32(4 + step*2), y = 0, radius = 1, material = u16(sand)}
+		sim_enqueue(&planned, command, i64(step*3))
+	}
+	sim_run(&planned, 40)
+
+	for step in 0 ..< 8 {
+		command := Input_Command{kind = .Spawn, x = i32(4 + step*2), y = 0, radius = 1, material = u16(sand)}
+		sim_enqueue(&stepped, command, i64(step*3))
+		sim_run(&stepped, 3)
+	}
+	sim_run(&stepped, 40 - 24)
+
+	testing.expect(
+		t,
+		sandbox_checksum(&planned.sandbox) == sandbox_checksum(&stepped.sandbox),
+		"the send pattern must not change the sandbox",
+	)
+}
