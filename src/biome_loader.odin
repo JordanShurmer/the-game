@@ -23,6 +23,8 @@ Biome_Load_Error :: enum u8 {
 	Unknown_Biome,    // biome_off_map names a biome that does not exist
 	Bad_Value,        // a value does not parse
 	Too_Many_Biomes,
+	Tile_Mismatch,    // generator and the tile key disagree
+	Too_Many_Tiles,
 }
 
 @(private = "file")
@@ -51,18 +53,22 @@ load_biomes :: proc(
 
 	text := string(data)
 
-	biomes := make([dynamic]Biome, allocator)
-	names  := make([dynamic]string, allocator)
+	biomes     := make([dynamic]Biome, allocator)
+	names      := make([dynamic]string, allocator)
+	tile_paths := make([dynamic]string, allocator)
 
-	// Both the image path and the names outlive this proc, so they are
-	// cloned. Release them if the load fails part way through.
+	// The image path, the names, and the tile paths all outlive this
+	// proc, so they are cloned. Release them if the load fails part way
+	// through.
 	map_image_path: string
 	ok := false
 	defer if !ok {
 		for n in names do delete(n, allocator)
+		for p in tile_paths do delete(p, allocator)
 		delete(map_image_path, allocator)
 		delete(biomes)
 		delete(names)
+		delete(tile_paths)
 	}
 
 	table.cells_per_pixel = 512
@@ -97,6 +103,12 @@ load_biomes :: proc(
 		if REQUIRED - seen != {} {
 			return .Missing_Key, current_line
 		}
+		// A tile generator needs a tile to draw, and a tile nothing
+		// draws is dead authoring. Either mistake shows up as a wrong
+		// world much later, so it stops the load here.
+		if (current.generator == .Tile) != (current.tile != TILE_NONE) {
+			return .Tile_Mismatch, current_line
+		}
 		for b in biomes {
 			if b.key_color == current.key_color {
 				return .Duplicate_Color, current_line
@@ -129,7 +141,9 @@ load_biomes :: proc(
 				has_current    = false
 			} else {
 				in_map_section = false
-				current        = Biome{}
+				// A fresh biome owns no tile. The zero value of Tile_Id is
+				// a real tile id, so this must be set, not left blank.
+				current        = Biome{tile = TILE_NONE}
 				current_name   = section
 				current_line   = line_index
 				seen           = {}
@@ -188,7 +202,20 @@ load_biomes :: proc(
 		case "generator":
 			switch value {
 			case "uniform": current.generator = .Uniform
+			case "tile":    current.generator = .Tile
 			case:           return {}, .Bad_Value, line_index
+			}
+		case "tile":
+			// Tile ids are handed out in file order and stay dense, so
+			// the tile set is one packed block with no holes in it.
+			if current.tile != TILE_NONE {
+				// The biome named a tile twice. The last one wins.
+				delete(tile_paths[current.tile], allocator)
+				tile_paths[current.tile] = strings.clone(value, allocator)
+			} else {
+				if len(tile_paths) >= MAX_TILES do return {}, .Too_Many_Tiles, line_index
+				current.tile = Tile_Id(len(tile_paths))
+				append(&tile_paths, strings.clone(value, allocator))
 			}
 		}
 	}
@@ -201,6 +228,7 @@ load_biomes :: proc(
 
 	table.biomes         = biomes[:]
 	table.names          = names[:]
+	table.tile_paths     = tile_paths[:]
 	table.map_image_path = map_image_path
 
 	if off_map_name != "" {
@@ -220,9 +248,11 @@ load_biomes :: proc(
 
 destroy_biome_table :: proc(table: Biome_Table, allocator := context.allocator) {
 	for n in table.names do delete(n, allocator)
+	for p in table.tile_paths do delete(p, allocator)
 	delete(table.map_image_path, allocator)
 	delete(table.biomes, allocator)
 	delete(table.names, allocator)
+	delete(table.tile_paths, allocator)
 }
 
 // ------------------------------------------------------------
@@ -271,15 +301,59 @@ test_load_biomes :: proc(t: ^testing.T) {
 	idx, found := find_biome_index(biomes, "Coalmine")
 	testing.expect(t, found, "Coalmine must exist")
 	testing.expect(t, biomes.biomes[idx].key_color == 0xFFD57917)
-	testing.expect(t, biomes.biomes[idx].generator == .Uniform)
+	testing.expect(t, biomes.biomes[idx].generator == .Tile)
 
 	dirt, dirt_found := find_material_index(materials, "Dirt")
 	testing.expect(t, dirt_found)
-	testing.expect(t, int(biomes.biomes[idx].fill_0) == dirt, "Coalmine fills with Dirt")
+	testing.expect(t, int(biomes.biomes[idx].fill_0) == dirt, "a new Coalmine tile starts as Dirt")
+
+	// A tile biome carries a tile id, and that id names a file.
+	tile := biomes.biomes[idx].tile
+	testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile")
+	testing.expect(t, biomes.tile_paths[tile] == "data/tiles/coalmine.png")
+
+	sky, sky_found := find_biome_index(biomes, "Sky")
+	testing.expect(t, sky_found)
+	testing.expect(t, biomes.biomes[sky].generator == .Uniform)
+	testing.expect(t, biomes.biomes[sky].tile == TILE_NONE, "a uniform biome owns no tile")
 
 	off, off_found := find_biome_index(biomes, "Deep_Rock")
 	testing.expect(t, off_found)
 	testing.expect(t, int(biomes.off_map_biome) == off, "off-map biome resolves by name")
+}
+
+/*
+Tile ids are dense and unique. The tile set packs its cells by id, so
+a repeated id would make two biomes share one tile by accident, and a
+gap would waste a block nobody can reach.
+*/
+@(test)
+test_biome_tile_ids_are_dense_and_unique :: proc(t: ^testing.T) {
+	materials, biomes, ok := load_test_tables(t)
+	if !ok do return
+	defer destroy_test_tables(materials, biomes)
+
+	seen := make([]bool, biome_tile_count(biomes))
+	defer delete(seen)
+
+	tiles := 0
+	for b, i in biomes.biomes {
+		if b.tile == TILE_NONE do continue
+		tiles += 1
+		if !testing.expectf(t, int(b.tile) < len(seen), "%s has tile id %d, out of range", biomes.names[i], b.tile) {
+			continue
+		}
+		testing.expectf(t, !seen[b.tile], "two biomes claim tile id %d", b.tile)
+		seen[b.tile] = true
+	}
+
+	testing.expect(t, tiles == biome_tile_count(biomes), "every tile path belongs to a biome")
+	for used, id in seen {
+		testing.expectf(t, used, "tile id %d has no biome", id)
+	}
+	for p in biomes.tile_paths {
+		testing.expect(t, p != "", "every tile names a file")
+	}
 }
 
 @(test)
@@ -345,6 +419,21 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 			"bad generator",
 			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = wang\n",
 			.Bad_Value,
+		},
+		{
+			"tile generator with no tile",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = tile\n",
+			.Tile_Mismatch,
+		},
+		{
+			"tile with no tile generator",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ntile = a.png\n",
+			.Tile_Mismatch,
+		},
+		{
+			"tile and generator together are fine",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = tile\ntile = a.png\n",
+			.None,
 		},
 	}
 

@@ -176,6 +176,25 @@ find_material_index :: proc(table: Material_Table, name: string) -> (idx: int, f
 	return -1, false
 }
 
+/*
+The material a color stands for, the way find_biome_by_color reads the
+biome map.
+
+A tile PNG is painted in material colors, so this turns paint back
+into ids. It runs once per pixel at load time over a short table, so a
+scan is the right rung: a color index would be more code and no
+faster at this size.
+
+Material colors must be unique for this to mean anything. A test on
+the shipped table holds that line.
+*/
+find_material_by_color :: proc(table: Material_Table, color: u32) -> (idx: int, found: bool) {
+	for m, i in table.materials {
+		if m.color == color do return i, true
+	}
+	return -1, false
+}
+
 // ------------------------------------------------------------
 // Data-driven tests (run with: odin test src  from repo root)
 // ------------------------------------------------------------
@@ -297,4 +316,42 @@ test_gold_density :: proc(t: ^testing.T) {
 	testing.expect(t, m.density == 19.3)
 	testing.expect(t, .Metal in m.tags)
 	testing.expect(t, m.fall_speed == 0)
+}
+
+/*
+Tile PNGs are painted in material colors, and the loader reads them
+back with find_material_by_color. Two materials sharing one color
+would make that lookup pick the wrong one, and the tile would load as
+something other than what the author painted.
+*/
+@(test)
+test_material_colors_are_unique :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer {
+		for n in table.names do delete(n)
+		delete(table.materials)
+		delete(table.names)
+	}
+	testing.expect(t, ok)
+
+	for a, i in table.materials {
+		for b, j in table.materials {
+			if i == j do continue
+			testing.expectf(
+				t,
+				a.color != b.color,
+				"%s and %s share color %08X",
+				table.names[i],
+				table.names[j],
+				a.color,
+			)
+		}
+	}
+
+	// Every color must find its way back to the material it came from.
+	for m, i in table.materials {
+		idx, found := find_material_by_color(table, m.color)
+		testing.expectf(t, found, "%s has a color no lookup finds", table.names[i])
+		testing.expectf(t, idx == i, "%s round trips to %s", table.names[i], table.names[idx])
+	}
 }

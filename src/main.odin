@@ -99,8 +99,16 @@ app_load_data :: proc(app: ^App) -> bool {
 		return false
 	}
 
+	tiles, tiles_ok := load_or_create_tile_set(biomes, materials)
+	if !tiles_ok {
+		destroy_biome_table(biomes)
+		destroy_material_table(materials)
+		return false
+	}
+
 	bmap, ok := load_or_create_biome_map(biomes)
 	if !ok {
+		destroy_tile_set(tiles)
 		destroy_biome_table(biomes)
 		destroy_material_table(materials)
 		return false
@@ -110,6 +118,7 @@ app_load_data :: proc(app: ^App) -> bool {
 		materials = materials,
 		biomes    = biomes,
 		biome_map = bmap,
+		tiles     = tiles,
 		seed      = 1,
 	}
 
@@ -128,9 +137,55 @@ app_load_data :: proc(app: ^App) -> bool {
 
 app_unload_data :: proc(app: ^App) {
 	editor_destroy(app)
+	destroy_tile_set(app.world.tiles)
 	destroy_biome_map(app.world.biome_map)
 	destroy_biome_table(app.world.biomes)
 	destroy_material_table(app.world.materials)
+}
+
+/*
+Read every authored tile, and write a flat one for any tile the data
+file names but nobody has painted yet.
+
+This is the same bargain load_or_create_biome_map makes: a fresh
+checkout opens on a world you can see, and the files it writes are the
+files the editor saves.
+*/
+load_or_create_tile_set :: proc(
+	biomes: Biome_Table,
+	materials: Material_Table,
+) -> (
+	set: Tile_Set,
+	ok: bool,
+) {
+	loaded, result, id := load_tile_set(biomes, materials, true)
+	if result.err == .None do return loaded, true
+
+	path := biomes.tile_paths[id]
+	switch result.err {
+	case .Unmatched_Color:
+		fmt.eprintfln(
+			"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
+			path,
+			result.x,
+			result.y,
+			result.color,
+			MATERIALS_PATH,
+		)
+	case .Wrong_Size:
+		fmt.eprintfln(
+			"%s: the tile is %dx%d, but every tile must be %dx%d",
+			path,
+			result.x,
+			result.y,
+			i32(TILE_SIZE),
+			i32(TILE_SIZE),
+		)
+	case .File_Unreadable:
+		fmt.eprintfln("cannot read or write %s", path)
+	case .None:
+	}
+	return {}, false
 }
 
 /*
@@ -315,15 +370,29 @@ draw_hud :: proc(app: ^App) {
 	cx := app.cam_x + (WINDOW_W / 2) * app.step
 	cy := app.cam_y + (WINDOW_H / 2) * app.step
 	id := world_biome_at(app.world, cx, cy)
+	b := app.world.biomes.biomes[id]
 
-	rl.DrawRectangle(0, 0, 420, 78, rl.Fade(rl.BLACK, 0.55))
+	rl.DrawRectangle(0, 0, 460, 100, rl.Fade(rl.BLACK, 0.55))
 	rl.DrawText(fmt.ctprintf("cell %d, %d   1px = %d cells", cx, cy, app.step), 12, 10, 18, rl.RAYWHITE)
 	rl.DrawText(
 		fmt.ctprintf("biome at centre: %s", app.world.biomes.names[id]),
 		12,
 		32,
 		18,
-		rl_from_argb(app.world.biomes.biomes[id].key_color),
+		rl_from_argb(b.key_color),
 	)
-	rl.DrawText("WASD pan   wheel zoom   TAB world editor", 12, 54, 16, rl.GRAY)
+
+	// What the cell under the crosshair is made of. A tile biome shows
+	// a different material every few cells, so the biome name alone no
+	// longer says what you are looking at.
+	cell := world_cell_at(app.world, cx, cy)
+	source := b.tile == TILE_NONE ? "fill" : "tile"
+	rl.DrawText(
+		fmt.ctprintf("material: %s (%s)", app.world.materials.names[cell], source),
+		12,
+		54,
+		18,
+		rl_from_argb(app.world.materials.materials[cell].color | 0xFF000000),
+	)
+	rl.DrawText("WASD pan   wheel zoom   TAB world editor", 12, 76, 16, rl.GRAY)
 }
