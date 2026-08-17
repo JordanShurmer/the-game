@@ -24,6 +24,29 @@ MAP_AREA_MAX :: 560
 
 STATUS_SECONDS :: 4.0
 
+/*
+A line of feedback that fades. Both editors report saves and blocked
+saves the same way, so they hold the same small struct rather than
+each keeping three loose fields.
+*/
+Status :: struct {
+	text:  string,
+	ok:    bool,
+	until: f64,
+}
+
+status_set :: proc(s: ^Status, text: string, ok: bool) {
+	s.text = text
+	s.ok = ok
+	s.until = rl.GetTime() + STATUS_SECONDS
+}
+
+// Draw the status line while it is still fresh.
+status_draw :: proc(s: Status, x, y: i32) {
+	if s.text == "" || rl.GetTime() >= s.until do return
+	rl.DrawText(fmt.ctprintf("%s", s.text), x, y, 18, s.ok ? rl.GREEN : rl.RED)
+}
+
 Editor :: struct {
 	open:            bool,
 	brush:           Biome_Id,
@@ -33,9 +56,7 @@ Editor :: struct {
 	labels:          []i32,
 	component_count: int,
 
-	status:          string,
-	status_ok:       bool,
-	status_until:    f64,
+	status:          Status,
 }
 
 editor_init :: proc(app: ^App) {
@@ -60,10 +81,7 @@ editor_can_save :: proc(app: ^App) -> bool {
 }
 
 editor_set_status :: proc(app: ^App, text: string, ok: bool) {
-	e := &app.editor
-	e.status = text
-	e.status_ok = ok
-	e.status_until = rl.GetTime() + STATUS_SECONDS
+	status_set(&app.editor.status, text, ok)
 }
 
 // The size of one map pixel on screen, and where the map starts.
@@ -139,6 +157,13 @@ editor_handle_input :: proc(app: ^App) {
 	if rl.IsKeyPressed(.S) {
 		editor_save(app)
 	}
+
+	// Open the tile of the biome on the brush. This is the whole path
+	// of Phase 2: pick a biome here, paint its tile, watch the world
+	// behind both overlays follow the paint.
+	if rl.IsKeyPressed(.T) {
+		tile_editor_open(app, e.brush)
+	}
 }
 
 // Centre the camera on the world region a map pixel covers.
@@ -190,7 +215,9 @@ editor_palette_under_mouse :: proc(app: ^App) -> (id: Biome_Id, hit: bool) {
 }
 
 editor_draw :: proc(app: ^App) {
-	if !app.editor.open do return
+	// The tile editor covers this one. Both overlays draw a palette in
+	// the same place, so only the top one may draw.
+	if !app.editor.open || app.tile_edit.open do return
 	e := &app.editor
 
 	// Dim the world, but keep it visible. The point of the editor is
@@ -203,7 +230,7 @@ editor_draw :: proc(app: ^App) {
 	// Status bar.
 	rl.DrawText("world editor", EDITOR_PANEL_X, 16, 26, rl.RAYWHITE)
 	rl.DrawText(
-		"LMB paint   RMB erase   M look   S save   TAB close",
+		"LMB paint   RMB erase   M look   T tile   S save   TAB close",
 		EDITOR_PANEL_X,
 		46,
 		16,
@@ -216,15 +243,7 @@ editor_draw :: proc(app: ^App) {
 	: fmt.ctprintf("%d separate regions - save blocked", e.component_count)
 	rl.DrawText(gate, EDITOR_PANEL_X, WINDOW_H - 56, 20, connected ? rl.GREEN : rl.RED)
 
-	if e.status != "" && rl.GetTime() < e.status_until {
-		rl.DrawText(
-			fmt.ctprintf("%s", e.status),
-			EDITOR_PANEL_X,
-			WINDOW_H - 30,
-			18,
-			e.status_ok ? rl.GREEN : rl.RED,
-		)
-	}
+	status_draw(e.status, EDITOR_PANEL_X, WINDOW_H - 30)
 }
 
 @(private = "file")
@@ -243,7 +262,6 @@ editor_draw_palette :: proc(app: ^App) {
 		rl.DrawRectangle(EDITOR_PANEL_X, y, 18, 18, rl_from_argb(b.key_color))
 		rl.DrawRectangleLines(EDITOR_PANEL_X, y, 18, 18, rl.Fade(rl.WHITE, 0.5))
 
-		// The fill material is what the region becomes in the world.
 		rl.DrawText(
 			fmt.ctprintf("%d %s", i + 1, app.world.biomes.names[i]),
 			EDITOR_PANEL_X + 26,
@@ -251,13 +269,20 @@ editor_draw_palette :: proc(app: ^App) {
 			18,
 			selected ? rl.RAYWHITE : rl.LIGHTGRAY,
 		)
-		rl.DrawText(
-			fmt.ctprintf("%s", app.world.materials.names[b.fill_0]),
-			EDITOR_PANEL_X + 170,
-			y + 2,
-			14,
-			rl.GRAY,
-		)
+
+		// What the region becomes in the world: one flat material, or a
+		// tile that T opens for painting.
+		if b.tile == TILE_NONE {
+			rl.DrawText(
+				fmt.ctprintf("%s", app.world.materials.names[b.fill_0]),
+				EDITOR_PANEL_X + 170,
+				y + 2,
+				14,
+				rl.GRAY,
+			)
+		} else {
+			rl.DrawText("tile  T", EDITOR_PANEL_X + 170, y + 2, 14, rl.SKYBLUE)
+		}
 	}
 }
 

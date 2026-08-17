@@ -26,6 +26,7 @@ STARTER_MAP_H :: 16
 App :: struct {
 	world:     World,
 	editor:    Editor,
+	tile_edit: Tile_Editor,
 
 	// Camera. cam_x and cam_y are the world cell at the top-left texel.
 	cam_x:     i32,
@@ -75,6 +76,7 @@ main :: proc() {
 		rl.DrawTexture(app.texture, 0, 0, rl.WHITE)
 		draw_hud(&app)
 		editor_draw(&app)
+		tile_editor_draw(&app)
 		rl.EndDrawing()
 
 		free_all(context.temp_allocator)
@@ -318,6 +320,13 @@ app_regenerate :: proc(app: ^App) {
 }
 
 app_handle_input :: proc(app: ^App) {
+	// The tile editor sits on top of the world editor, so it reads the
+	// keyboard first and nothing behind it moves while it is open.
+	if app.tile_edit.open {
+		tile_editor_handle_input(app)
+		return
+	}
+
 	if rl.IsKeyPressed(.TAB) {
 		app.editor.open = !app.editor.open
 		if app.editor.open do editor_refresh(app)
@@ -365,7 +374,7 @@ app_handle_input :: proc(app: ^App) {
 }
 
 draw_hud :: proc(app: ^App) {
-	if app.editor.open do return
+	if app.editor.open || app.tile_edit.open do return
 
 	cx := app.cam_x + (WINDOW_W / 2) * app.step
 	cy := app.cam_y + (WINDOW_H / 2) * app.step
