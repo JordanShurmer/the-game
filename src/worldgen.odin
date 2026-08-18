@@ -717,7 +717,8 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 
 	// The view spans map pixels (0,1) and (1,1), which are both
 	// Coalmine, plus the Lake and the unpainted pixel to their right.
-	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 1}
+	// One texel per four cells, so 512 of them reach across all four.
+	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 4}
 	before := make([]Cell, int(view.w) * int(view.h))
 	after := make([]Cell, int(view.w) * int(view.h))
 	defer delete(before)
