@@ -26,6 +26,7 @@ make shot
 ./bin/shot biome=Coalmine out=shots/look.png            # a region, close up
 ./bin/shot biome=Coalmine grid=1 out=shots/grid.png     # with the tile lattice
 ./bin/shot biome=Coalmine step=2 out=shots/wide.png     # pulled back
+./bin/shot player=1 out=shots/wizard.png                # the wizard where he starts
 ```
 
 Then open the PNG and look at it. `grid=1` draws the tile lattice and
@@ -78,9 +79,31 @@ of the whole world.
 | `src/` | the game, package `game`, tests beside the code |
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
-| `data/` | materials, biomes, the biome map, the tile sets |
+| `data/` | materials, biomes, the biome map, the tile sets, the sprites |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain build, and the tile seeder |
+| `tools/` | the toolchain build, the tile seeder, and the wizard seeder |
+
+## The player
+
+`docs/player.md` is the design note: how the wizard is built, the
+numbers he moves by, and what this phase leaves out. Read it before
+changing `src/player.odin` or `src/sprite.odin`.
+
+Two rules there are easy to break and hard to see:
+
+- **His body is 13 cells tall because the world allows no more.** Two
+  tiles that meet share a band, and the clear channel through it is 16
+  cells. A taller body fits every cave and leaves none of them.
+  `test_the_player_fits_the_world` measures the real tiles and fails
+  when a reseed closes the channel.
+- **The drawing and the collision box are two numbers that must agree.**
+  `tools/seed_wizard.py` holds the body box, `src/sprite.odin` asserts
+  it matches `src/player.odin`, and `--check` holds the sheet to it.
+
+```sh
+tools/seed_wizard.py           # redraw data/sprites/wizard.png
+tools/seed_wizard.py --check   # hold the file to the rules
+```
 
 A pixel editor works on a tile too, but then the save gate may report
 a seam that no longer agrees, and `N` in the editor mends it.
