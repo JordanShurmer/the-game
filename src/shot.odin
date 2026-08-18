@@ -18,6 +18,25 @@ look at the world from a terminal or from a test.
 Use it to judge what an edit did. A tile set is 32 pictures and a
 biome is a lattice of them; neither reads as a cave system until it is
 drawn at size, so draw it and look.
+
+The wizard draws the same way. He is optional and carried on Shot
+itself, not a second argument to world_shot: the proc still takes
+exactly one World, one Shot and one path, and everything about whether
+and how to draw him lives inside the Shot the caller already builds.
+Three compositing choices are worth saying outright, because a picture
+does not explain its own rules:
+
+  - He is point-sampled at whatever step the terrain is sampled at, for
+    the same reason the terrain is: at step above 1 he can shrink to a
+    few pixels, and that is an honest picture of what a pulled-back
+    view can show of anything this small, not a bug to average away.
+  - At scale above 1 he is drawn scale times over, the same as every
+    texel of terrain, so he does not go soft next to a world that
+    stays crisp.
+  - He is drawn under the grid, not over it: shot_draw_grid runs after
+    he is baked into the pixels, so grid=1 still shows the lattice over
+    the whole picture, him included, the way it already shows over
+    every material.
 */
 
 // A shot has to fit in memory and in a reader. This is far past what
@@ -25,9 +44,11 @@ drawn at size, so draw it and look.
 SHOT_MAX_PIXELS :: 8192 * 8192
 
 Shot :: struct {
-	view:  World_View,
-	scale: i32,  // image pixels along one edge of a texel; 1 or more
-	grid:  bool, // draw the tile lattice and the region borders
+	view:   World_View,
+	scale:  i32,  // image pixels along one edge of a texel; 1 or more
+	grid:   bool, // draw the tile lattice and the region borders
+	player: Maybe(Player), // draw him here, from `sprite`, if set
+	sprite: Sprite_Sheet,  // the wizard sheet; read only when player is set
 }
 
 // The lattice, and the borders between regions. Both are drawn over
@@ -55,7 +76,21 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	// One color per material, composited once instead of per pixel.
 	lut: [256]rl.Color
 	for m, i in world.materials.materials {
-		lut[i] = shot_over_background(rl_from_argb(m.color))
+		lut[i] = blend_over(rl_from_argb(m.color), BACKGROUND)
+	}
+
+	// Where the player's frame falls in world cells, and which frame of
+	// which row, worked out once rather than per texel. Point-sampled
+	// below at whatever step the terrain itself is sampled at; see the
+	// header comment for why that is the honest choice above step 1.
+	player, has_player := shot.player.?
+	origin_x, origin_y: i32
+	motion: Player_Motion
+	column: int
+	if has_player {
+		origin_x, origin_y = sprite_frame_origin(player)
+		motion = player_motion(player)
+		column = sprite_frame(motion, player.anim)
 	}
 
 	pixels := make([]rl.Color, int(width) * int(height))
@@ -63,10 +98,24 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 
 	for ty in 0 ..< shot.view.h {
 		row := cells[int(ty) * int(shot.view.w):][:shot.view.w]
+		wy := shot.view.y + ty * shot.view.step
+		fy := wy - origin_y
+		in_frame_row := has_player && fy >= 0 && fy < SPRITE_FRAME_H
+
 		for sy in 0 ..< shot.scale {
 			line := pixels[int(ty * shot.scale + sy) * int(width):][:width]
 			for tx in 0 ..< shot.view.w {
 				c := lut[row[tx]]
+
+				if in_frame_row {
+					wx := shot.view.x + tx * shot.view.step
+					fx := wx - origin_x
+					if fx >= 0 && fx < SPRITE_FRAME_W {
+						sc := sprite_pixel(shot.sprite, motion, column, player.facing, fx, fy)
+						if sc.a != 0 do c = blend_over(sc, c)
+					}
+				}
+
 				for sx in 0 ..< shot.scale {
 					line[tx * shot.scale + sx] = c
 				}
@@ -74,6 +123,8 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 		}
 	}
 
+	// Drawn last, over the player as well as the terrain, so grid=1
+	// shows the lattice over the whole picture rather than under him.
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
 
 	// The image borrows our buffer, so raylib must not free it.
@@ -112,23 +163,26 @@ shot_biome_origin :: proc(world: World, biome: Biome_Id) -> (x: i32, y: i32, fou
 	return 0, 0, false
 }
 
-// Air is transparent, so it shows what is behind the world. That is
-// the window background, and a shot says the same thing.
+/*
+Alpha-composite fg over bg. The result always carries full alpha: a
+shot is a flat picture, and nothing behind it is ever drawn afterward.
+
+One proc, used three ways: air over the window background, the wizard
+over whatever terrain is already at his texel, and a grid line over
+the whole picture once that terrain and that wizard are both baked in.
+Three call sites for the same blend is what makes it worth pulling out
+rather than writing the formula a third time slightly differently.
+*/
 @(private = "file")
-shot_over_background :: proc(c: rl.Color) -> rl.Color {
-	if c.a == 255 do return c
+blend_over :: proc(fg, bg: rl.Color) -> rl.Color {
+	if fg.a == 255 do return fg
 
 	over :: proc(fg, bg: u8, a: f32) -> u8 {
 		return u8(f32(fg) * a + f32(bg) * (1 - a))
 	}
 
-	a := f32(c.a) / 255
-	return rl.Color {
-		over(c.r, BACKGROUND.r, a),
-		over(c.g, BACKGROUND.g, a),
-		over(c.b, BACKGROUND.b, a),
-		255,
-	}
+	a := f32(fg.a) / 255
+	return rl.Color{over(fg.r, bg.r, a), over(fg.g, bg.g, a), over(fg.b, bg.b, a), 255}
 }
 
 @(private = "file")
@@ -156,23 +210,16 @@ shot_line_at :: proc(world: World, w: i32, step: i32) -> Shot_Line {
 
 @(private = "file")
 shot_draw_grid :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
-	blend :: proc(dst: ^rl.Color, line: rl.Color) {
-		a := f32(line.a) / 255
-		over :: proc(fg, bg: u8, a: f32) -> u8 {
-			return u8(f32(fg) * a + f32(bg) * (1 - a))
-		}
-		dst.r = over(line.r, dst.r, a)
-		dst.g = over(line.g, dst.g, a)
-		dst.b = over(line.b, dst.b, a)
-	}
-
 	for tx in 0 ..< shot.view.w {
 		kind := shot_line_at(world, shot.view.x + tx * shot.view.step, shot.view.step)
 		if kind == .None do continue
 
 		color := kind == .Region ? SHOT_REGION_LINE : SHOT_TILE_LINE
 		x := tx * shot.scale
-		for y in 0 ..< height do blend(&pixels[int(y) * int(width) + int(x)], color)
+		for y in 0 ..< height {
+			p := &pixels[int(y) * int(width) + int(x)]
+			p^ = blend_over(color, p^)
+		}
 	}
 
 	for ty in 0 ..< shot.view.h {
@@ -181,7 +228,10 @@ shot_draw_grid :: proc(world: World, shot: Shot, pixels: []rl.Color, width, heig
 
 		color := kind == .Region ? SHOT_REGION_LINE : SHOT_TILE_LINE
 		y := ty * shot.scale
-		for x in 0 ..< width do blend(&pixels[int(y) * int(width) + int(x)], color)
+		for x in 0 ..< width {
+			p := &pixels[int(y) * int(width) + int(x)]
+			p^ = blend_over(color, p^)
+		}
 	}
 }
 
@@ -267,4 +317,159 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 		"a shot larger than SHOT_MAX_PIXELS is a typo, not a request",
 	)
 	testing.expect(t, !os.exists(path), "a refused shot must write nothing")
+}
+
+// A spawned wizard for a test to draw, standing rather than mid-fall:
+// player_spawn already checked the ground under his feet, and a shot
+// draws one instant with no physics tick to discover on_ground for
+// itself the way player_step would on the game's first tick.
+@(private = "file")
+shot_test_player :: proc(t: ^testing.T, world: World) -> (p: Player, ok: bool) {
+	x, y, found := world_find_spawn(world)
+	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return {}, false
+	return Player{x = f32(x), y = f32(y), facing = 1, on_ground = true}, true
+}
+
+@(test)
+test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
+	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
+	defer destroy_sprite_sheet(sheet)
+
+	player, ok := shot_test_player(t, s.world)
+	if !ok do return
+
+	// Centred on the frame itself, not just on his feet, so the shot
+	// actually holds the picture of him and not just the air above
+	// where he stands.
+	ox, oy := sprite_frame_origin(player)
+	view := World_View{x = ox - 4, y = oy - 4, w = SPRITE_FRAME_W + 8, h = SPRITE_FRAME_H + 8, step = 1}
+
+	without_path := "shot_diff_without_player.tmp.png"
+	with_path := "shot_diff_with_player.tmp.png"
+	defer os.remove(without_path)
+	defer os.remove(with_path)
+
+	testing.expect(t, world_shot(s.world, Shot{view = view, scale = 1}, without_path))
+	testing.expect(t, world_shot(s.world, Shot{view = view, scale = 1, player = player, sprite = sheet}, with_path))
+
+	without_bytes, err1 := os.read_entire_file_from_path(without_path, context.allocator)
+	defer delete(without_bytes)
+	with_bytes, err2 := os.read_entire_file_from_path(with_path, context.allocator)
+	defer delete(with_bytes)
+	if !testing.expect(t, err1 == nil && err2 == nil, "both shots must be written") do return
+
+	differs := len(without_bytes) != len(with_bytes)
+	if !differs {
+		for i in 0 ..< len(without_bytes) {
+			if without_bytes[i] != with_bytes[i] {
+				differs = true
+				break
+			}
+		}
+	}
+	testing.expect(t, differs, "drawing the player must change the picture")
+}
+
+/*
+Finds one opaque pixel of the idle frame inside the body box, then
+checks that world_shot puts the wizard's ink at the exact world cell
+sprite_frame_origin and sprite_pixel say it belongs at, rather than
+trusting the two procs and the compositing loop to agree by
+construction. No pixel is hard-coded: the drawing is procedural and
+authored data can change under this test, so the pixel to look for is
+found the same way world_shot would find it.
+*/
+@(test)
+test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
+	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
+	defer destroy_sprite_sheet(sheet)
+
+	player, ok := shot_test_player(t, s.world)
+	if !ok do return
+
+	motion := player_motion(player) // .Idle: on_ground is true and vx is 0
+	column := sprite_frame(motion, player.anim)
+
+	ink_x, ink_y := i32(-1), i32(-1)
+	find_ink: for fy in i32(SPRITE_BODY_Y) ..< SPRITE_BODY_Y + SPRITE_BODY_H {
+		for fx in i32(SPRITE_BODY_X) ..< SPRITE_BODY_X + SPRITE_BODY_W {
+			if sprite_pixel(sheet, motion, column, player.facing, fx, fy).a != 0 {
+				ink_x, ink_y = fx, fy
+				break find_ink
+			}
+		}
+	}
+	if !testing.expect(t, ink_x >= 0, "the idle frame must hold at least one opaque pixel inside the body box") do return
+	want := sprite_pixel(sheet, motion, column, player.facing, ink_x, ink_y)
+
+	ox, oy := sprite_frame_origin(player)
+	wx, wy := ox + ink_x, oy + ink_y
+
+	path := "shot_body_box.tmp.png"
+	defer os.remove(path)
+	shot := Shot{view = World_View{x = wx, y = wy, w = 1, h = 1, step = 1}, scale = 1, player = player, sprite = sheet}
+	if !testing.expect(t, world_shot(s.world, shot, path), "the shot must be written") do return
+
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	img := rl.LoadImage(cpath)
+	defer rl.UnloadImage(img)
+	if !testing.expect(t, img.data != nil, "the shot must load back") do return
+
+	colors := rl.LoadImageColors(img)
+	defer rl.UnloadImageColors(colors)
+	got := colors[0]
+
+	testing.expectf(
+		t,
+		got.r == want.r && got.g == want.g && got.b == want.b,
+		"the body box's ink at %d,%d must land at world (%d,%d), got %v want %v",
+		ink_x, ink_y, wx, wy, got, want,
+	)
+}
+
+@(test)
+test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
+	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
+	defer destroy_sprite_sheet(sheet)
+
+	player, ok := shot_test_player(t, s.world)
+	if !ok do return
+
+	shot := Shot {
+		view   = World_View{x = i32(player.x) - 40, y = i32(player.y) - 40, w = 80, h = 60, step = 1},
+		scale  = 3,
+		player = player,
+		sprite = sheet,
+	}
+
+	path := "shot_valid_with_player.tmp.png"
+	defer os.remove(path)
+	testing.expect(t, world_shot(s.world, shot, path), "a shot with a player must still be written")
+
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	img := rl.LoadImage(cpath)
+	defer rl.UnloadImage(img)
+	testing.expect(t, img.data != nil, "the shot must load back")
+	testing.expectf(
+		t,
+		img.width == 240 && img.height == 180,
+		"scale must multiply both edges, got %dx%d",
+		img.width,
+		img.height,
+	)
 }
