@@ -39,6 +39,7 @@ SANDBOX_DEFAULT_DELAY  :: 2
 
 Sim :: struct {
 	world:     World,       // the authored world: materials, biomes, map, tiles
+	player:    Player,      // the wizard; see docs/player.md
 	editor:    Editor,      // biome map editing state
 	tile_edit: Tile_Editor, // tile editing state
 	sandbox:   Sandbox,     // the rectangle that runs physics
@@ -108,6 +109,11 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 	}
 
 	editor_init(s)
+
+	// Beside a hole, not in it: world_find_spawn scans the shipped map
+	// for the mouth into the caves and stands him clear of its lip. He
+	// owns no allocation, so nothing here needs a matching teardown.
+	s.player = player_spawn(s.world)
 	s.loaded = true
 
 	// Open a sandbox on the world origin, so a client can run physics
@@ -199,6 +205,21 @@ sim_apply :: proc(s: ^Sim, command: Input_Command) {
 
 sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 	return find_material_index(s.world.materials, name)
+}
+
+/*
+One whole tick of the wizard.
+
+He is not on the Input_Queue (docs/player.md says why: held movement
+keys through the queue's delay is input lag, not fairness), so this is
+a second, simpler path into the Sim, taken directly rather than
+through sim_apply. The window keeps the fixed-step accumulator and
+calls this a whole number of times per frame; anything else that ever
+drives him calls it the same way, so it never has to reach into
+Player or World itself.
+*/
+sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool) {
+	player_step(&s.player, s.world, held, jump_pressed)
 }
 
 // ------------------------------------------------------------

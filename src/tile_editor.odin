@@ -68,10 +68,12 @@ Tile_Editor :: struct {
 	// save, the same way a cut map gates the biome map save.
 	conflict:   Wang_Conflict,
 
-	// The world editor works at whatever zoom you left it at, but tile
-	// paint is one cell wide. The tile editor drops to 1 cell per pixel
-	// so the paint is visible, and gives the old zoom back on close.
+	// The world editor works at whatever step and zoom you left it at,
+	// but tile paint is one cell wide. The tile editor drops both to 1
+	// so the paint is visible at native resolution, and gives the old
+	// values back on close.
 	saved_step: i32,
+	saved_zoom: i32,
 
 	status:     Status,
 }
@@ -322,13 +324,24 @@ tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
 	status_set(&app.tile_edit.status, message, true)
 
 	app.tile_edit.saved_step = app.step
+	app.tile_edit.saved_zoom = app.zoom
 
 	// Show the world at native resolution, so one painted cell is one
-	// pixel on screen instead of one sample in eight.
-	if app.step != 1 {
-		app.cam_x += (WINDOW_W / 2) * (app.step - 1)
-		app.cam_y += (WINDOW_H / 2) * (app.step - 1)
+	// pixel on screen instead of one sample in eight. Forcing step to 1
+	// alone is not enough now that zoom exists: a zoom left above 1
+	// would blow the same oversized texels back up on screen, which is
+	// exactly what forcing step to 1 is here to avoid.
+	if app.step != 1 || app.zoom != 1 {
+		w0, h0 := app_view_cells(app)
+		centre_x := app.cam_x + (w0 * app.step) / 2
+		centre_y := app.cam_y + (h0 * app.step) / 2
+
 		app.step = 1
+		app.zoom = 1
+
+		w1, h1 := app_view_cells(app)
+		app.cam_x = centre_x - (w1 * app.step) / 2
+		app.cam_y = centre_y - (h1 * app.step) / 2
 		app.dirty = true
 	}
 }
@@ -337,10 +350,17 @@ tile_editor_close :: proc(app: ^App) {
 	e := &app.tile_edit
 	e.open = false
 
-	if app.step != e.saved_step {
-		app.cam_x -= (WINDOW_W / 2) * (e.saved_step - app.step)
-		app.cam_y -= (WINDOW_H / 2) * (e.saved_step - app.step)
+	if app.step != e.saved_step || app.zoom != e.saved_zoom {
+		w0, h0 := app_view_cells(app)
+		centre_x := app.cam_x + (w0 * app.step) / 2
+		centre_y := app.cam_y + (h0 * app.step) / 2
+
 		app.step = e.saved_step
+		app.zoom = e.saved_zoom
+
+		w1, h1 := app_view_cells(app)
+		app.cam_x = centre_x - (w1 * app.step) / 2
+		app.cam_y = centre_y - (h1 * app.step) / 2
 		app.dirty = true
 	}
 }
