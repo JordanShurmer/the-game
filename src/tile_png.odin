@@ -400,6 +400,49 @@ test_the_shipped_sets_have_no_seam_conflict :: proc(t: ^testing.T) {
 	testing.expect(t, sets > 0, "the shipped data must author at least one set")
 }
 
+/*
+A tiled biome is about half air.
+
+A set that is nearly solid gives a world with scratches in it, and a
+set that is nearly empty gives a hall with pillars. Neither is a cave
+system, and the difference is not visible in any one tile, so it is
+measured over the whole set. Draw one with bin/shot to see what a
+number here means.
+*/
+@(test)
+test_the_shipped_sets_are_about_half_air :: proc(t: ^testing.T) {
+	materials, biomes, ok := load_png_test_tables(t)
+	if !ok do return
+	defer destroy_biome_table(biomes)
+	defer destroy_material_table(materials)
+
+	set, result, _ := load_tile_set(biomes, materials, false)
+	if !testing.expectf(t, result.err == .None, "the sets must load, got %v", result.err) do return
+	defer destroy_tile_set(set)
+
+	air, _ := find_material_index(materials, "Air")
+
+	for b, i in biomes.biomes {
+		if b.tile_base == TILE_NONE do continue
+
+		open := 0
+		for k in 0 ..< wang_set_size(b) {
+			for c in tile_cells(set, b.tile_base + Tile_Id(k)) {
+				if int(c) == air do open += 1
+			}
+		}
+
+		percent := 100 * open / (wang_set_size(b) * TILE_AREA)
+		testing.expectf(
+			t,
+			percent >= 35 && percent <= 60,
+			"%s is %d%% air, and a cave system is about half",
+			biomes.names[i],
+			percent,
+		)
+	}
+}
+
 @(test)
 test_load_tile_set_fills_a_missing_set_with_the_biome_fill :: proc(t: ^testing.T) {
 	materials, mat_ok := load_materials("data/materials.txt")

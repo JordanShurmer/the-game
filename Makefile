@@ -10,9 +10,9 @@ BIN  ?= bin
 
 SOURCES := $(wildcard src/*.odin)
 
-.PHONY: all game mcp test check run clean
+.PHONY: all game mcp shot test check run clean
 
-all: game mcp
+all: game mcp shot
 
 # The game window.
 game: $(BIN)/the-game
@@ -28,6 +28,14 @@ mcp: $(BIN)/game-mcp
 $(BIN)/game-mcp: $(SOURCES) $(wildcard cmd/mcp/*.odin)
 	@mkdir -p $(BIN)
 	$(ODIN) build cmd/mcp -out:$@ -o:speed
+
+# The world as a PNG, with no window. Run it from the repository root:
+#   ./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
+shot: $(BIN)/shot
+
+$(BIN)/shot: $(SOURCES) $(wildcard cmd/shot/*.odin)
+	@mkdir -p $(BIN)
+	$(ODIN) build cmd/shot -out:$@ -o:speed
 
 # The whole suite lives beside the code it covers.
 test:

@@ -32,7 +32,19 @@ relative to it.
 ```sh
 odin run src        # play
 odin test src       # run the tests
-make                # builds both binaries into bin/
+make                # builds the binaries into bin/
+```
+
+There is no toolchain in the box. `sudo tools/build-toolchain.sh`
+builds the Odin compiler and the raylib library it links, which takes
+about five minutes; `docs/toolchain.md` says what it does.
+
+`bin/shot` draws a rectangle of the world into a PNG with no window
+and no display, which is how to look at what an edit did:
+
+```sh
+make shot
+./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
 ```
 
 Built and tested against the Odin dev-2026-08 release. It uses the
@@ -129,8 +141,10 @@ set is on screen beside it.
 ```
 src/       the game, package game, with the tests beside the code
 cmd/mcp/   the MCP server binary
+cmd/shot/  the world as a PNG
 data/      the materials, the biomes, the biome map, the tiles
-docs/      the design notes
+docs/      the design notes and the toolchain
+tools/     the toolchain build
 ```
 
 The game is made of three parts. The biome map says which biome owns
@@ -151,6 +165,7 @@ burns, smoke climbs.
 | `src/sim.odin` | The whole game state, with no window in it |
 | `src/mcp*.odin` | The MCP server |
 | `src/main.odin` | The game window |
+| `src/shot.odin` | The world as a PNG, with no window |
 
 ## Play and author through MCP
 
