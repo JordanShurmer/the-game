@@ -104,7 +104,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		biomes    = biomes,
 		biome_map = bmap,
 		tiles     = tiles,
-		seed      = 1,
+		seed      = biomes.world_seed,
 	}
 
 	editor_init(s)
@@ -206,34 +206,59 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 // ------------------------------------------------------------
 
 /*
-Read every authored tile, and write a flat one for any tile the data
-file names but nobody has painted yet.
+Read every authored tile, and write a flat one for any tile a set
+names but nobody has painted yet.
 
 This is the same bargain load_or_create_biome_map makes: a fresh
 checkout opens on a world you can see, and the files it writes are the
-files the editor saves.
+files the editor saves. A biome that has just been given
+`generator = wang` gets a complete flat set, which draws exactly the
+world its old flat fill drew until somebody paints into it.
+
+A set that disagrees with itself still loads. It came from a pixel
+editor that knows nothing of the seam rule, and the way to fix it is
+to open it and press N, not to refuse to start.
 */
 load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) -> (set: Tile_Set, ok: bool) {
 	loaded, result, id := load_tile_set(biomes, materials, true)
-	if result.err == .None do return loaded, true
 
-	path := biomes.tile_paths[id]
-	switch result.err {
-	case .Unmatched_Color:
-		fmt.eprintfln(
-			"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
-			path, result.x, result.y, result.color, MATERIALS_PATH,
-		)
-	case .Wrong_Size:
-		fmt.eprintfln(
-			"%s: the tile is %dx%d, but every tile must be %dx%d",
-			path, result.x, result.y, i32(TILE_SIZE), i32(TILE_SIZE),
-		)
-	case .File_Unreadable:
-		fmt.eprintfln("cannot read or write %s", path)
-	case .None:
+	if result.err != .None {
+		owner, found := biome_of_tile(biomes, id)
+		path := found ? biome_tile_path(biomes, owner, id) : "a tile"
+		switch result.err {
+		case .Unmatched_Color:
+			fmt.eprintfln(
+				"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
+				path, result.x, result.y, result.color, MATERIALS_PATH,
+			)
+		case .Wrong_Size:
+			fmt.eprintfln(
+				"%s: the tile is %dx%d, but every tile must be %dx%d",
+				path, result.x, result.y, i32(TILE_SIZE), i32(TILE_SIZE),
+			)
+		case .File_Unreadable:
+			fmt.eprintfln("cannot read or write %s", path)
+		case .None:
+		}
+		return {}, false
 	}
-	return {}, false
+
+	// Say so once, at load, rather than letting the author find the
+	// broken seam in the world.
+	for b, i in biomes.biomes {
+		if b.tile_base == TILE_NONE do continue
+		conflict := wang_find_conflict(loaded, b)
+		if !conflict.found do continue
+
+		fmt.eprintfln(
+			"%s: %s and %s disagree at cell (%d,%d), where the edge color they share says they must not. Open the set and press N.",
+			biomes.names[i],
+			biome_tile_path(biomes, Biome_Id(i), conflict.a),
+			biome_tile_path(biomes, Biome_Id(i), conflict.b),
+			conflict.x, conflict.y,
+		)
+	}
+	return loaded, true
 }
 
 /*
@@ -467,26 +492,26 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 
 	mine, found := find_biome_index(s.world.biomes, "Coalmine")
 	if !testing.expect(t, found, "Coalmine must exist") do return
-	tile := s.world.biomes.biomes[mine].tile
-	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+	b := s.world.biomes.biomes[mine]
+	if !testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set") do return
 
 	// A region the mine owns. Map pixel (0,3) is Coalmine in the
-	// starter map, so it starts at world cell (0 - origin) * cpp.
+	// starter map, so it starts at world cell (0 - origin) * cpp. The
+	// sandbox is wider than one tile, so it reads several squares of
+	// the lattice and the whole set has to be painted.
 	cpp := s.world.biomes.cells_per_pixel
 	ox := (0 - s.world.biomes.origin_pixel_x) * cpp
 	oy := (3 - s.world.biomes.origin_pixel_y) * cpp
-	sim_open_sandbox(&s, 64, 64, ox, oy, 1, 0)
+	sim_open_sandbox(&s, 128, 128, ox, oy, 1, 0)
 
 	gold, _ := sim_material_index(&s, "Gold")
-	for y in i32(0) ..< TILE_SIZE {
-		for x in i32(0) ..< TILE_SIZE {
-			tile_set_cell(s.world.tiles, tile, x, y, Cell(gold))
-		}
+	for k in 0 ..< wang_set_size(b) {
+		tile_fill(s.world.tiles, b.tile_base + Tile_Id(k), Cell(gold))
 	}
 	sim_refill_sandbox(&s)
 
 	counts := make([]int, len(s.world.materials.materials))
 	defer delete(counts)
 	sandbox_census(&s.sandbox, counts)
-	testing.expect(t, counts[gold] == 64*64, "the painted tile must fill the sandbox")
+	testing.expect(t, counts[gold] == 128*128, "the painted set must fill the sandbox")
 }

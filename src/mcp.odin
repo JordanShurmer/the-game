@@ -36,10 +36,15 @@ biome_map_paint, write it with biome_map_save. A save is blocked while the
 painted map falls into more than one connected piece, because a world the
 player cannot walk across is a mistake.
 
-TILES say what a region is made of. A biome with "generator = tile" repeats one
-64x64 authored tile through every region it owns. Open one with tile_open, read
-it with tile_view, paint it with tile_paint, write it with tile_save. Painting
-one tile changes every region of that biome at once.
+TILE SETS say what a region is made of. A biome with "generator = wang" owns a
+set of 64x64 authored tiles, and the world lays them out on a lattice. Each
+tile carries a color on each of its four sides, and the world only puts two
+tiles side by side when they agree about the side they share, so the pattern
+runs on with no seam in it. Open a set with tile_open, pick a tile of it with
+tile_select, read it with tile_view, paint it with tile_paint, write the whole
+set with tile_save. The cells within 4 of a side belong to the edge color
+rather than to the tile, so a stroke there lands in every tile that carries
+that color. Painting changes every region of that biome at once.
 
 THE SANDBOX runs the physics. sandbox_open fills a rectangle of the authored
 world with cells and starts a run; call it again with no arguments after an

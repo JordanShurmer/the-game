@@ -207,9 +207,9 @@ editor_handle_input :: proc(app: ^App) {
 		editor_save(app)
 	}
 
-	// Open the tile of the biome on the brush. This is the whole path
-	// of Phase 2: pick a biome here, paint its tile, watch the world
-	// behind both overlays follow the paint.
+	// Open the tile set of the biome on the brush. This is the whole
+	// path of the phase: pick a biome here, paint one tile of its set,
+	// watch every region of that biome follow the paint.
 	if rl.IsKeyPressed(.T) {
 		tile_editor_open(app, e.brush)
 	}
@@ -307,8 +307,8 @@ editor_draw_palette :: proc(app: ^App) {
 		)
 
 		// What the region becomes in the world: one flat material, or a
-		// tile that T opens for painting.
-		if b.tile == TILE_NONE {
+		// set of tiles that T opens for painting.
+		if b.tile_base == TILE_NONE {
 			rl.DrawText(
 				fmt.ctprintf("%s", app.world.materials.names[b.fill_0]),
 				EDITOR_PANEL_X + 170,
@@ -317,7 +317,13 @@ editor_draw_palette :: proc(app: ^App) {
 				rl.GRAY,
 			)
 		} else {
-			rl.DrawText("tile  T", EDITOR_PANEL_X + 170, y + 2, 14, rl.SKYBLUE)
+			rl.DrawText(
+				fmt.ctprintf("%d tiles  T", wang_set_size(b)),
+				EDITOR_PANEL_X + 170,
+				y + 2,
+				14,
+				rl.SKYBLUE,
+			)
 		}
 	}
 }

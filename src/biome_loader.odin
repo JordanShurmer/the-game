@@ -21,10 +21,11 @@ Biome_Load_Error :: enum u8 {
 	Duplicate_Color,  // two biomes share one key color
 	Unknown_Material, // fill_0 names a material that does not exist
 	Unknown_Biome,    // biome_off_map names a biome that does not exist
-	Bad_Value,        // a value does not parse
+	Bad_Value,        // a value does not parse, or is out of range
 	Too_Many_Biomes,
-	Tile_Mismatch,    // generator and the tile key disagree
+	Tile_Mismatch,    // generator and the tiles key disagree
 	Too_Many_Tiles,
+	Region_Mismatch,  // a region is not a whole number of tiles
 }
 
 @(private = "file")
@@ -53,25 +54,26 @@ load_biomes :: proc(
 
 	text := string(data)
 
-	biomes     := make([dynamic]Biome, allocator)
-	names      := make([dynamic]string, allocator)
-	tile_paths := make([dynamic]string, allocator)
+	biomes   := make([dynamic]Biome, allocator)
+	names    := make([dynamic]string, allocator)
+	prefixes := make([dynamic]string, allocator)
 
-	// The image path, the names, and the tile paths all outlive this
+	// The image path, the names, and the tile prefixes all outlive this
 	// proc, so they are cloned. Release them if the load fails part way
 	// through.
 	map_image_path: string
 	ok := false
 	defer if !ok {
 		for n in names do delete(n, allocator)
-		for p in tile_paths do delete(p, allocator)
+		for p in prefixes do delete(p, allocator)
 		delete(map_image_path, allocator)
 		delete(biomes)
 		delete(names)
-		delete(tile_paths)
+		delete(prefixes)
 	}
 
 	table.cells_per_pixel = 512
+	table.world_seed      = 1
 	table.off_map_biome   = BIOME_EMPTY
 
 	// biome_off_map may name a biome that appears further down the
@@ -79,20 +81,34 @@ load_biomes :: proc(
 	// points into `data`, which is alive until this proc returns.
 	off_map_name: string
 
+	// Tile ids are handed out in file order and stay dense, so the tile
+	// set is one packed block with no holes in it.
+	next_tile := 0
+
 	in_map_section := false
 	has_current    := false
 	current:        Biome
 	current_name:   string
+	current_prefix: string
 	current_line:   int
 	seen:           bit_set[Required_Key]
 
-	// flush appends the biome being read. It runs at each new section
-	// and once more at the end of the file.
+	/*
+	flush appends the biome being read. It runs at each new section and
+	once more at the end of the file.
+
+	The whole section is in hand by then, so this is where the keys are
+	checked against each other and where the biome takes its block of
+	tile ids.
+	*/
 	flush :: proc(
 		biomes: ^[dynamic]Biome,
 		names: ^[dynamic]string,
+		prefixes: ^[dynamic]string,
+		next_tile: ^int,
 		current: Biome,
 		current_name: string,
+		current_prefix: string,
 		seen: bit_set[Required_Key],
 		current_line: int,
 		allocator: runtime.Allocator,
@@ -100,25 +116,39 @@ load_biomes :: proc(
 		err: Biome_Load_Error,
 		line_no: int,
 	) {
+		biome := current
+
 		if REQUIRED - seen != {} {
 			return .Missing_Key, current_line
 		}
-		// A tile generator needs a tile to draw, and a tile nothing
-		// draws is dead authoring. Either mistake shows up as a wrong
-		// world much later, so it stops the load here.
-		if (current.generator == .Tile) != (current.tile != TILE_NONE) {
+		// A wang generator needs tiles to draw, and tiles nothing draws
+		// are dead authoring. Either mistake shows up as a wrong world
+		// much later, so it stops the load here.
+		if (biome.generator == .Wang) != (current_prefix != "") {
 			return .Tile_Mismatch, current_line
 		}
 		for b in biomes {
-			if b.key_color == current.key_color {
+			if b.key_color == biome.key_color {
 				return .Duplicate_Color, current_line
 			}
 		}
 		if len(biomes) >= MAX_BIOMES {
 			return .Too_Many_Biomes, current_line
 		}
-		append(biomes, current)
+
+		if biome.generator == .Wang {
+			biome.tile_base = Tile_Id(next_tile^)
+			next_tile^ += WANG_SIGNATURES * int(biome.variants)
+			if next_tile^ > MAX_TILES {
+				return .Too_Many_Tiles, current_line
+			}
+		} else {
+			biome.tile_base = TILE_NONE
+		}
+
+		append(biomes, biome)
 		append(names, strings.clone(current_name, allocator))
+		append(prefixes, strings.clone(current_prefix, allocator))
 		return .None, 0
 	}
 
@@ -131,7 +161,7 @@ load_biomes :: proc(
 		// New section
 		if trimmed[0] == '[' && trimmed[len(trimmed) - 1] == ']' {
 			if has_current {
-				if e, l := flush(&biomes, &names, current, current_name, seen, current_line, allocator); e != .None {
+				if e, l := flush(&biomes, &names, &prefixes, &next_tile, current, current_name, current_prefix, seen, current_line, allocator); e != .None {
 					return {}, e, l
 				}
 			}
@@ -141,10 +171,12 @@ load_biomes :: proc(
 				has_current    = false
 			} else {
 				in_map_section = false
-				// A fresh biome owns no tile. The zero value of Tile_Id is
-				// a real tile id, so this must be set, not left blank.
-				current        = Biome{tile = TILE_NONE}
+				// A fresh biome owns no tiles and draws one of each
+				// signature. The zero value of Tile_Id is a real tile id,
+				// so tile_base must be set, not left blank.
+				current        = Biome{tile_base = TILE_NONE, variants = 1}
 				current_name   = section
+				current_prefix = ""
 				current_line   = line_index
 				seen           = {}
 				has_current    = true
@@ -169,6 +201,10 @@ load_biomes :: proc(
 			case "cells_per_pixel":
 				v, vok := strconv.parse_i64(value)
 				if !vok || v <= 0 do return {}, .Bad_Value, line_index
+				// A region has to be a whole number of tiles across, or a
+				// biome border would cut a tile in half and the lattice
+				// would show a seam nobody drew.
+				if v % TILE_SIZE != 0 do return {}, .Region_Mismatch, line_index
 				table.cells_per_pixel = i32(v)
 			case "origin_pixel":
 				v := value
@@ -180,6 +216,10 @@ load_biomes :: proc(
 				if !xnum || !ynum do return {}, .Bad_Value, line_index
 				table.origin_pixel_x = i32(x)
 				table.origin_pixel_y = i32(y)
+			case "seed":
+				v, vok := strconv.parse_u64_maybe_prefixed(value)
+				if !vok do return {}, .Bad_Value, line_index
+				table.world_seed = v
 			case "biome_off_map":
 				off_map_name = value
 			}
@@ -202,33 +242,30 @@ load_biomes :: proc(
 		case "generator":
 			switch value {
 			case "uniform": current.generator = .Uniform
-			case "tile":    current.generator = .Tile
+			case "wang":    current.generator = .Wang
 			case:           return {}, .Bad_Value, line_index
 			}
-		case "tile":
-			// Tile ids are handed out in file order and stay dense, so
-			// the tile set is one packed block with no holes in it.
-			if current.tile != TILE_NONE {
-				// The biome named a tile twice. The last one wins.
-				delete(tile_paths[current.tile], allocator)
-				tile_paths[current.tile] = strings.clone(value, allocator)
-			} else {
-				if len(tile_paths) >= MAX_TILES do return {}, .Too_Many_Tiles, line_index
-				current.tile = Tile_Id(len(tile_paths))
-				append(&tile_paths, strings.clone(value, allocator))
-			}
+		case "tiles":
+			// The value is the start of every file name in the set, not
+			// one file. wang_tile_path finishes each name.
+			if value == "" do return {}, .Bad_Value, line_index
+			current_prefix = value
+		case "variants":
+			v, vok := strconv.parse_i64(value)
+			if !vok || v < 1 || v > WANG_MAX_VARIANTS do return {}, .Bad_Value, line_index
+			current.variants = u8(v)
 		}
 	}
 
 	if has_current {
-		if e, l := flush(&biomes, &names, current, current_name, seen, current_line, allocator); e != .None {
+		if e, l := flush(&biomes, &names, &prefixes, &next_tile, current, current_name, current_prefix, seen, current_line, allocator); e != .None {
 			return {}, e, l
 		}
 	}
 
 	table.biomes         = biomes[:]
 	table.names          = names[:]
-	table.tile_paths     = tile_paths[:]
+	table.tile_prefixes  = prefixes[:]
 	table.map_image_path = map_image_path
 
 	if off_map_name != "" {
@@ -248,11 +285,11 @@ load_biomes :: proc(
 
 destroy_biome_table :: proc(table: Biome_Table, allocator := context.allocator) {
 	for n in table.names do delete(n, allocator)
-	for p in table.tile_paths do delete(p, allocator)
+	for p in table.tile_prefixes do delete(p, allocator)
 	delete(table.map_image_path, allocator)
 	delete(table.biomes, allocator)
 	delete(table.names, allocator)
-	delete(table.tile_paths, allocator)
+	delete(table.tile_prefixes, allocator)
 }
 
 // ------------------------------------------------------------
@@ -293,29 +330,41 @@ test_load_biomes :: proc(t: ^testing.T) {
 
 	testing.expect(t, len(biomes.biomes) == 9, "expected 9 biomes")
 	testing.expect(t, len(biomes.names) == len(biomes.biomes))
+	testing.expect(t, len(biomes.tile_prefixes) == len(biomes.biomes))
 	testing.expect(t, biomes.cells_per_pixel == 512)
+	testing.expect(t, biomes.cells_per_pixel % TILE_SIZE == 0, "a region is a whole number of tiles")
 	testing.expect(t, biomes.origin_pixel_x == 8)
 	testing.expect(t, biomes.origin_pixel_y == 8)
 	testing.expect(t, biomes.map_image_path == "data/biome_map.png")
+	testing.expect(t, biomes.world_seed != 0, "the lattice needs a seed")
 
 	idx, found := find_biome_index(biomes, "Coalmine")
 	testing.expect(t, found, "Coalmine must exist")
 	testing.expect(t, biomes.biomes[idx].key_color == 0xFFD57917)
-	testing.expect(t, biomes.biomes[idx].generator == .Tile)
+	testing.expect(t, biomes.biomes[idx].generator == .Wang)
 
 	dirt, dirt_found := find_material_index(materials, "Dirt")
 	testing.expect(t, dirt_found)
 	testing.expect(t, int(biomes.biomes[idx].fill_0) == dirt, "a new Coalmine tile starts as Dirt")
 
-	// A tile biome carries a tile id, and that id names a file.
-	tile := biomes.biomes[idx].tile
-	testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile")
-	testing.expect(t, biomes.tile_paths[tile] == "data/tiles/coalmine.png")
+	// A wang biome carries a block of tile ids, and those ids name files.
+	b := biomes.biomes[idx]
+	testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set")
+	testing.expect(t, b.variants >= 1)
+	testing.expect(t, wang_set_size(b) == WANG_SIGNATURES * int(b.variants))
+	testing.expect(t, biomes.tile_prefixes[idx] == "data/tiles/coalmine")
+	testing.expect(
+		t,
+		biome_tile_path(biomes, Biome_Id(idx), wang_tile_id(b, wang_signature(1, 0, 1, 0), 0)) ==
+		"data/tiles/coalmine_1010_0.png",
+		"the file name must carry the edge colors",
+	)
 
 	sky, sky_found := find_biome_index(biomes, "Sky")
 	testing.expect(t, sky_found)
 	testing.expect(t, biomes.biomes[sky].generator == .Uniform)
-	testing.expect(t, biomes.biomes[sky].tile == TILE_NONE, "a uniform biome owns no tile")
+	testing.expect(t, biomes.biomes[sky].tile_base == TILE_NONE, "a uniform biome owns no tiles")
+	testing.expect(t, biomes.tile_prefixes[sky] == "")
 
 	off, off_found := find_biome_index(biomes, "Deep_Rock")
 	testing.expect(t, off_found)
@@ -323,36 +372,41 @@ test_load_biomes :: proc(t: ^testing.T) {
 }
 
 /*
-Tile ids are dense and unique. The tile set packs its cells by id, so
-a repeated id would make two biomes share one tile by accident, and a
-gap would waste a block nobody can reach.
+Tile ids are dense and the sets do not overlap. The tile set packs its
+cells by id, so an overlap would make two biomes share a tile by
+accident, and a gap would waste a block nobody can reach.
 */
 @(test)
-test_biome_tile_ids_are_dense_and_unique :: proc(t: ^testing.T) {
+test_biome_tile_ids_are_dense_and_do_not_overlap :: proc(t: ^testing.T) {
 	materials, biomes, ok := load_test_tables(t)
 	if !ok do return
 	defer destroy_test_tables(materials, biomes)
 
-	seen := make([]bool, biome_tile_count(biomes))
-	defer delete(seen)
+	owner := make([]int, biome_tile_count(biomes))
+	defer delete(owner)
+	for &o in owner do o = -1
 
-	tiles := 0
 	for b, i in biomes.biomes {
-		if b.tile == TILE_NONE do continue
-		tiles += 1
-		if !testing.expectf(t, int(b.tile) < len(seen), "%s has tile id %d, out of range", biomes.names[i], b.tile) {
+		if b.tile_base == TILE_NONE {
+			testing.expectf(t, biomes.tile_prefixes[i] == "", "%s names files it never draws", biomes.names[i])
 			continue
 		}
-		testing.expectf(t, !seen[b.tile], "two biomes claim tile id %d", b.tile)
-		seen[b.tile] = true
+		testing.expectf(t, biomes.tile_prefixes[i] != "", "%s owns tiles but names no files", biomes.names[i])
+
+		for k in 0 ..< wang_set_size(b) {
+			id := int(b.tile_base) + k
+			if !testing.expectf(t, id < len(owner), "%s reaches tile %d, past the end", biomes.names[i], id) {
+				continue
+			}
+			testing.expectf(t, owner[id] < 0, "biomes %d and %d both claim tile %d", owner[id], i, id)
+			owner[id] = i
+		}
 	}
 
-	testing.expect(t, tiles == biome_tile_count(biomes), "every tile path belongs to a biome")
-	for used, id in seen {
-		testing.expectf(t, used, "tile id %d has no biome", id)
-	}
-	for p in biomes.tile_paths {
-		testing.expect(t, p != "", "every tile names a file")
+	for who, id in owner {
+		testing.expectf(t, who >= 0, "tile id %d has no biome", id)
+		found_biome, found := biome_of_tile(biomes, Tile_Id(id))
+		testing.expect(t, found && int(found_biome) == who, "the owner lookup must agree")
 	}
 }
 
@@ -417,22 +471,32 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 		},
 		{
 			"bad generator",
-			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = wang\n",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = herringbone\n",
 			.Bad_Value,
 		},
 		{
-			"tile generator with no tile",
-			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = tile\n",
+			"wang generator with no tiles",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = wang\n",
 			.Tile_Mismatch,
 		},
 		{
-			"tile with no tile generator",
-			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ntile = a.png\n",
+			"tiles with no wang generator",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ntiles = data/tiles/a\n",
 			.Tile_Mismatch,
 		},
 		{
-			"tile and generator together are fine",
-			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = tile\ntile = a.png\n",
+			"variants out of range",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = wang\ntiles = a\nvariants = 0\n",
+			.Bad_Value,
+		},
+		{
+			"a region that is not a whole number of tiles",
+			"[Map]\nbiome_off_map = A\ncells_per_pixel = 500\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\n",
+			.Region_Mismatch,
+		},
+		{
+			"tiles and generator together are fine",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = wang\ntiles = a\nvariants = 3\n",
 			.None,
 		},
 	}
@@ -444,7 +508,11 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 
 		table, err, _ := load_biomes(path, materials)
 		testing.expectf(t, err == c.want, "%s: want %v, got %v", c.name, c.want, err)
-		if err == .None do destroy_biome_table(table)
+		if err == .None {
+			testing.expect(t, table.biomes[0].variants == 3, "the set must hold the variants it asked for")
+			testing.expect(t, wang_set_size(table.biomes[0]) == WANG_SIGNATURES * 3)
+			destroy_biome_table(table)
+		}
 	}
 }
 

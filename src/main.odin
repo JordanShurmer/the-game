@@ -219,11 +219,22 @@ draw_hud :: proc(app: ^App) {
 		rl_from_argb(b.key_color),
 	)
 
-	// What the cell under the crosshair is made of. A tile biome shows
+	// What the cell under the crosshair is made of. A tiled biome shows
 	// a different material every few cells, so the biome name alone no
-	// longer says what you are looking at.
+	// longer says what you are looking at. Naming the tile as well says
+	// which file to open to change it.
 	cell := world_cell_at(app.world, cx, cy)
-	source := b.tile == TILE_NONE ? "fill" : "tile"
+	source := "fill"
+	if b.tile_base != TILE_NONE {
+		sig := wang_signature_at(app.world.seed, tile_slot(cx), tile_slot(cy))
+		source = fmt.tprintf(
+			"tile %d%d%d%d",
+			wang_north(sig),
+			wang_east(sig),
+			wang_south(sig),
+			wang_west(sig),
+		)
+	}
 	rl.DrawText(
 		fmt.ctprintf("material: %s (%s)", app.world.materials.names[cell], source),
 		12,
