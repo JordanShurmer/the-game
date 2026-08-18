@@ -99,6 +99,13 @@ data/tiles/coalmine_0110_1.png
                     NESW variant
 ```
 
+The sets are authored data, and the tile editor is how to change one.
+A whole set is 32 pictures, so `tools/seed_tiles.py` draws one: caves
+carved out of stone, about half of every tile open. It reads the
+material and biome tables, so a new biome only needs `generator = wang`
+and a `tiles` prefix to be seeded, and `--check` holds the files on
+disk to the seam rule.
+
 ### Controls
 
 | Key | Action |
@@ -144,7 +151,7 @@ cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
 data/      the materials, the biomes, the biome map, the tiles
 docs/      the design notes and the toolchain
-tools/     the toolchain build
+tools/     the toolchain build, and the tile seeder
 ```
 
 The game is made of three parts. The biome map says which biome owns

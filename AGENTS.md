@@ -46,6 +46,31 @@ system reads until it is drawn at size. Two things are only ever
 visible in a shot: whether the lattice shows through as a grid, and
 whether the caves join up across the borders between tiles.
 
+## Draw a biome
+
+The tile PNGs in `data/tiles/` are authored data. Small changes belong
+in the tile editor (press T in the world editor) or in the MCP tile
+tools, which keep the Wang seam rule for you. A whole set is 32
+pictures, which is not hand work, so there is a tool for that:
+
+```sh
+tools/seed_tiles.py --list                 # which biomes draw a set
+tools/seed_tiles.py Coalmine --force       # OVERWRITES its 32 tiles
+tools/seed_tiles.py Coalmine --force --seed 12345   # another drawing
+tools/seed_tiles.py --check                # hold the files to the seam rule
+```
+
+It reads `data/materials.txt` and `data/biomes.txt`, so a biome only
+needs `generator = wang` and a `tiles` prefix there to be seeded. The
+`STYLES` table in the script says which materials a biome is made of,
+and the constants above it say how open the caves are. With no
+`--seed` it draws the tiles that are in the repository, exactly, so a
+change to the tool shows up as a change to the data.
+
+Read the header of that script before changing terrain generation. It
+holds the two rules that are easy to break and only visible in a shot
+of the whole world.
+
 ## Where things are
 
 | Path | What it holds |
@@ -55,10 +80,7 @@ whether the caves join up across the borders between tiles.
 | `cmd/shot/` | the world as a PNG |
 | `data/` | materials, biomes, the biome map, the tile sets |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain build |
+| `tools/` | the toolchain build, and the tile seeder |
 
-The tile PNGs in `data/tiles/` are authored data. Change them in the
-tile editor (press T in the world editor) or through the MCP tile
-tools, which keep the Wang seam rule for you. A pixel editor works
-too, but then the save gate may report a seam that no longer agrees,
-and `N` in the editor mends it.
+A pixel editor works on a tile too, but then the save gate may report
+a seam that no longer agrees, and `N` in the editor mends it.

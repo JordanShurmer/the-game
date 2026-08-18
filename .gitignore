@@ -34,6 +34,10 @@ desktop.ini
 shots/*
 !shots/.gitkeep
 
+# Python leaves these beside the tools
+__pycache__/
+*.pyc
+
 # Temporary / intermediate
 *.tmp
 *.log
