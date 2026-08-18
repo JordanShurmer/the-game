@@ -250,14 +250,22 @@ player_edge_clear_x :: proc(world: World, x, y: f32, dir: i32) -> bool {
 	return true
 }
 
-// The leading edge of a vertical move at a candidate y: the one row
-// the body would newly reach, spanning its full width. PLAYER_BODY_W
-// cells.
+/*
+The leading edge of a vertical move at a candidate y, spanning the
+body's full width: PLAYER_BODY_W cells.
+
+Going up that is the top row of the body. Going down it is the row at
+floor(y), which the body does NOT occupy: y is the floor his feet rest
+on, so the row under his feet is the one that stops him. Testing the
+body's own bottom row instead would test a row he already stands in,
+which is always clear, and he would sink a whole cell into every floor
+before the next row down finally refused him.
+*/
 @(private = "file")
 player_edge_clear_y :: proc(world: World, x, y: f32, dir: i32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, y1 := player_body_y_bounds(y)
-	edge := dir > 0 ? y1 - 1 : y0
+	edge := dir > 0 ? y1 : y0
 	for cx in x0 ..< x1 {
 		if player_solid_at(world, cx, edge) do return false
 	}
@@ -464,6 +472,13 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 		if player_edge_clear_y(world, p.x, ny, dir) {
 			p.y = ny
 		} else {
+			// Land flush on the row that stopped him rather than
+			// wherever in the cell the last substep happened to leave
+			// him. Without this he rests at a fraction, and every tick
+			// after gravity moves him a little further into the cell
+			// until it rounds down: a slow sink into every floor he
+			// stands on, and a position that means nothing exact.
+			if dir > 0 do p.y = math.floor(ny)
 			p.vy = 0
 			break
 		}
@@ -588,17 +603,26 @@ world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	return ground_x, surface_y, true
 }
 
-// A fresh wizard: found and standing, or at the world's fallback spot
-// if even that fails, facing right with a full tank.
+/*
+A fresh wizard: found and standing, or at the world's fallback spot if
+even that fails, facing right with a full tank.
+
+on_ground is asked of the world rather than left false. A spawn that
+reports itself airborne makes the first frame draw a falling wizard on
+solid ground, and every caller that only wants to place him and look at
+him has to run a physics tick or patch the flag by hand. The world
+already knows the answer, so this asks it once.
+*/
 player_spawn :: proc(world: World) -> Player {
 	x, y, found := world_find_spawn(world)
 	if !found do x, y = 0, 0
 
 	return Player{
-		x = f32(x),
-		y = f32(y),
-		facing = 1,
-		fuel = PLAYER_FUEL_MAX,
+		x         = f32(x),
+		y         = f32(y),
+		facing    = 1,
+		fuel      = PLAYER_FUEL_MAX,
+		on_ground = player_on_ground(world, f32(x), f32(y)),
 	}
 }
 
@@ -1071,6 +1095,41 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 		t, abs(x - mouth_x) < 200,
 		"the spawn must sit a sensible distance from the mouth it was found beside, got x=%d mouth=%d", x, mouth_x,
 	)
+}
+
+/*
+Beside the hole, not in it.
+
+The two tests above say the spawn cell is solid and the body box is
+clear, which a cell on the very lip of a mouth also satisfies. Neither
+of them says he is still there a second later. This runs him with no
+buttons held, which is what a player sees before touching anything: if
+the spawn hangs him over the edge, gravity finds out.
+*/
+@(test)
+test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	p := player_spawn(s.world)
+	testing.expect(t, p.on_ground, "a wizard spawned on solid ground must know he is standing")
+
+	start_x, start_y := p.x, p.y
+	for _ in 0 ..< PLAYER_TICK_HZ {
+		player_step(&p, s.world, {}, false)
+	}
+
+	testing.expectf(
+		t, p.y == start_y,
+		"he must not sink or fall in the first second, from y=%v to y=%v", start_y, p.y,
+	)
+	testing.expectf(
+		t, p.x == start_x,
+		"nothing pushes a wizard who holds no key, and he moved from x=%v to x=%v", start_x, p.x,
+	)
+	testing.expect(t, p.on_ground, "he must still be standing")
+	testing.expect(t, player_body_clear(s.world, p.x, p.y), "and still clear of the ground")
 }
 
 /*

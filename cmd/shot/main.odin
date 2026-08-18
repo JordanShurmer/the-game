@@ -17,31 +17,42 @@ window draws through, so the picture is what a player would see.
 
 	make shot
 	./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
+	./bin/shot player=1 out=shots/wizard.png
 
 Arguments are key=value in any order:
 
-	out    where to write the PNG               (shots/world.png)
-	biome  aim at the first region of this biome
-	x y    world cell at the top left           (0 0, or the biome)
-	w h    size of the picture in texels        (384 256)
-	step   world cells per texel                (1)
-	scale  image pixels per texel               (2)
-	grid   1 draws the tile lattice and the region borders (0)
+	out     where to write the PNG               (shots/world.png)
+	biome   aim at the first region of this biome
+	player  1 spawns the wizard and draws him standing at the cave
+	        mouth, aiming the view at him unless x, y or biome say
+	        otherwise                             (0)
+	x y     world cell at the top left           (0 0, or wherever
+	        player or biome aims the camera)
+	w h     size of the picture in texels        (384 256)
+	step    world cells per texel                (1)
+	scale   image pixels per texel               (2)
+	grid    1 draws the tile lattice and the region borders (0)
+
+This is the check on the sprite and its collision box lining up:
+player=1 draws through the same Sprite_Sheet and the same
+sprite_frame_origin the game window will later use, so a wizard who is
+off by a cell here would be off by a cell there too.
 
 The data paths are relative, so run it from the repository root.
 */
 
 Options :: struct {
-	out:   string,
-	biome: string,
-	x:     i32,
-	y:     i32,
-	w:     i32,
-	h:     i32,
-	step:  i32,
-	scale: i32,
-	grid:  bool,
-	aimed: bool, // x or y was given, so a biome must not move the camera
+	out:    string,
+	biome:  string,
+	x:      i32,
+	y:      i32,
+	w:      i32,
+	h:      i32,
+	step:   i32,
+	scale:  i32,
+	grid:   bool,
+	player: bool,
+	aimed:  bool, // x or y was given, so a biome or the player must not move the camera
 }
 
 main :: proc() {
@@ -64,6 +75,44 @@ main :: proc() {
 		os.exit(1)
 	}
 	defer game.sim_unload(&sim)
+
+	// Declared (and freed) here regardless of player=1, because Odin's
+	// defer fires at the end of the scope it is written in, not the end
+	// of the function: nesting the defer inside the `if options.player`
+	// block below would free this sheet before world_shot ever reads
+	// it. A zero-valued Sprite_Sheet has nil pixels, and destroying that
+	// is a no-op, so this is safe whether or not player=1 was given.
+	sheet: game.Sprite_Sheet
+	defer game.destroy_sprite_sheet(sheet)
+
+	player: game.Player
+	if options.player {
+		result: game.Sprite_Load_Result
+		sheet, result = game.load_sprite_sheet(game.SPRITE_SHEET_PATH)
+		if result.err != .None {
+			fmt.eprintfln("the sprite sheet could not load: %v", result.err)
+			os.exit(1)
+		}
+
+		player = game.player_spawn(sim.world)
+		// player_spawn already lands him on solid ground: world_find_spawn
+		// checks player_solid_at under his feet before it ever returns a
+		// point. A shot draws one still instant with no physics tick to
+		// discover that for itself the way player_step would on the
+		// game's first tick, so this states outright what that tick would
+		// otherwise compute, and draws him standing rather than mid-fall.
+		player.on_ground = true
+
+		// Aim the view at him unless the caller already aimed it some
+		// other way. A wizard is 24x32 cells; the default view is 384x256
+		// world cells starting at (0,0), and he spawns thousands of cells
+		// from the origin, so without this the default view would almost
+		// certainly not contain him at all.
+		if !options.aimed && options.biome == "" {
+			options.x = i32(player.x) - options.w * options.step / 2
+			options.y = i32(player.y) - options.h * options.step / 2
+		}
+	}
 
 	if options.biome != "" {
 		idx, found := game.find_biome_index(sim.world.biomes, options.biome)
@@ -92,6 +141,10 @@ main :: proc() {
 		},
 		scale = options.scale,
 		grid = options.grid,
+	}
+	if options.player {
+		shot.player = player
+		shot.sprite = sheet
 	}
 
 	if !game.world_shot(sim.world, shot, options.out) {
@@ -160,6 +213,8 @@ read_options :: proc(options: ^Options) -> bool {
 			options.scale, ok = number(key, value)
 		case "grid":
 			options.grid = value != "0" && value != "false"
+		case "player":
+			options.player = value != "0" && value != "false"
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false
