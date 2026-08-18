@@ -220,8 +220,14 @@ editor_look_at_pixel :: proc(app: ^App, px, py: i32) {
 	cpp := app.world.biomes.cells_per_pixel
 	centre_x := (px - app.world.biomes.origin_pixel_x) * cpp + cpp / 2
 	centre_y := (py - app.world.biomes.origin_pixel_y) * cpp + cpp / 2
-	app.cam_x = centre_x - (WINDOW_W / 2) * app.step
-	app.cam_y = centre_y - (WINDOW_H / 2) * app.step
+
+	// The view is app_view_cells texels wide, not WINDOW_W: at zoom
+	// above 1 that is fewer texels than the window has pixels, and
+	// centring on WINDOW_W would land M or middle-click off by the
+	// zoom factor.
+	w, h := app_view_cells(app)
+	app.cam_x = centre_x - (w / 2) * app.step
+	app.cam_y = centre_y - (h / 2) * app.step
 	app.dirty = true
 }
 
@@ -394,8 +400,13 @@ editor_draw_camera_box :: proc(app: ^App, cell, x0, y0: i32) {
 	// camera exactly rather than snapping to a region.
 	left := f32(app.cam_x) / f32(cpp) + f32(app.world.biomes.origin_pixel_x)
 	top := f32(app.cam_y) / f32(cpp) + f32(app.world.biomes.origin_pixel_y)
-	w := f32(WINDOW_W * app.step) / f32(cpp)
-	h := f32(WINDOW_H * app.step) / f32(cpp)
+
+	// view_w and view_h are texels, not WINDOW_W/WINDOW_H: at zoom above
+	// 1 the window shows fewer texels than it has pixels, and a box
+	// drawn at the window size would be zoom times too large.
+	view_w, view_h := app_view_cells(app)
+	w := f32(view_w * app.step) / f32(cpp)
+	h := f32(view_h * app.step) / f32(cpp)
 
 	rl.DrawRectangleLinesEx(
 		rl.Rectangle{f32(x0) + left * f32(cell), f32(y0) + top * f32(cell), w * f32(cell), h * f32(cell)},
