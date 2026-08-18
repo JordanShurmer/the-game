@@ -58,24 +58,33 @@ OUT_PATH = "data/sprites/wizard.png"
 # room below him is for the jetpack flame, which comes out under the
 # robe. Both belong to the frame, so the game draws one picture and
 # never has to know where a flame goes.
-FRAME_W = 32
-FRAME_H = 40
+FRAME_W = 24
+FRAME_H = 32
 COLUMNS = 6
 ROWS = 6
 
 # Where the wizard collides. src/player.odin holds the same four
 # numbers, and src/sprite.odin has a test that the art respects them.
-BODY_X = 12  # left column of the body box inside a frame
+#
+# The height is what the world allows, not what the drawing wants. Two
+# tiles that meet share the cells within WANG_SEAM of the border, so
+# every mouth in the world narrows to the same channel where it crosses
+# a seam. That channel is 16 cells in the shipped sets. A body taller
+# than that cannot leave the tile it is in, whatever the cave looks like
+# in the middle, so the body is 13 and keeps a cell of air either side.
+# src/player.odin holds a test that measures the channel and fails if a
+# reseeded set ever closes it.
+BODY_X = 8  # left column of the body box inside a frame
 BODY_W = 8
-BODY_Y = 10  # top row of the body box inside a frame
-BODY_H = 22
+BODY_Y = 11  # top row of the body box inside a frame
+BODY_H = 13
 
-FOOT_Y = BODY_Y + BODY_H - 1  # the row his feet stand on: 31
+FOOT_Y = BODY_Y + BODY_H - 1  # the row his feet stand on: 23
 
 # How far the art may lift off the bottom of the body box. A walk rides
 # up and down and a flame lifts him off his feet, so the gate allows a
 # little; a wizard drawn any higher than this is floating.
-FOOT_SLACK = 3
+FOOT_SLACK = 2
 
 # A row of the sheet, and how many of its columns hold a frame. The
 # rest of the row is left transparent on purpose; src/sprite.odin reads
@@ -180,14 +189,14 @@ def draw_wizard(f, p):
     floor and everything else is measured from there.
     """
     ground = FOOT_Y + p["bob"]
-    centre = BODY_X + BODY_W / 2 - 0.5  # 15.5, the middle of the body box
+    centre = BODY_X + BODY_W / 2 - 0.5  # 11.5, the middle of the body box
     upper = centre + p["lean"]
 
-    hem_y = ground - 3
-    shoulder_y = ground - 16 + p["squash"]
-    brim_y = shoulder_y - 2
+    hem_y = ground - 2
+    shoulder_y = ground - 11 + p["squash"]
+    brim_y = shoulder_y - 1
     tip_x = upper + p["tip"][0]
-    tip_y = brim_y - 10 + p["tip"][1]
+    tip_y = brim_y - 7 + p["tip"][1]
 
     # The flame comes first: it is behind him and below him.
     if p["jet"] > 0:
@@ -197,44 +206,37 @@ def draw_wizard(f, p):
     # all that ever shows of his legs, the same way they are in the
     # drawing.
     for dx, dy in (p["foot_back"], p["foot_front"]):
-        rect(f, centre + dx - 1.5, ground - 1 + dy, centre + dx + 1.5, ground + dy, INK_DEEP)
+        rect(f, centre + dx - 1, ground - 1 + dy, centre + dx + 1, ground + dy, INK_DEEP)
 
     # The robe, shoulders to hem. It is the mass of him and it is dark,
     # with one fold catching the light down the right. It stops short of
     # his feet, or the feet are inside it and he has none.
     hem_x = centre + p["hem_sway"]
-    taper(f, upper, shoulder_y, 5.2, hem_x, hem_y, p["hem"], INK_DEEP)
-    taper(f, upper + 2.6, shoulder_y + 3, 1.6, hem_x + 3.8, hem_y - 1, 2.2, INK)
+    taper(f, upper, shoulder_y, 3.3, hem_x, hem_y, p["hem"], INK_DEEP)
+    taper(f, upper + 1.7, shoulder_y + 2, 1.0, hem_x + 2.4, hem_y - 1, 1.4, INK)
 
     # The sleeve that reaches out to the staff.
     hand_x = upper + p["hand"][0]
     hand_y = shoulder_y + p["hand"][1]
-    thick_line(f, upper + 2, shoulder_y + 3, hand_x, hand_y, 1.6, INK)
+    thick_line(f, upper + 1.3, shoulder_y + 2, hand_x, hand_y, 1.0, INK)
 
     # The beard: the one pale thing on him, and the thing that says
     # wizard. It is a narrow wedge that comes to a point above the hem,
     # not a panel: the robe has to show dark on both sides of it, or he
     # reads as a lamp with a window in it.
     beard_x = upper + p["beard"]
-    beard_end = hem_y - 3
-    taper(f, upper, brim_y + 2, 2.9, beard_x, beard_end, 0.8, BEARD)
+    beard_end = hem_y - 2
+    taper(f, upper, brim_y + 2, 1.9, beard_x, beard_end, 0.5, BEARD)
 
-    # Two strands down it. A flat wedge of one color reads as cloth; a
+    # One strand down it. A flat wedge of one color reads as cloth; a
     # line along the way the hair falls reads as hair.
-    for side, start in ((-1.1, 0.15), (1.0, 0.35)):
-        top = brim_y + 2 + (beard_end - brim_y - 2) * start
-        thick_line(
-            f,
-            upper + side, top,
-            beard_x + side * 0.3, beard_end - 1,
-            0.4, BEARD_SHADE,
-        )
+    thick_line(f, upper - 0.7, brim_y + 3, beard_x - 0.3, beard_end - 1, 0.3, BEARD_SHADE)
 
     # The hat. The cone is drawn up from the brim, and the brim over the
     # foot of it, which is the order the shapes overlap in the drawing.
-    taper(f, upper - 0.5, brim_y, 5.0, tip_x, tip_y, 1.0, INK_DEEP)
-    taper(f, upper + 0.8, brim_y - 1, 2.6, tip_x + 0.5, tip_y + 2, 0.6, INK)
-    thick_line(f, tip_x, tip_y, tip_x + p["flop"][0], tip_y + p["flop"][1], 1.2, INK_DEEP)
+    taper(f, upper - 0.3, brim_y, 3.2, tip_x, tip_y, 0.7, INK_DEEP)
+    taper(f, upper + 0.5, brim_y - 1, 1.6, tip_x + 0.3, tip_y + 1.3, 0.4, INK)
+    thick_line(f, tip_x, tip_y, tip_x + p["flop"][0], tip_y + p["flop"][1], 0.8, INK_DEEP)
 
     brim(f, upper, brim_y, p["brim"])
 
@@ -244,11 +246,11 @@ def draw_wizard(f, p):
     head_dx, head_dy = p["staff_head"]
     head_x = upper + head_dx
     head_y = shoulder_y + head_dy
-    thick_line(f, centre + foot_dx, ground + foot_dy, head_x, head_y, 0.9, INK_DEEP)
+    thick_line(f, centre + foot_dx, ground + foot_dy, head_x, head_y, 0.6, INK_DEEP)
 
-    disc(f, hand_x, hand_y, 1.6, INK)
-    disc(f, head_x, head_y, 3.2, ORB)
-    disc(f, head_x - 0.9, head_y - 0.9, 1.4, ORB_CORE)
+    disc(f, hand_x, hand_y, 1.0, INK)
+    disc(f, head_x, head_y, 2.1, ORB)
+    disc(f, head_x - 0.6, head_y - 0.6, 0.9, ORB_CORE)
 
     edge_left(f, INK, INK_PALE)
     edge_left(f, BEARD, BEARD_SHADE)
@@ -261,9 +263,9 @@ def brim(f, cx, y, half):
     thickness and all of its width, and that is what makes the hat read
     as a hat at this size rather than as a cone on a head.
     """
-    rect(f, cx - half + 1.5, y - 1, cx + half - 1.5, y - 1, INK)
+    rect(f, cx - half + 1.0, y - 1, cx + half - 1.0, y - 1, INK)
     rect(f, cx - half, y, cx + half, y, INK_DEEP)
-    rect(f, cx - half + 1, y + 1, cx + half - 1, y + 1, INK_DEEP)
+    rect(f, cx - half + 0.8, y + 1, cx + half - 0.8, y + 1, INK_DEEP)
 
 
 def plume(f, cx, ground, flicker):
@@ -272,10 +274,10 @@ def plume(f, cx, ground, flicker):
     He wears no machine. The drawing gave him no pack, so the lift comes
     out from under the robe, which is the read a wizard wants anyway.
     """
-    length = 7 + flicker * 1.5
+    length = 6 + flicker * 1.5
     for i in range(int(round(length))):
         t = i / length
-        half = 2.6 * (1.0 - t) + 0.4
+        half = 1.8 * (1.0 - t) + 0.3
         row = ground + 1 + i
         for x in range(int(round(cx - half)), int(round(cx + half)) + 1):
             put(f, x, row, FLAME_HOT if t < 0.4 else FLAME)
@@ -290,17 +292,17 @@ def base_params():
         "bob": 0.0,  # the whole of him, up and down
         "lean": 0.0,  # everything above the hem, left and right
         "squash": 0.0,  # his shoulders, up and down
-        "hem": 7.8,  # half the width of the robe where it ends
+        "hem": 5.0,  # half the width of the robe where it ends
         "hem_sway": 0.0,
         "beard": 0.0,  # where the point of the beard swings to
-        "brim": 8.4,  # half the width of the hat
-        "tip": (-3.4, 0.0),  # where the point of the hat leans
-        "flop": (-2.2, 1.8),  # and where it flops over to
-        "hand": (5.6, 4.0),  # the grip, from his shoulder
-        "staff_foot": (3.5, 0.0),  # the foot of the staff, from his feet
-        "staff_head": (11.5, -9.0),  # the head of it, from his shoulder
-        "foot_back": (-3.0, 0.0),
-        "foot_front": (2.5, 0.0),
+        "brim": 5.4,  # half the width of the hat
+        "tip": (-2.1, 0.0),  # where the point of the hat leans
+        "flop": (-1.4, 1.1),  # and where it flops over to
+        "hand": (3.5, 2.5),  # the grip, from his shoulder
+        "staff_foot": (2.2, 0.0),  # the foot of the staff, from his feet
+        "staff_head": (6.0, -7.0),  # the head of it, from his shoulder
+        "foot_back": (-1.9, 0.0),
+        "foot_front": (1.6, 0.0),
         "jet": 0.0,
         "flicker": 0.0,
     }
@@ -319,82 +321,82 @@ def frames_of(row, rng):
             # He breathes and the hat tip settles. Nothing else moves,
             # or standing still reads as fidgeting.
             p["bob"] = -0.5 + 0.5 * math.cos(phase)
-            p["squash"] = 0.4 * math.sin(phase)
-            p["beard"] = 0.4 * math.sin(phase)
-            p["tip"] = (-3.0 + 0.5 * math.sin(phase), 0.3 * math.cos(phase))
-            p["hem_sway"] = 0.3 * math.sin(phase)
+            p["squash"] = 0.3 * math.sin(phase)
+            p["beard"] = 0.25 * math.sin(phase)
+            p["tip"] = (-2.1 + 0.3 * math.sin(phase), 0.25 * math.cos(phase))
+            p["hem_sway"] = 0.2 * math.sin(phase)
 
         elif row == "walk":
             # The robe hides his legs, so the walk is in the feet, the
             # hem, and the rise and fall of the whole of him.
-            stride = 3.4 * math.sin(phase)
-            p["bob"] = -abs(math.sin(phase)) * 1.4
-            p["lean"] = 0.5
-            p["foot_back"] = (-2.0 - stride, -max(0.0, -stride) * 0.7)
-            p["foot_front"] = (2.0 + stride, -max(0.0, stride) * 0.7)
-            p["hem_sway"] = -0.9 * math.sin(phase)
-            p["hem"] = 6.4 + 0.4 * abs(math.cos(phase))
-            p["beard"] = -0.7 * math.sin(phase)
-            p["tip"] = (-3.2 - 0.6 * math.sin(phase), 0.0)
-            p["staff_foot"] = (3.5 + 0.8 * math.sin(phase), 0.0)
+            stride = 2.1 * math.sin(phase)
+            p["bob"] = -abs(math.sin(phase)) * 0.9
+            p["lean"] = 0.3
+            p["foot_back"] = (-1.4 - stride, -max(0.0, -stride) * 0.7)
+            p["foot_front"] = (1.4 + stride, -max(0.0, stride) * 0.7)
+            p["hem_sway"] = -0.6 * math.sin(phase)
+            p["hem"] = 5.0 + 0.25 * abs(math.cos(phase))
+            p["beard"] = -0.45 * math.sin(phase)
+            p["tip"] = (-2.1 - 0.4 * math.sin(phase), 0.0)
+            p["staff_foot"] = (2.2 + 0.5 * math.sin(phase), 0.0)
 
         elif row == "run":
             # The same walk, leaning into it, with everything trailing.
-            stride = 5.0 * math.sin(phase)
-            p["bob"] = -abs(math.sin(phase)) * 2.2
-            p["lean"] = 1.1
-            p["squash"] = 0.6
-            p["foot_back"] = (-2.0 - stride, -max(0.0, -stride) * 1.1)
-            p["foot_front"] = (2.0 + stride, -max(0.0, stride) * 1.1)
-            p["hem_sway"] = -1.5 - 0.8 * math.sin(phase)
-            p["hem"] = 6.8
-            p["beard"] = -1.8 - 0.6 * math.sin(phase)
-            p["brim"] = 7.4
-            p["tip"] = (-4.6, 1.0)
-            p["flop"] = (-2.6, 1.0)
-            p["staff_foot"] = (2.6, 0.0)
+            stride = 3.1 * math.sin(phase)
+            p["bob"] = -abs(math.sin(phase)) * 1.4
+            p["lean"] = 0.7
+            p["squash"] = 0.4
+            p["foot_back"] = (-1.4 - stride, -max(0.0, -stride) * 1.1)
+            p["foot_front"] = (1.4 + stride, -max(0.0, stride) * 1.1)
+            p["hem_sway"] = -0.9 - 0.5 * math.sin(phase)
+            p["hem"] = 5.2
+            p["beard"] = -1.1 - 0.4 * math.sin(phase)
+            p["brim"] = 5.2
+            p["tip"] = (-2.9, 0.6)
+            p["flop"] = (-1.6, 0.6)
+            p["staff_foot"] = (1.6, 0.0)
 
         elif row == "rise":
             # Going up: everything he wears is pulled down after him.
-            p["bob"] = -0.6 * i
-            p["squash"] = -0.8
-            p["hem"] = 5.2 - 0.3 * i
+            p["bob"] = -0.4 * i
+            p["squash"] = -0.5
+            p["hem"] = 3.4 - 0.2 * i
             p["beard"] = 0.0
-            p["foot_back"] = (-2.4, -1.5 - 0.4 * i)
-            p["foot_front"] = (2.4, -2.2 - 0.4 * i)
-            p["tip"] = (-2.2, 1.6 + 0.5 * i)
-            p["flop"] = (-1.4, 2.2)
-            p["hand"] = (5.0, 2.0)
+            p["foot_back"] = (-1.6, -1.0 - 0.25 * i)
+            p["foot_front"] = (1.6, -1.4 - 0.25 * i)
+            p["tip"] = (-1.4, 1.0 + 0.3 * i)
+            p["flop"] = (-0.9, 1.4)
+            p["hand"] = (3.1, 1.3)
 
         elif row == "fall":
             # Going down: everything is pulled up, and his feet spread.
-            p["bob"] = -0.3 * i
-            p["squash"] = 0.6
-            p["hem"] = 7.4 + 0.4 * i
+            p["bob"] = -0.2 * i
+            p["squash"] = 0.4
+            p["hem"] = 4.6 + 0.25 * i
             p["hem_sway"] = 0.0
             p["beard"] = 0.0
-            p["foot_back"] = (-3.6, 0.0)
-            p["foot_front"] = (3.4, 0.0)
-            p["tip"] = (-3.4, -1.6 - 0.4 * i)
-            p["flop"] = (-2.4, -1.4)
-            p["hand"] = (5.2, 4.2)
+            p["foot_back"] = (-2.2, 0.0)
+            p["foot_front"] = (2.1, 0.0)
+            p["tip"] = (-2.1, -1.0 - 0.25 * i)
+            p["flop"] = (-1.5, -0.9)
+            p["hand"] = (3.2, 2.6)
 
         elif row == "jet":
             # Under thrust: the robe is blown out, the staff comes down,
             # and the flame beats.
             beat = math.sin(phase)
-            p["bob"] = -1.0 - 0.4 * beat
-            p["squash"] = -0.4
-            p["hem"] = 7.6 + 0.8 * beat
-            p["hem_sway"] = 0.4 * beat
-            p["beard"] = -0.8
-            p["foot_back"] = (-2.6, -2.0)
-            p["foot_front"] = (2.6, -2.4)
-            p["tip"] = (-3.6, 1.8)
-            p["flop"] = (-2.2, 2.0)
-            p["hand"] = (5.4, 5.0)
-            p["staff_foot"] = (4.2, -2.0)
-            p["staff_head"] = (9.0, -11.0)
+            p["bob"] = -0.6 - 0.25 * beat
+            p["squash"] = -0.25
+            p["hem"] = 4.7 + 0.5 * beat
+            p["hem_sway"] = 0.25 * beat
+            p["beard"] = -0.5
+            p["foot_back"] = (-1.6, -1.2)
+            p["foot_front"] = (1.6, -1.5)
+            p["tip"] = (-2.2, 1.1)
+            p["flop"] = (-1.4, 1.2)
+            p["hand"] = (3.3, 3.1)
+            p["staff_foot"] = (2.6, -1.2)
+            p["staff_head"] = (5.4, -5.5)
             p["jet"] = 1.0
             p["flicker"] = beat
 
