@@ -29,6 +29,11 @@ desktop.ini
 *.swp
 *~
 
+# Shots are pictures of the world, drawn on demand. The harness is
+# kept; what it draws is not.
+shots/*
+!shots/.gitkeep
+
 # Temporary / intermediate
 *.tmp
 *.log
