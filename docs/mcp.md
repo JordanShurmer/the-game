@@ -29,7 +29,7 @@ The tools follow the three things the game is made of.
 | Part | What it decides | Tools |
 | --- | --- | --- |
 | The biome map | Which biome owns which region | `biome_map_view`, `biome_map_paint`, `biome_map_save` |
-| The tiles | What one region of a biome is made of | `tile_open`, `tile_view`, `tile_paint`, `tile_save` |
+| The tile sets | What a biome is made of, tile by tile | `tile_open`, `tile_select`, `tile_view`, `tile_paint`, `tile_repair`, `tile_save` |
 | The sandbox | What a rectangle of that world does next | `sandbox_open`, `enqueue_input`, `tick`, `observe`, `queue_peek` |
 
 Three more tools read the tables: `world_status`, `list_materials`,
@@ -43,7 +43,9 @@ drag in the world editor calls. `tile_paint` calls
 `tile_editor_paint_cell`, which is what a left drag in the tile editor
 calls. `biome_map_save` calls `editor_save_map`, and it meets the same
 gate: a map that falls into more than one connected piece does not
-save, for a model as for a person.
+save, for a model as for a person. `tile_save` meets the other gate:
+a set whose tiles disagree about a cell they share does not save
+either.
 
 So the two cannot drift apart. There is no second code path to keep in
 step, and a rule added to the editor reaches both at once.
@@ -136,7 +138,8 @@ raises a counter that `world_status` prints.
 The point of the merge is that an edit reaches the physics.
 
 ```
-tile_open     biome=Coalmine
+tile_open     biome=Coalmine             -> 32 tiles, 2 per signature
+tile_select   edges=0110                 -> open on the east and the south
 tile_paint    x=20 y=6 rows=[...]        -> every Coalmine region changes
 sandbox_open  biome=Coalmine width=48 height=34
   -> sandbox 48x34 filled from world (-4096,-2560), the first Coalmine region
@@ -149,6 +152,32 @@ observe
 
 `sandbox_open` with no arguments reloads the same rectangle. That is
 how any edit to the map or to a tile reaches a running sandbox.
+
+## The tile sets
+
+A biome with `generator = wang` owns a set of 64x64 tiles, and the
+world lays them out on a lattice of tile squares. Each tile carries a
+color on each of its four sides. The lattice colors every edge from a
+hash of its own position, and a square takes the tile whose four sides
+match the four edges around it, so two tiles side by side always agree
+about the edge they share and no rectangle of world has to be
+generated before another one.
+
+Two colors make a complete set 16 tiles. `variants` draws several
+pictures of one set of edges, and the lattice picks between them, so
+the same four edges do not always give the same tile.
+
+`tile_select` names a tile by its edge colors, north east south west,
+which is also the end of its file name:
+`data/tiles/coalmine_0110_1.png`.
+
+The cells within four of a side belong to the edge color rather than
+to the tile. `tile_paint` writes a stroke there into every tile of the
+set that carries that color, because that is the same seam seen from
+another tile. `tile_view` says so before it prints the grid.
+
+`tile_repair` is for files painted outside the editor. It makes every
+shared cell agree again, and it never touches the middle of a tile.
 
 ## Reading the world
 

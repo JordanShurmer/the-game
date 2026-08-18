@@ -6,42 +6,47 @@ import "core:testing"
 /*
 Biome tiles.
 
-A tile is a square block of authored cells. A biome that owns a tile
-repeats that tile across the world instead of showing one flat
-material.
+A tile is a square block of authored cells. A biome that owns tiles
+draws them across the world instead of showing one flat material.
 
-This is the bottom rung of the ladder on purpose. There is no
-herringbone lattice, no edge constraints, and no template: one tile
-per biome, repeated. Phase 3 adds the lattice. The data does not
-change shape when it does, because a tile stays a square block of
-material ids whatever chooses it.
+A biome owns a whole set, not one tile. The world is cut into a
+lattice of tile squares, and each square takes the tile of the set
+that fits the edges around it. wang.odin decides which one that is.
+This file only holds the cells and hands them out.
 
-Every tile is the same size, and all tiles live in one allocation, so
-the generator reads a tile the way it reads any other flat array.
+Every tile is the same size, and all tiles of every biome live in one
+allocation, so the generator reads a tile the way it reads any other
+flat array.
 */
 
-// Cells along one edge of a tile. It is a power of two, so the
-// generator wraps a world coordinate with a mask instead of a
-// division. The generator does that once per texel, so it counts.
+// Cells along one edge of a tile. It is a power of two, so a world
+// coordinate wraps into a tile with a mask instead of a division. The
+// generator does that once per texel, so it counts.
 TILE_SIZE :: 64
 TILE_MASK :: TILE_SIZE - 1
 TILE_AREA :: TILE_SIZE * TILE_SIZE
 
 #assert(TILE_SIZE > 0 && (TILE_SIZE & TILE_MASK) == 0, "TILE_SIZE must be a power of two")
 
-// A tile id indexes a Tile_Set. TILE_NONE marks a biome with no tile,
-// which fills flat. The id fits the byte Biome left free.
-Tile_Id :: u8
+/*
+A tile id indexes a Tile_Set. TILE_NONE marks a biome with no tiles,
+which fills flat.
 
-TILE_NONE :: Tile_Id(0xFF)
-MAX_TILES :: 255 // 0xFF is reserved for TILE_NONE
+The id is two bytes now. A biome owns WANG_SIGNATURES tiles times its
+variants, so a handful of tiled biomes passes what one byte holds.
+*/
+Tile_Id :: u16
+
+TILE_NONE :: Tile_Id(0xFFFF)
+MAX_TILES :: 4096 // far past what an author can draw, and 8 MB of cells
 
 /*
 Every tile in the world, back to back.
 
-`cells` is one block: tile `id` starts at `int(id) * TILE_AREA`. The
-whole set is small (4 KB per tile), so it stays in cache while the
-generator fills a screen.
+`cells` is one block: tile `id` starts at `int(id) * TILE_AREA`. One
+tile is 4 KB and one complete set is 64 KB per variant, so a biome
+set stays inside the second level cache while the generator fills a
+screen from it.
 
 The set holds no names or paths. Cold authoring data lives in
 Biome_Table, next to the other strings the loader owns.
@@ -82,29 +87,37 @@ tile_set_cell :: proc(set: Tile_Set, id: Tile_Id, x, y: i32, c: Cell) {
 }
 
 // Paint a whole tile one material. A tile with no file on disk starts
-// like this, so a biome that gains a tile looks the way it did with a
+// like this, so a biome that gains a set looks the way it did with a
 // flat fill until somebody paints it.
 tile_fill :: proc(set: Tile_Set, id: Tile_Id, c: Cell) {
 	slice.fill(tile_cells(set, id), c)
 }
 
 /*
-The cell a tile shows at a world position.
+The lattice square a world coordinate falls in.
 
-The wrap is in world space, not region space, so the pattern runs
-unbroken across two neighbouring regions of the same biome. It also
-means a region never has to know where it starts.
+The lattice is in world space, not region space, so it runs unbroken
+across two neighbouring regions of the same biome, and a region never
+has to know where it starts.
+
+floor_div, not a truncating divide: the square left of zero is -1, not
+0, and folding the two sides of the origin together would put a seam
+there that no edge color asked for.
+*/
+tile_slot :: proc(w: i32) -> i32 {
+	return floor_div(w, TILE_SIZE)
+}
+
+/*
+Where a world coordinate lands inside its tile.
 
 A mask does the wrap. TILE_SIZE is a power of two, and two's
 complement makes the mask give the floored remainder for negative
 coordinates as well: `-1 & 63` is 63, the cell at the far edge of the
-tile to the left. Plain `%` would fold the two sides of zero together,
-the same trap floor_div avoids for regions.
+tile to the left.
 */
-tile_sample :: proc(set: Tile_Set, id: Tile_Id, wx, wy: i32) -> Cell {
-	x := wx & TILE_MASK
-	y := wy & TILE_MASK
-	return set.cells[int(id) * TILE_AREA + int(y) * TILE_SIZE + int(x)]
+tile_offset :: proc(w: i32) -> i32 {
+	return w & TILE_MASK
 }
 
 // ------------------------------------------------------------
@@ -138,75 +151,32 @@ test_tile_set_gives_each_tile_its_own_block :: proc(t: ^testing.T) {
 	for c in tile_cells(set, 0) do testing.expect(t, c == 1 || c == 42)
 }
 
+/*
+The lattice must not fold the two sides of the origin together. The
+square left of world cell 0 is square -1, and its last column is the
+cell at world x -1.
+*/
 @(test)
-test_tile_sample_wraps_across_the_origin :: proc(t: ^testing.T) {
-	set := make_tile_set(1)
-	defer destroy_tile_set(set)
+test_tile_lattice_crosses_the_origin :: proc(t: ^testing.T) {
+	testing.expect(t, tile_slot(0) == 0)
+	testing.expect(t, tile_slot(TILE_SIZE - 1) == 0)
+	testing.expect(t, tile_slot(TILE_SIZE) == 1)
+	testing.expect(t, tile_slot(-1) == -1)
+	testing.expect(t, tile_slot(-TILE_SIZE) == -1)
+	testing.expect(t, tile_slot(-TILE_SIZE - 1) == -2)
 
-	// Mark the four corners so a wrap that lands in the wrong place is
-	// visible.
-	tile_fill(set, 0, 0)
-	tile_set_cell(set, 0, 0, 0, 1)
-	tile_set_cell(set, 0, TILE_SIZE - 1, 0, 2)
-	tile_set_cell(set, 0, 0, TILE_SIZE - 1, 3)
-	tile_set_cell(set, 0, TILE_SIZE - 1, TILE_SIZE - 1, 4)
+	testing.expect(t, tile_offset(0) == 0)
+	testing.expect(t, tile_offset(-1) == TILE_SIZE - 1)
+	testing.expect(t, tile_offset(-TILE_SIZE) == 0)
 
-	testing.expect(t, tile_sample(set, 0, 0, 0) == 1)
-	testing.expect(t, tile_sample(set, 0, TILE_SIZE, TILE_SIZE) == 1, "one tile over repeats")
-	testing.expect(t, tile_sample(set, 0, -TILE_SIZE, -TILE_SIZE) == 1, "and so does one tile back")
-
-	// The cell left of the origin is the last column, not the first.
-	testing.expect(t, tile_sample(set, 0, -1, 0) == 2)
-	testing.expect(t, tile_sample(set, 0, 0, -1) == 3)
-	testing.expect(t, tile_sample(set, 0, -1, -1) == 4)
-
-	// The pattern is unbroken: every position agrees with the position
-	// one whole tile away, on both sides of the origin.
-	for wy in i32(-TILE_SIZE - 3) ..< i32(TILE_SIZE + 3) {
-		for wx in i32(-TILE_SIZE - 3) ..< i32(TILE_SIZE + 3) {
-			a := tile_sample(set, 0, wx, wy)
-			testing.expectf(
-				t,
-				a == tile_sample(set, 0, wx + TILE_SIZE, wy),
-				"the tile must repeat across x at %d,%d",
-				wx,
-				wy,
-			)
-			testing.expectf(
-				t,
-				a == tile_sample(set, 0, wx, wy + TILE_SIZE),
-				"the tile must repeat across y at %d,%d",
-				wx,
-				wy,
-			)
-		}
-	}
-}
-
-@(test)
-test_tile_sample_matches_the_plain_wrap :: proc(t: ^testing.T) {
-	set := make_tile_set(1)
-	defer destroy_tile_set(set)
-
-	// A pattern with no symmetry, so a swapped axis shows up.
-	for y in i32(0) ..< TILE_SIZE {
-		for x in i32(0) ..< TILE_SIZE {
-			tile_set_cell(set, 0, x, y, Cell((x * 7 + y * 13) & 0xFF))
-		}
-	}
-
-	// floor_div gives the same wrap as the mask. It is the slow oracle.
-	for wy in i32(-200) ..< i32(200) {
-		for wx in i32(-200) ..< i32(200) {
-			x := wx - floor_div(wx, TILE_SIZE) * TILE_SIZE
-			y := wy - floor_div(wy, TILE_SIZE) * TILE_SIZE
-			testing.expectf(
-				t,
-				tile_sample(set, 0, wx, wy) == tile_at(set, 0, x, y),
-				"mask wrap must match floored wrap at %d,%d",
-				wx,
-				wy,
-			)
-		}
+	// The two together rebuild the coordinate they came from, on both
+	// sides of the origin.
+	for w in i32(-200) ..< i32(200) {
+		testing.expectf(
+			t,
+			tile_slot(w) * TILE_SIZE + tile_offset(w) == w,
+			"the lattice must account for every cell, and it lost %d",
+			w,
+		)
 	}
 }

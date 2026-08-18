@@ -12,7 +12,7 @@ They fall into three groups, which are the three things the game is
 made of:
 
   the biome map   which biome owns which region of the world
-  the tiles       what one region of a biome is made of
+  the tile sets   what a biome is made of, tile by tile
   the sandbox     what a rectangle of that world does next
 
 The first two are the editors. Every one of their tools calls the same
@@ -55,15 +55,21 @@ MCP_TOOLS_JSON :: `{"tools":[
  "description":"Write the biome map image. The save is blocked while the painted map falls into more than one connected region, which is the same gate the world editor applies.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"tile_open",
- "description":"Open a biome's tile for painting, the same way pressing T does in the world editor. A biome that fills flat has no tile and says so.",
+ "description":"Open a biome's tile set for painting, the same way pressing T does in the world editor. A biome that fills flat has no set and says so. A set holds one tile for every combination of four edge colors, so the world can place them anywhere and never show a seam.",
  "inputSchema":{"type":"object","properties":{
-   "biome":{"type":"string","description":"Biome name whose tile to open."}},
+   "biome":{"type":"string","description":"Biome name whose set to open."}},
   "required":["biome"],"additionalProperties":false}},
+{"name":"tile_select",
+ "description":"Choose which tile of the open set to paint. A tile is named by its four edge colors, north east south west, which is also the end of its file name.",
+ "inputSchema":{"type":"object","properties":{
+   "edges":{"type":"string","description":"Four digits, north east south west, each 0 or 1. For example \"0110\" is open on the east and the south."},
+   "variant":{"type":"integer","description":"Which drawing of those four edges to paint. Default 0.","minimum":0}},
+  "additionalProperties":false}},
 {"name":"tile_view",
- "description":"Read the open tile as a character grid of material glyphs.",
+ "description":"Read the selected tile as a character grid of material glyphs, with its edge colors and which cells the seam rule shares with the rest of the set.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"tile_paint",
- "description":"Paint the open tile, the same way the mouse does in the tile editor. Give either a rectangle and a material, or rows of material glyphs to stamp a picture. Every region of that biome in the world changes at once.",
+ "description":"Paint the selected tile, the same way the mouse does in the tile editor. Give either a rectangle and a material, or rows of material glyphs to stamp a picture. A cell in the middle belongs to this tile; a cell within 4 of a side belongs to the edge color of that side and is written into every tile of the set that carries it. Every region of that biome in the world changes at once.",
  "inputSchema":{"type":"object","properties":{
    "x":{"type":"integer","description":"Left cell in the tile (0 to 63)."},
    "y":{"type":"integer","description":"Top cell in the tile (0 to 63)."},
@@ -72,8 +78,11 @@ MCP_TOOLS_JSON :: `{"tools":[
    "material":{"type":"string","description":"Material name to paint. Ignored when rows are given."},
    "rows":{"type":"array","items":{"type":"string"},"description":"Rows of material glyphs, stamped with the top-left corner at (x,y). A space leaves a cell alone."}},
   "required":["x","y"],"additionalProperties":false}},
+{"name":"tile_repair",
+ "description":"Make the open set agree with itself again: for every cell two tiles share, the first tile that holds it wins. Only needed for files painted outside this editor, and it never touches the middle of a tile.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"tile_save",
- "description":"Write the open tile to the PNG file its biome names. The image is the source, so any pixel editor can open it afterwards.",
+ "description":"Write every PNG of the open set. The images are the source, so any pixel editor can open them afterwards. The save is blocked while two tiles disagree about a cell they share; call tile_repair first.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"sandbox_open",
  "description":"Fill the sandbox from a rectangle of the authored world and empty the input queue. Call it with no arguments to reload the same rectangle, which is how an edit to the map or a tile reaches the physics.",
@@ -148,6 +157,12 @@ mcp_call_tool :: proc(s: ^Sim, out: ^strings.Builder, id: json.Value, request: j
 	case "tile_open":
 		text, failed := tool_tile_open(s, arguments)
 		mcp_write_tool_text(out, id, text, failed)
+	case "tile_select":
+		text, failed := tool_tile_select(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
+	case "tile_repair":
+		text, failed := tool_tile_repair(s)
+		mcp_write_tool_text(out, id, text, failed)
 	case "tile_view":
 		text, failed := tool_tile_view(s)
 		mcp_write_tool_text(out, id, text, failed)
@@ -195,12 +210,19 @@ tool_world_status :: proc(s: ^Sim) -> string {
 
 	if s.tile_edit.open {
 		fmt.sbprintf(
-			&b, "tile open: %s (%s)\n",
+			&b, "tile set open: %s, tile %s (%s)\n",
 			s.world.biomes.names[s.tile_edit.biome],
-			s.world.biomes.tile_paths[s.tile_edit.tile],
+			tile_editor_describe(s),
+			biome_tile_path(s.world.biomes, s.tile_edit.biome, tile_editor_tile(s)),
 		)
+		if !tile_editor_can_save(s) {
+			fmt.sbprintf(
+				&b, "the set disagrees with itself at cell (%d,%d), so a save is blocked\n",
+				s.tile_edit.conflict.x, s.tile_edit.conflict.y,
+			)
+		}
 	} else {
-		strings.write_string(&b, "no tile is open\n")
+		strings.write_string(&b, "no tile set is open\n")
 	}
 
 	fmt.sbprintf(
@@ -248,9 +270,11 @@ tool_list_biomes :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	table := s.world.biomes
 
-	strings.write_string(&b, "id glyph name       key color  generator fill      tile\n")
+	strings.write_string(&b, "id glyph name       key color  generator fill      tiles\n")
 	for biome, i in table.biomes {
-		tile_path := biome.tile == TILE_NONE ? "-" : table.tile_paths[biome.tile]
+		set := biome.tile_base == TILE_NONE \
+		? "-" \
+		: fmt.tprintf("%s_*.png (%d)", table.tile_prefixes[i], wang_set_size(biome))
 		fmt.sbprintf(
 			&b,
 			"% 2d %c     %-10s 0x%08X %-9v %-9s %s\n",
@@ -260,11 +284,12 @@ tool_list_biomes :: proc(s: ^Sim) -> string {
 			biome.key_color,
 			biome.generator,
 			s.world.materials.names[biome.fill_0],
-			tile_path,
+			set,
 		)
 	}
 	fmt.sbprintf(&b, "\nOutside the map every region is %s.\n", table.names[table.off_map_biome])
-	strings.write_string(&b, "A biome with generator = tile repeats its tile. Open it with tile_open.\n")
+	strings.write_string(&b, "A biome with generator = wang draws a lattice of tiles from its set. Open it with tile_open.\n")
+	fmt.sbprintf(&b, "The world lays that lattice out from seed %d.\n", s.world.seed)
 	return strings.to_string(b)
 }
 
@@ -412,38 +437,101 @@ tool_tile_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "%s\n", message)
-	fmt.sbprintf(
-		&b, "the tile is %dx%d cells and lives in %s\n",
-		i32(TILE_SIZE), i32(TILE_SIZE), s.world.biomes.tile_paths[s.tile_edit.tile],
-	)
-	fmt.sbprintf(&b, "every region of %s repeats it\n", s.world.biomes.names[s.tile_edit.biome])
+	fmt.sbprintf(&b, "every tile is %dx%d cells\n", i32(TILE_SIZE), i32(TILE_SIZE))
+	write_tile_set_lines(&b, s)
 	return strings.to_string(b), false
+}
+
+/*
+What the set is and how it holds together.
+
+A model that has never seen the editor learns the rule here: which
+tile is in hand, what the four edge colors mean, and which cells a
+stroke will carry into the rest of the set.
+*/
+@(private = "file")
+write_tile_set_lines :: proc(b: ^strings.Builder, s: ^Sim) {
+	e := &s.tile_edit
+	biome := tile_editor_biome(s)
+
+	fmt.sbprintf(
+		b, "the %s set holds %d tiles: one for each of the %d ways to color four edges, times %d variants\n",
+		s.world.biomes.names[e.biome], wang_set_size(biome), WANG_SIGNATURES, int(biome.variants),
+	)
+	fmt.sbprintf(b, "selected tile %s, file %s\n", tile_editor_describe(s), biome_tile_path(s.world.biomes, e.biome, tile_editor_tile(s)))
+	fmt.sbprintf(
+		b, "the world only puts two tiles side by side when they agree on the edge between them, so the outer %d cells of each side belong to the edge color, not to the tile\n",
+		i32(WANG_SEAM),
+	)
+	strings.write_string(b, "paint there and every tile of the set that carries that color changes with it; a corner belongs to the whole set\n")
+
+	if e.conflict.found {
+		fmt.sbprintf(
+			b, "the set disagrees with itself at cell (%d,%d), so a save is blocked; call tile_repair\n",
+			e.conflict.x, e.conflict.y,
+		)
+	}
+}
+
+tool_tile_select :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	if !s.tile_edit.open {
+		return "no tile set is open. Call tile_open with a biome name first.", true
+	}
+
+	sig := int(s.tile_edit.sig)
+	if edges := json_string_field(arguments, "edges", ""); edges != "" {
+		if len(edges) != 4 {
+			return fmt.tprintf("edges is four digits, north east south west, and %q is not", edges), true
+		}
+		colors: [4]u8
+		highest := u8('0') + u8(WANG_COLORS - 1)
+		for i in 0 ..< 4 {
+			digit := edges[i]
+			if digit < u8('0') || digit > highest {
+				return fmt.tprintf("an edge color is 0 to %d, and %q is not", WANG_COLORS - 1, rune(digit)), true
+			}
+			colors[i] = digit - u8('0')
+		}
+		sig = int(wang_signature(colors[0], colors[1], colors[2], colors[3]))
+	}
+
+	variant := int(json_int_field(arguments, "variant", i64(s.tile_edit.variant)))
+	message, ok := tile_editor_select(s, sig, variant)
+	if !ok do return message, true
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%s\n", message)
+	fmt.sbprintf(&b, "file %s\n", biome_tile_path(s.world.biomes, s.tile_edit.biome, tile_editor_tile(s)))
+	return strings.to_string(b), false
+}
+
+tool_tile_repair :: proc(s: ^Sim) -> (string, bool) {
+	message, ok := tile_editor_normalize(s)
+	return message, !ok
 }
 
 tool_tile_view :: proc(s: ^Sim) -> (string, bool) {
 	if !s.tile_edit.open {
-		return "no tile is open. Call tile_open with a biome name first.", true
+		return "no tile set is open. Call tile_open with a biome name first.", true
 	}
 
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(
-		&b, "tile of %s, %dx%d cells\n",
-		s.world.biomes.names[s.tile_edit.biome], i32(TILE_SIZE), i32(TILE_SIZE),
-	)
-	cells := tile_cells(s.world.tiles, s.tile_edit.tile)
+	write_tile_set_lines(&b, s)
+	cells := tile_cells(s.world.tiles, tile_editor_tile(s))
 	write_cell_map(&b, s, cells, TILE_SIZE, TILE_SIZE, 0, 0, 1)
 	return strings.to_string(b), false
 }
 
 tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	if !s.tile_edit.open {
-		return "no tile is open. Call tile_open with a biome name first.", true
+		return "no tile set is open. Call tile_open with a biome name first.", true
 	}
 
 	x := i32(json_int_field(arguments, "x", 0))
 	y := i32(json_int_field(arguments, "y", 0))
 
 	painted := 0
+	shared := 0 // cells that landed in the rest of the set as well
 
 	if rows, has_rows := json_rows_field(arguments, "rows"); has_rows {
 		// A picture, in material glyphs. A space leaves a cell alone.
@@ -459,7 +547,10 @@ tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 						dy, rune(glyph),
 					), true
 				}
-				if tile_editor_paint_cell(s, x + i32(i), y + i32(dy), material) do painted += 1
+				if tile_editor_paint_cell(s, x + i32(i), y + i32(dy), material) {
+					painted += 1
+					if wang_band(x + i32(i), y + i32(dy)) != .Inside do shared += 1
+				}
 			}
 		}
 	} else {
@@ -476,17 +567,27 @@ tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		height := i32(max(json_int_field(arguments, "height", 1), 1))
 		for py in y ..< y + height {
 			for px in x ..< x + width {
-				if tile_editor_paint_cell(s, px, py, Cell(idx)) do painted += 1
+				if tile_editor_paint_cell(s, px, py, Cell(idx)) {
+					painted += 1
+					if wang_band(px, py) != .Inside do shared += 1
+				}
 			}
 		}
 	}
 
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "painted %d tile cells\n", painted)
+	if shared > 0 {
+		fmt.sbprintf(
+			&b,
+			"%d of them sat in a border band, so they went into every tile of the set that carries that edge color\n",
+			shared,
+		)
+	}
 	if painted > 0 {
 		fmt.sbprintf(
 			&b,
-			"every %s region in the world changed at once; call tile_save to write the file, or sandbox_open to bring the change into the physics\n",
+			"every %s region in the world changed at once; call tile_save to write the files, or sandbox_open to bring the change into the physics\n",
 			s.world.biomes.names[s.tile_edit.biome],
 		)
 	}
@@ -494,7 +595,7 @@ tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 }
 
 tool_tile_save :: proc(s: ^Sim) -> (string, bool) {
-	message, ok := tile_editor_save_tile(s)
+	message, ok := tile_editor_save_tiles(s)
 	return message, !ok
 }
 
@@ -935,7 +1036,7 @@ test_tool_list_is_valid_json :: proc(t: ^testing.T) {
 
 	array, is_array := tools.(json.Array)
 	testing.expect(t, is_array)
-	testing.expect(t, len(array) == 15, "fifteen tools must be listed")
+	testing.expect(t, len(array) == 17, "seventeen tools must be listed")
 
 	for entry in array {
 		tool, tool_ok := entry.(json.Object)
@@ -1054,15 +1155,18 @@ test_biome_map_save_is_blocked_when_the_map_is_cut_in_two :: proc(t: ^testing.T)
 }
 
 @(test)
-test_tile_tools_need_an_open_tile :: proc(t: ^testing.T) {
+test_tile_tools_need_an_open_set :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
 	_, view_failed := tool_tile_view(&s)
-	testing.expect(t, view_failed, "there is no tile open yet")
+	testing.expect(t, view_failed, "there is no set open yet")
 
 	_, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"material":"Gold"}`))
-	testing.expect(t, paint_failed, "painting needs an open tile")
+	testing.expect(t, paint_failed, "painting needs an open set")
+
+	_, select_failed := tool_tile_select(&s, arguments_of(t, `{"edges":"0000"}`))
+	testing.expect(t, select_failed, "choosing a tile needs an open set")
 }
 
 @(test)
@@ -1070,33 +1174,125 @@ test_tile_open_refuses_a_flat_biome :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
-	// Sky fills flat, so it has no tile to paint.
+	// Sky fills flat, so it has no set to paint.
 	text, failed := tool_tile_open(&s, arguments_of(t, `{"biome":"Sky"}`))
-	testing.expect(t, failed, "a flat biome has no tile")
-	testing.expect(t, strings.contains(text, "generator = tile"), "the reply must say how to give it one")
+	testing.expect(t, failed, "a flat biome has no tiles")
+	testing.expect(t, strings.contains(text, "generator = wang"), "the reply must say how to give it some")
 }
 
 @(test)
-test_tile_open_paint_and_view :: proc(t: ^testing.T) {
+test_tile_open_select_paint_and_view :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
 	opened, failed := tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
-	testing.expect(t, !failed, "Coalmine owns a tile")
+	testing.expect(t, !failed, "Coalmine owns a set")
 	testing.expect(t, strings.contains(opened, "Coalmine"))
 	testing.expect(t, s.tile_edit.open)
 
-	text, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":4,"height":4,"material":"Gold"}`))
+	// A tile is named by its edge colors, the same way its file is.
+	chosen, select_failed := tool_tile_select(&s, arguments_of(t, `{"edges":"1010"}`))
+	testing.expect(t, !select_failed)
+	testing.expect(t, strings.contains(chosen, "coalmine_1010_0.png"), "the reply must name the file")
+	testing.expect(t, wang_north(s.tile_edit.sig) == 1 && wang_east(s.tile_edit.sig) == 0)
+	testing.expect(t, wang_south(s.tile_edit.sig) == 1 && wang_west(s.tile_edit.sig) == 0)
+
+	// The middle of the tile, so the paint stays in this one. The first
+	// stroke may meet a cell that already holds the material it paints,
+	// so the count is read from the second one, which cannot.
+	tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"width":4,"height":4,"material":"Rock"}`))
+	text, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"width":4,"height":4,"material":"Gold"}`))
 	testing.expect(t, !paint_failed)
 	testing.expect(t, strings.contains(text, "painted 16 tile cells"))
 
 	gold, _ := find_material_index(s.world.materials, "Gold")
-	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 0, 0)) == gold, "the tile must hold the paint")
-	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 3, 3)) == gold)
+	tile := tile_editor_tile(&s)
+	testing.expect(t, int(tile_at(s.world.tiles, tile, 20, 20)) == gold, "the tile must hold the paint")
+	testing.expect(t, int(tile_at(s.world.tiles, tile, 23, 23)) == gold)
 
 	view, view_failed := tool_tile_view(&s)
 	testing.expect(t, !view_failed)
 	testing.expect(t, strings.contains(view, "=Gold"), "the legend must name the paint")
+}
+
+@(test)
+test_tile_select_refuses_a_bad_name :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+
+	_, short := tool_tile_select(&s, arguments_of(t, `{"edges":"01"}`))
+	testing.expect(t, short, "a tile is named by four edges")
+
+	_, bad := tool_tile_select(&s, arguments_of(t, `{"edges":"0192"}`))
+	testing.expect(t, bad, "an edge color that does not exist is a mistake")
+
+	_, no_variant := tool_tile_select(&s, arguments_of(t, `{"edges":"0000","variant":9}`))
+	testing.expect(t, no_variant, "a variant nobody drew is a mistake")
+}
+
+/*
+A stroke in a border band is a stroke on the seam, so it lands in
+every tile that carries that edge color and nowhere else.
+*/
+@(test)
+test_a_seam_paint_reaches_every_tile_with_that_edge :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+	tool_tile_select(&s, arguments_of(t, `{"edges":"0001"}`)) // west edge is color 1
+
+	text, failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":32,"material":"Gold"}`))
+	testing.expect(t, !failed)
+	testing.expect(t, strings.contains(text, "border band"), "the reply must say the stroke was shared")
+
+	gold, _ := find_material_index(s.world.materials, "Gold")
+	b := tile_editor_biome(&s)
+	for sig in 0 ..< WANG_SIGNATURES {
+		for v in 0 ..< int(b.variants) {
+			tile := wang_tile_id(b, Wang_Signature(sig), v)
+			holds := int(tile_at(s.world.tiles, tile, 0, 32)) == gold
+			testing.expectf(
+				t,
+				holds == (wang_west(Wang_Signature(sig)) == 1),
+				"tile %d has west edge %d and %v the paint",
+				sig,
+				wang_west(Wang_Signature(sig)),
+				holds ? "holds" : "does not hold",
+			)
+		}
+	}
+
+	// The set still agrees with itself, so the save gate stays open.
+	// The save itself is not called here, because it would write over
+	// the tiles in the repository.
+	testing.expect(t, tile_editor_can_save(&s))
+}
+
+/*
+A set painted somewhere else can disagree with itself. The save gate
+catches it and tile_repair mends it.
+*/
+@(test)
+test_the_save_gate_catches_a_broken_seam :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
+
+	// Reach past the editor, the way a pixel editor would.
+	b := tile_editor_biome(&s)
+	gold, _ := find_material_index(s.world.materials, "Gold")
+	tile_set_cell(s.world.tiles, wang_tile_id(b, wang_signature(1, 1, 1, 1), 0), 0, 32, Cell(gold))
+	tile_editor_refresh(&s)
+
+	testing.expect(t, !tile_editor_can_save(&s), "the set no longer agrees with itself")
+	text, failed := tool_tile_save(&s)
+	testing.expect(t, failed, "a broken seam must not save")
+	testing.expect(t, strings.contains(text, "disagree"), "the reply must say why")
+
+	repaired, repair_failed := tool_tile_repair(&s)
+	testing.expect(t, !repair_failed, repaired)
+	testing.expect(t, tile_editor_can_save(&s), "the repair must open the gate")
 }
 
 @(test)
@@ -1106,15 +1302,16 @@ test_tile_paint_takes_a_picture :: proc(t: ^testing.T) {
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
 
 	// A space leaves a cell alone, so a picture can be a stencil.
-	before := tile_at(s.world.tiles, s.tile_edit.tile, 1, 0)
-	_, failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"rows":["G G","GGG"]}`))
+	tile := tile_editor_tile(&s)
+	before := tile_at(s.world.tiles, tile, 21, 20)
+	_, failed := tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"rows":["G G","GGG"]}`))
 	testing.expect(t, !failed)
 
 	gold, _ := find_material_index(s.world.materials, "Gold")
-	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 0, 0)) == gold)
-	testing.expect(t, tile_at(s.world.tiles, s.tile_edit.tile, 1, 0) == before, "a space must leave the cell alone")
-	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 2, 0)) == gold)
-	testing.expect(t, int(tile_at(s.world.tiles, s.tile_edit.tile, 1, 1)) == gold)
+	testing.expect(t, int(tile_at(s.world.tiles, tile, 20, 20)) == gold)
+	testing.expect(t, tile_at(s.world.tiles, tile, 21, 20) == before, "a space must leave the cell alone")
+	testing.expect(t, int(tile_at(s.world.tiles, tile, 22, 20)) == gold)
+	testing.expect(t, int(tile_at(s.world.tiles, tile, 21, 21)) == gold)
 }
 
 @(test)
@@ -1125,7 +1322,23 @@ test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
-	tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":64,"height":64,"material":"Gold"}`))
+
+	// The sandbox reads several squares of the lattice, so every tile
+	// of the set has to hold the paint for every cell of it to.
+	b := tile_editor_biome(&s)
+	for sig in 0 ..< WANG_SIGNATURES {
+		tool_tile_select(&s, arguments_of(t, fmt.tprintf(
+			`{"edges":"%d%d%d%d"}`,
+			wang_north(Wang_Signature(sig)),
+			wang_east(Wang_Signature(sig)),
+			wang_south(Wang_Signature(sig)),
+			wang_west(Wang_Signature(sig)),
+		)))
+		for v in 0 ..< int(b.variants) {
+			tool_tile_select(&s, arguments_of(t, fmt.tprintf(`{"variant":%d}`, v)))
+			tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":64,"height":64,"material":"Gold"}`))
+		}
+	}
 
 	text, failed := tool_sandbox_open(&s, arguments_of(t, `{"biome":"Coalmine","width":32,"height":32}`))
 	testing.expect(t, !failed, "the sandbox must open on a Coalmine region")
@@ -1135,7 +1348,7 @@ test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
 	counts := make([]int, len(s.world.materials.materials))
 	defer delete(counts)
 	sandbox_census(&s.sandbox, counts)
-	testing.expect(t, counts[gold] == 32*32, "every cell must come from the painted tile")
+	testing.expect(t, counts[gold] == 32*32, "every cell must come from the painted set")
 }
 
 @(test)

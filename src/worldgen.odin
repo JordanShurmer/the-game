@@ -12,10 +12,17 @@ order, from the biome map only. The generator never reads a neighbour
 region and holds no state between calls, so the result is the same
 whatever the player has already visited.
 
-Phase 2 has two generators. Uniform makes a region one flat material.
-Tile repeats one authored tile through the region. The shape of this
-proc did not change when Tile arrived, and it does not change when the
-herringbone lattice arrives: only the body of the per-region fill does.
+There are two generators. Uniform makes a region one flat material.
+Wang cuts the world into a lattice of tile squares and draws one tile
+of the biome's set in each of them. Which tile that is comes from the
+colors of the four lattice edges around the square, and those colors
+come from a hash of their own position. Two squares beside each other
+therefore agree about the edge they share without either of them
+being generated first.
+
+The shape of this proc has not changed since the flat fill: only the
+body of the per-region run changed. That is the point of keeping the
+biome lookup and the run loop apart from what fills the run.
 */
 
 // A world cell holds a material id. One byte per cell keeps a screen
@@ -31,7 +38,7 @@ World :: struct {
 	biomes:    Biome_Table,
 	biome_map: Biome_Map,
 	tiles:     Tile_Set,
-	seed:      u64, // reserved for wang tile placement in Phase 3
+	seed:      u64, // colors the tile lattice; change it for another world
 }
 
 /*
@@ -43,7 +50,7 @@ buffer, which lets the camera pull back and show whole regions. The
 uniform generator is exact at any step, because a sample never
 misses detail that is not there.
 
-A tile biome is not exact above step 1. The view point samples the
+A tiled biome is not exact above step 1. The view point samples the
 tile and skips the cells between, so fine paint aliases when the
 camera pulls back. That is a property of the view, not of the world:
 the cells themselves are the same either way, and step 1 shows every
@@ -87,6 +94,18 @@ world_biome_at :: proc(world: World, wx, wy: i32) -> Biome_Id {
 }
 
 /*
+Which tile of a biome's set covers a world cell.
+
+The lattice is in world space, so the answer does not depend on which
+region the cell is in, and a run of the same biome across a region
+border carries the pattern straight through. Where the biome does
+change the world cuts, and a hard border is what the phase asks for.
+*/
+world_tile_at :: proc(world: World, b: Biome, wx, wy: i32) -> Tile_Id {
+	return wang_tile_at(world.seed, b, tile_slot(wx), tile_slot(wy))
+}
+
+/*
 The material one world cell holds.
 
 This is the whole of generation for a single cell, and every path
@@ -96,19 +115,22 @@ cannot drift apart.
 */
 world_cell_at :: proc(world: World, wx, wy: i32) -> Cell {
 	b := world.biomes.biomes[world_biome_at(world, wx, wy)]
-	if b.tile == TILE_NONE do return Cell(b.fill_0)
-	return tile_sample(world.tiles, b.tile, wx, wy)
+	if b.tile_base == TILE_NONE do return Cell(b.fill_0)
+
+	tile := world_tile_at(world, b, wx, wy)
+	return tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy))
 }
 
 /*
 Generate a view into a caller-owned buffer. There is no chunk store:
 a chunk is only how much the caller asks for.
 
-The inner loop works one region at a time, because the biome lookup
-costs the same for one cell as for a thousand. What it does with the
-run depends on the generator: a uniform region is one store per run,
-and a tile region reads the tile per cell. Both write the same run of
-texels, so the loop that finds the run is shared.
+The inner loop works one run at a time, because the lookups cost the
+same for one cell as for a thousand. A run reaches to the next thing
+that could change what fills it: the region border for a flat biome,
+and the nearer of the region border and the tile border for a tiled
+one. Both write the same run of texels, so the loop that finds the
+run is shared.
 */
 generate :: proc(world: World, view: World_View, out: []Cell) {
 	assert(view.step >= 1, "step must be 1 or more")
@@ -119,6 +141,7 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 	for ty in 0 ..< view.h {
 		wy := view.y + ty * view.step
 		map_y := floor_div(wy, cpp) + world.biomes.origin_pixel_y
+		slot_y := tile_slot(wy)
 		row := out[int(ty) * int(view.w):][:view.w]
 
 		tx: i32 = 0
@@ -131,21 +154,28 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 			if id == BIOME_EMPTY do id = world.biomes.off_map_biome
 			b := world.biomes.biomes[id]
 
-			// The run reaches to the next region edge, because the biome
-			// cannot change before then.
-			next_region_start := (region_x + 1) * cpp
-			tx_end := ceil_div(next_region_start - view.x, view.step)
+			// The run cannot outlast the region, because the biome
+			// changes there.
+			limit := (region_x + 1) * cpp
+			slot_x := tile_slot(wx)
+			if b.tile_base != TILE_NONE {
+				// Nor the tile square, because the tile changes there.
+				limit = min(limit, (slot_x + 1) * TILE_SIZE)
+			}
+
+			tx_end := ceil_div(limit - view.x, view.step)
 			tx_end = clamp(tx_end, tx + 1, view.w)
 
-			if b.tile == TILE_NONE {
+			if b.tile_base == TILE_NONE {
 				slice.fill(row[tx:tx_end], Cell(b.fill_0))
 			} else {
-				// One row of the tile, wrapped. The y wrap is the same for
-				// every texel in the run, so it is lifted out of the loop.
-				tile := tile_cells(world.tiles, b.tile)
-				tile_row := tile[int(wy & TILE_MASK) * TILE_SIZE:][:TILE_SIZE]
+				// One row of one tile. The tile and the y wrap are the
+				// same for every texel in the run, so both are lifted out
+				// of the loop.
+				tile := wang_tile_at(world.seed, b, slot_x, slot_y)
+				tile_row := tile_cells(world.tiles, tile)[int(tile_offset(wy)) * TILE_SIZE:][:TILE_SIZE]
 				for t in tx ..< tx_end {
-					row[t] = tile_row[(view.x + t * view.step) & TILE_MASK]
+					row[t] = tile_row[tile_offset(view.x + t * view.step)]
 				}
 			}
 			tx = tx_end
@@ -210,7 +240,7 @@ make_test_world :: proc(t: ^testing.T) -> (world: World, ok: bool) {
 			biomes = biomes,
 			biome_map = m,
 			tiles = tiles,
-			seed = 12345,
+			seed = biomes.world_seed,
 		},
 		true
 }
@@ -258,14 +288,16 @@ test_generate_matches_the_plain_version :: proc(t: ^testing.T) {
 	defer destroy_test_world(world)
 
 	/*
-	Views that straddle region edges, the world origin, and the edge of
-	the painted map.
+	Views that straddle region edges, tile edges, the world origin, and
+	the edge of the painted map.
 
-	The second group sits inside the painted map, where Coalmine owns a
-	tile. Without those, every view here reads off-map, every biome is
+	The second group sits inside the painted map, where Coalmine draws
+	a set. Without those, every view here reads off-map, every biome is
 	uniform, and the tile branch of the run fill is never compared with
 	the oracle at all. The unaligned starts matter most: a view whose x
-	is a whole number of tiles would hide an error in the run offset.
+	is a whole number of tiles would hide an error in the run offset,
+	and a step wider than a tile would hide a run that fails to stop at
+	the tile border.
 
 	Map pixels (0,1) and (1,1) are Coalmine, so world x -4096 to -3072
 	at y -3584 to -3072 is tiled. Lake starts at x -3072.
@@ -279,7 +311,7 @@ test_generate_matches_the_plain_version :: proc(t: ^testing.T) {
 		{x = 511, y = 511, w = 3, h = 3, step = 1}, // corner of four regions
 		{x = 3000, y = 40, w = 40, h = 40, step = 5}, // past the painted map
 
-		// Inside a tile biome.
+		// Inside a tiled biome.
 		{x = -4096, y = -3584, w = 128, h = 64, step = 1}, // tile-aligned start
 		{x = -4090, y = -3580, w = 200, h = 64, step = 1}, // unaligned start
 		{x = -4091, y = -3577, w = 96, h = 48, step = 3}, // unaligned, strided
@@ -287,6 +319,8 @@ test_generate_matches_the_plain_version :: proc(t: ^testing.T) {
 		{x = -4200, y = -3600, w = 256, h = 128, step = 5}, // off-map into tiled
 		{x = -3590, y = -3590, w = 64, h = 64, step = 1}, // corner of four regions
 		{x = -4096, y = -3584, w = 160, h = 80, step = 9}, // pulled back over tiles
+		{x = -4093, y = -3581, w = 64, h = 64, step = 64}, // one texel per tile
+		{x = -4093, y = -3581, w = 48, h = 48, step = 97}, // wider than a tile
 	}
 
 	for view in views {
@@ -317,7 +351,7 @@ test_generate_fills_regions_from_the_map :: proc(t: ^testing.T) {
 	rock, _ := find_material_index(world.materials, "Rock") // the off-map fill
 
 	// Which biome owns a cell is asked separately from what the cell
-	// holds. A tile biome paints many materials, so ownership is the
+	// holds. A tiled biome paints many materials, so ownership is the
 	// thing this test is about.
 	owner :: proc(world: World, wx, wy: i32) -> string {
 		return world.biomes.names[world_biome_at(world, wx, wy)]
@@ -361,68 +395,208 @@ test_generate_fills_regions_from_the_map :: proc(t: ^testing.T) {
 }
 
 /*
-A tile biome shows its tile, and it shows the same tile in every
-region it owns. This is the phase in one test: what the author paints
-into the tile is what the world holds.
+A region border falls on a tile border.
+
+The loader refuses a region that is not a whole number of tiles
+across, and this is why: a border in the middle of a tile would cut
+the pattern in half, and the cut would move with the origin.
 */
 @(test)
-test_tile_biome_repeats_its_tile_through_the_world :: proc(t: ^testing.T) {
+test_a_region_is_a_whole_number_of_tiles :: proc(t: ^testing.T) {
+	world, ok := make_test_world(t)
+	if !ok do return
+	defer destroy_test_world(world)
+
+	testing.expect(t, world.biomes.cells_per_pixel % TILE_SIZE == 0)
+
+	cpp := world.biomes.cells_per_pixel
+	for px in i32(-3) ..< i32(3) {
+		border := px * cpp
+		testing.expectf(
+			t,
+			tile_offset(border) == 0,
+			"the region border at %d must be the start of a tile",
+			border,
+		)
+	}
+}
+
+/*
+The phase in one test: what the author paints into a set is what the
+world holds, and the tiles that meet always agree along the edge they
+share.
+*/
+@(test)
+test_a_wang_biome_draws_its_set_with_matching_edges :: proc(t: ^testing.T) {
 	world, ok := make_test_world(t)
 	if !ok do return
 	defer destroy_test_world(world)
 
 	mine, found := find_biome_index(world.biomes, "Coalmine")
 	if !testing.expect(t, found, "Coalmine must exist") do return
-	tile := world.biomes.biomes[mine].tile
-	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+	b := world.biomes.biomes[mine]
+	if !testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set") do return
 
 	cpp := world.biomes.cells_per_pixel
 	ox := world.biomes.origin_pixel_x
 	oy := world.biomes.origin_pixel_y
 
 	// Map pixels (0,1) and (1,1) are both Coalmine, and they sit side
-	// by side. The tile wraps in world space, so the pattern must run
-	// straight through the border between them.
+	// by side.
 	left_x := (0 - ox) * cpp
 	right_x := (1 - ox) * cpp
 	base_y := (1 - oy) * cpp
 
-	for i in i32(0) ..< i32(300) {
-		wx := left_x + i
-		wy := base_y + 7
-		testing.expectf(
-			t,
-			world_cell_at(world, wx, wy) == tile_sample(world.tiles, tile, wx, wy),
-			"a Coalmine cell must come from the Coalmine tile at %d,%d",
-			wx,
-			wy,
-		)
-	}
-
-	// The seam between the two regions carries the tile through with no
-	// break, because the wrap never asks which region it is in.
-	for d in i32(-40) ..< i32(40) {
-		wx := right_x + d
-		wy := base_y + 21
-		testing.expectf(
-			t,
-			world_cell_at(world, wx, wy) == tile_sample(world.tiles, tile, wx, wy),
-			"the tile must cross the region seam at %d",
-			wx,
-		)
-	}
-
-	// The tile is authored, not flat. If it were flat, every test above
-	// would pass while saying nothing.
-	first := tile_cells(world.tiles, tile)[0]
-	varied := false
-	for c in tile_cells(world.tiles, tile) {
-		if c != first {
-			varied = true
-			break
+	// Every cell of the two regions comes from the tile the lattice
+	// picked for the square it is in.
+	for wy := base_y; wy < base_y + 128; wy += 7 {
+		for wx := left_x; wx < right_x + 128; wx += 3 {
+			tile := world_tile_at(world, b, wx, wy)
+			testing.expectf(
+				t,
+				world_cell_at(world, wx, wy) == tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy)),
+				"a Coalmine cell must come from the tile of its square at %d,%d",
+				wx,
+				wy,
+			)
 		}
 	}
-	testing.expect(t, varied, "the shipped Coalmine tile must hold more than one material")
+
+	// Neighbouring squares carry the same color on the edge they share,
+	// including across the border between the two regions.
+	used: map[Tile_Id]bool
+	defer delete(used)
+
+	for sy in tile_slot(base_y) ..< tile_slot(base_y) + 8 {
+		for sx in tile_slot(left_x) ..< tile_slot(right_x) + 8 {
+			here := wang_tile_at(world.seed, b, sx, sy)
+			right := wang_tile_at(world.seed, b, sx + 1, sy)
+			below := wang_tile_at(world.seed, b, sx, sy + 1)
+			used[here] = true
+
+			sig_here := wang_signature_of(b, here)
+			testing.expectf(
+				t,
+				wang_east(sig_here) == wang_west(wang_signature_of(b, right)),
+				"the tiles at %d,%d and %d,%d disagree about the edge between them",
+				sx,
+				sy,
+				sx + 1,
+				sy,
+			)
+			testing.expectf(
+				t,
+				wang_south(sig_here) == wang_north(wang_signature_of(b, below)),
+				"the tiles at %d,%d and %d,%d disagree about the edge between them",
+				sx,
+				sy,
+				sx,
+				sy + 1,
+			)
+		}
+	}
+
+	// A set nobody drew twice would be a repeat, not a lattice.
+	testing.expect(t, len(used) > 4, "the world must reach for more than a few tiles of the set")
+
+	// The shipped set is authored, not flat. If it were flat, every
+	// test above would pass while saying nothing.
+	first := world.tiles.cells[int(b.tile_base) * TILE_AREA]
+	varied := false
+	for k in 0 ..< wang_set_size(b) {
+		for c in tile_cells(world.tiles, b.tile_base + Tile_Id(k)) {
+			if c != first do varied = true
+		}
+	}
+	testing.expect(t, varied, "the shipped Coalmine set must hold more than one material")
+}
+
+/*
+The seams hold in the world, not only in the files.
+
+Where two tiles meet, the cells either side of the border are the ones
+the shared edge color says they are. That is what makes the lattice
+look drawn rather than assembled.
+*/
+@(test)
+test_the_world_has_no_seam_between_two_tiles :: proc(t: ^testing.T) {
+	world, ok := make_test_world(t)
+	if !ok do return
+	defer destroy_test_world(world)
+
+	mine, _ := find_biome_index(world.biomes, "Coalmine")
+	b := world.biomes.biomes[mine]
+	if !testing.expect(t, b.tile_base != TILE_NONE) do return
+
+	cpp := world.biomes.cells_per_pixel
+	left_x := (0 - world.biomes.origin_pixel_x) * cpp
+	base_y := (1 - world.biomes.origin_pixel_y) * cpp
+
+	// The cells beside a border belong to the edge, so any other place
+	// in the world with the same edge color holds the same cells. Walk
+	// the border of every square and compare it with the first square
+	// that used that color.
+	seen_column: [WANG_COLORS]bool
+	column: [WANG_COLORS][TILE_SIZE]Cell
+
+	for sx in tile_slot(left_x) ..< tile_slot(left_x) + 12 {
+		for sy in tile_slot(base_y) ..< tile_slot(base_y) + 6 {
+			color := wang_vertical_edge(world.seed, sx, sy)
+			wx := sx * TILE_SIZE // the first column inside this square
+
+			if !seen_column[color] {
+				seen_column[color] = true
+				for i in i32(0) ..< TILE_SIZE {
+					column[color][i] = world_cell_at(world, wx, sy * TILE_SIZE + i)
+				}
+				continue
+			}
+			for i in i32(0) ..< TILE_SIZE {
+				testing.expectf(
+					t,
+					world_cell_at(world, wx, sy * TILE_SIZE + i) == column[color][i],
+					"the cell at %d,%d does not match the edge color %d it sits on",
+					wx,
+					sy * TILE_SIZE + i,
+					color,
+				)
+			}
+		}
+	}
+
+	testing.expect(t, seen_column[0] && seen_column[1], "both edge colors must turn up")
+}
+
+/*
+The seed lays out the lattice. Two worlds with the same authored data
+and a different seed hold the same tiles in different places.
+*/
+@(test)
+test_the_seed_lays_out_the_lattice :: proc(t: ^testing.T) {
+	world, ok := make_test_world(t)
+	if !ok do return
+	defer destroy_test_world(world)
+
+	other := world
+	other.seed = world.seed + 1
+
+	cpp := world.biomes.cells_per_pixel
+	view := World_View {
+		x    = (0 - world.biomes.origin_pixel_x) * cpp,
+		y    = (1 - world.biomes.origin_pixel_y) * cpp,
+		w    = 256,
+		h    = 256,
+		step = 1,
+	}
+
+	a := make([]Cell, int(view.w) * int(view.h))
+	b := make([]Cell, int(view.w) * int(view.h))
+	defer delete(a)
+	defer delete(b)
+
+	generate(world, view, a)
+	generate(other, view, b)
+	testing.expect(t, !slice.equal(a, b), "another seed must lay the tiles out differently")
 }
 
 /*
@@ -461,46 +635,60 @@ test_live_map_matches_saved_map :: proc(t: ^testing.T) {
 /*
 The same bargain one level down.
 
-The tile editor paints into the tile the running world holds, and Save
-writes that tile to disk. If the file and the live tile ever drew
+The tile editor paints into the set the running world holds, and Save
+writes that set to disk. If the files and the live set ever drew
 different worlds, the author would save one thing and the player would
 get another.
 */
 @(test)
-test_live_tile_edit_matches_saved_tile :: proc(t: ^testing.T) {
+test_live_tile_edit_matches_saved_tiles :: proc(t: ^testing.T) {
 	world, ok := make_test_world(t)
 	if !ok do return
 	defer destroy_test_world(world)
 
 	mine, found := find_biome_index(world.biomes, "Coalmine")
 	if !testing.expect(t, found) do return
-	tile := world.biomes.biomes[mine].tile
-	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+	b := world.biomes.biomes[mine]
+	if !testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set") do return
 
-	// Paint a block, the way the editor does on a left-drag.
+	// Paint a block in the middle of one tile, the way the editor does
+	// on a left-drag, and a seam cell, which reaches a whole group.
 	acid, _ := find_material_index(world.materials, "Acid")
-	for y in i32(8) ..< i32(16) {
-		for x in i32(8) ..< i32(16) {
+	sig := wang_signature(1, 0, 1, 0)
+	tile := wang_tile_id(b, sig, 0)
+	for y in i32(20) ..< i32(28) {
+		for x in i32(20) ..< i32(28) {
 			tile_set_cell(world.tiles, tile, x, y, Cell(acid))
 		}
 	}
+	wang_paint_cell(world.tiles, b, sig, 0, TILE_SIZE / 2, Cell(acid))
 
-	path := "worldgen_tile_edit.tmp.png"
-	defer os.remove(path)
-	testing.expect(t, save_tile_png(tile_cells(world.tiles, tile), world.materials, path))
+	// Save the set into a scratch prefix, then read it back into a set
+	// of its own and generate from that.
+	saved_table := world.biomes
+	prefixes := make([]string, len(world.biomes.tile_prefixes))
+	defer delete(prefixes)
+	copy(prefixes, world.biomes.tile_prefixes)
+	prefixes[mine] = "worldgen_set.tmp"
+	saved_table.tile_prefixes = prefixes
 
-	// Read the file back into a set of its own, and generate from that.
-	reloaded := make_tile_set(world.tiles.count)
+	written, failed, save_ok := save_tile_set(world.tiles, saved_table, Biome_Id(mine), world.materials)
+	testing.expectf(t, save_ok, "the set must save, and %s did not", failed)
+	testing.expect(t, written == wang_set_size(b))
+	defer {
+		for k in 0 ..< wang_set_size(b) {
+			os.remove(biome_tile_path(saved_table, Biome_Id(mine), b.tile_base + Tile_Id(k)))
+		}
+	}
+
+	reloaded, result, _ := load_tile_set(saved_table, world.materials, false)
+	testing.expectf(t, result.err == .None, "the set must reload, got %v", result.err)
 	defer destroy_tile_set(reloaded)
-	copy(reloaded.cells, world.tiles.cells)
-	r := load_tile_png(path, world.materials, tile_cells(reloaded, tile))
-	testing.expectf(t, r.err == .None, "reload must succeed, got %v", r.err)
 
 	from_disk := world
 	from_disk.tiles = reloaded
 
-	// A view across the Coalmine regions and the biomes beside them.
-	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 4}
+	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 1}
 	live := make([]Cell, int(view.w) * int(view.h))
 	saved := make([]Cell, int(view.w) * int(view.h))
 	defer delete(live)
@@ -508,13 +696,13 @@ test_live_tile_edit_matches_saved_tile :: proc(t: ^testing.T) {
 
 	generate(world, view, live)
 	generate(from_disk, view, saved)
-	testing.expect(t, slice.equal(live, saved), "a painted tile must save and reload unchanged")
+	testing.expect(t, slice.equal(live, saved), "a painted set must save and reload unchanged")
 }
 
 /*
 Painting a tile changes the biome that owns it, and nothing else.
 
-A tile belongs to a biome, not to a region, so the edit must reach
+A set belongs to a biome, not to a region, so the edit must reach
 every region of that biome and stop at the border of the next one.
 */
 @(test)
@@ -524,12 +712,12 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 	defer destroy_test_world(world)
 
 	mine, _ := find_biome_index(world.biomes, "Coalmine")
-	tile := world.biomes.biomes[mine].tile
-	if !testing.expect(t, tile != TILE_NONE, "Coalmine must own a tile") do return
+	b := world.biomes.biomes[mine]
+	if !testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set") do return
 
 	// The view spans map pixels (0,1) and (1,1), which are both
 	// Coalmine, plus the Lake and the unpainted pixel to their right.
-	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 4}
+	view := World_View{x = -4096, y = -3584, w = 512, h = 128, step = 1}
 	before := make([]Cell, int(view.w) * int(view.h))
 	after := make([]Cell, int(view.w) * int(view.h))
 	defer delete(before)
@@ -537,10 +725,14 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 
 	generate(world, view, before)
 
+	// Every tile of the set, so the change reaches the world wherever
+	// the lattice looked.
 	acid, _ := find_material_index(world.materials, "Acid")
-	for y in i32(8) ..< i32(16) {
-		for x in i32(8) ..< i32(16) {
-			tile_set_cell(world.tiles, tile, x, y, Cell(acid))
+	for k in 0 ..< wang_set_size(b) {
+		for y in i32(20) ..< i32(28) {
+			for x in i32(20) ..< i32(28) {
+				tile_set_cell(world.tiles, b.tile_base + Tile_Id(k), x, y, Cell(acid))
+			}
 		}
 	}
 
@@ -574,6 +766,6 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 	testing.expect(
 		t,
 		len(regions_touched) > 1,
-		"the tile belongs to the biome, so every region of it must change",
+		"the set belongs to the biome, so every region of it must change",
 	)
 }

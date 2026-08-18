@@ -39,20 +39,53 @@ Built and tested against the Odin dev-2026-08 release. It uses the
 current `core:os`, where a file operation returns an `Error` rather
 than a `bool`.
 
-## Biome generation, phase 1
+## Biome generation
 
-Phase 1 is one complete loop: paint a biome map, watch the world
-change, then save.
+One complete loop: paint a biome map, paint the tiles a biome is made
+of, watch the world change, then save.
 
 - `data/materials.txt` holds the materials.
-- `data/biomes.txt` holds the biomes. Each biome has a key color and
-  one fill material.
+- `data/biomes.txt` holds the biomes. Each biome has a key color, one
+  fill material, and either a flat fill or a set of tiles.
 - `data/biome_map.png` is the world layout. One pixel is one region
   of 512x512 world cells. The game writes a starter map if the file
   is absent.
+- `data/tiles/` holds the tile sets, one PNG per tile.
 
-Every biome fills its regions with one material, so borders are hard
-cuts. Wang tiles arrive in a later phase.
+### Wang tiles
+
+A biome with `generator = wang` owns a set of 64x64 tiles. The world
+is cut into a lattice of tile squares, and each square draws one tile
+of the set of the biome that owns it. Borders between biomes stay hard
+cuts; inside one biome the lattice runs on unbroken, across region
+borders as well.
+
+Which tile lands where is a Wang tiling. Every tile carries a color on
+each of its four sides. The lattice colors each of its edges from a
+hash of the position of that edge, and a square takes the tile whose
+four sides match the four edges around it. Two squares beside each
+other read one edge, so the tiles that land on them always agree about
+it, and no rectangle of world has to be generated before another one:
+the world is still unbounded and still generates in any order.
+
+Two edge colors make a complete set 16 tiles. `variants` draws several
+pictures of one set of edges, and the lattice picks between them with
+a second hash, so the same four edges do not always give the same
+tile. The Coalmine set ships with two.
+
+Matching colors is only half of a seam. The cells within four of a
+side belong to the edge color rather than to the tile: every tile that
+carries color 1 on its west side holds the same four columns there. A
+corner cell sits in two bands at once, so the whole set shares it,
+which is why the bands stay narrow. The tile editor keeps all of that
+true as you paint, and the save gate refuses a set where it is not.
+
+A tile file is named after what it carries:
+
+```
+data/tiles/coalmine_0110_1.png
+                    NESW variant
+```
 
 ### Controls
 
@@ -65,11 +98,31 @@ cuts. Wang tiles arrive in a later phase.
 | Right mouse | Erase a map pixel |
 | `1` to `9` | Select a biome |
 | `M` or middle mouse | Look at the region under the cursor |
+| `T` | Open the tile set of the selected biome |
 | `S` | Save the map image |
 
 The world regenerates as you paint. Save is blocked while the painted
 map falls into more than one connected region, and the editor outlines
 the stranded pixels in red.
+
+In the tile editor:
+
+| Key | Action |
+| --- | --- |
+| Left mouse | Paint the selected material |
+| Right mouse | Erase to air |
+| `[` and `]` | Walk the set |
+| `V` | Next variant of this tile |
+| `1` to `9` | Select a material |
+| `M` | Look at a region of this biome |
+| `N` | Make the seams agree again |
+| `S` | Save every tile of the set |
+| `T` or `TAB` | Close |
+
+The tile in hand is drawn with the neighbour strips that would sit
+beyond each side, so a seam is always painted as a joined picture. The
+four edge colors are drawn on the sides they belong to, and the whole
+set is on screen beside it.
 
 ## Layout
 
@@ -81,7 +134,7 @@ docs/      the design notes
 ```
 
 The game is made of three parts. The biome map says which biome owns
-which region. A tile says what one region of a biome is made of. The
+which region. A tile set says what a biome is made of. The
 sandbox says what a rectangle of that world does next: sand falls, oil
 burns, smoke climbs.
 
@@ -90,6 +143,7 @@ burns, smoke climbs.
 | `src/worldgen.odin` | The generator: what a world cell is made of |
 | `src/biome*.odin` | The biome table and the biome map |
 | `src/tile*.odin` | The tiles and their PNG files |
+| `src/wang.odin` | The tile lattice, the edge colors, the seam rule |
 | `src/editor.odin` | The world editor, model and window |
 | `src/tile_editor.odin` | The tile editor, model and window |
 | `src/sandbox.odin` | The cell grid and the falling sand step |

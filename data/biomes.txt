@@ -16,16 +16,35 @@
 image           = data/biome_map.png
 origin_pixel    = 8 8         # map pixel that holds world cell (0,0)
 cells_per_pixel = 512         # world cells along one edge of a region
+seed            = 20260818    # lays out the tile lattice; change it for another world
 biome_off_map   = Deep_Rock   # biome used outside the map image
+
+# cells_per_pixel must be a whole number of tiles (a multiple of 64),
+# or a biome border would cut a tile in half.
 
 # A biome fills its regions one of two ways.
 #
 #   generator = uniform   the whole region is fill_0
-#   generator = tile      the region repeats the tile named below
+#   generator = wang      the region is a lattice of tiles from a set
 #
-# A tile is a 64x64 PNG painted in material colors. The two keys go
-# together: generator = tile needs a tile, and a tile needs
-# generator = tile. The loader reports either half on its own as a
+# A tile is a 64x64 PNG painted in material colors. A wang biome owns
+# a whole set of them, named after the prefix below:
+#
+#   <tiles>_<N><E><S><W>_<variant>.png
+#
+# The four digits are the colors of the four edges of that tile, north
+# east south west. The world only ever puts two tiles side by side
+# when they agree about the edge they share, so the pattern runs on
+# with no seam in it. There are two colors, so a complete set is 16
+# tiles, times the variants: several drawings of one set of edges,
+# picked at random, so the same four edges do not always give the same
+# picture.
+#
+# The cells within 4 of a side belong to the edge color rather than to
+# the tile, and the editor writes a stroke there into every tile that
+# carries that color. Press T in the world editor to paint a set.
+#
+# generator = wang and tiles go together: either one on its own is a
 # hard error. fill_0 stays required, because a tile with no file yet
 # starts as a flat block of it.
 
@@ -36,15 +55,16 @@ fill_0    = Air
 
 [Coalmine]
 color     = 0xFFD57917
-generator = tile
+generator = wang
 fill_0    = Dirt
-tile      = data/tiles/coalmine.png
+tiles     = data/tiles/coalmine
+variants  = 2
 
 [Sandcave]
 color     = 0xFFC2B280
-generator = tile
+generator = wang
 fill_0    = Sand
-tile      = data/tiles/sandcave.png
+tiles     = data/tiles/sandcave
 
 [Lake]
 color     = 0xFF3A7CA5
