@@ -1023,6 +1023,27 @@ arguments_of :: proc(t: ^testing.T, text: string) -> json.Object {
 	return object
 }
 
+/*
+The arguments that name one tile of a set.
+
+fmt reads a brace as the start of a verb, so a JSON literal cannot be
+built with tprintf. The pieces are joined instead.
+*/
+@(private = "file")
+select_arguments :: proc(t: ^testing.T, sig: Wang_Signature, variant: int) -> json.Object {
+	text := strings.concatenate(
+		{
+			`{"edges":"`,
+			fmt.tprintf("%d%d%d%d", wang_north(sig), wang_east(sig), wang_south(sig), wang_west(sig)),
+			`","variant":`,
+			fmt.tprintf("%d", variant),
+			`}`,
+		},
+		context.temp_allocator,
+	)
+	return arguments_of(t, text)
+}
+
 @(test)
 test_tool_list_is_valid_json :: proc(t: ^testing.T) {
 	value, err := json.parse_string(MCP_TOOLS_JSON, .JSON, true, context.temp_allocator)
@@ -1327,15 +1348,8 @@ test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
 	// of the set has to hold the paint for every cell of it to.
 	b := tile_editor_biome(&s)
 	for sig in 0 ..< WANG_SIGNATURES {
-		tool_tile_select(&s, arguments_of(t, fmt.tprintf(
-			`{"edges":"%d%d%d%d"}`,
-			wang_north(Wang_Signature(sig)),
-			wang_east(Wang_Signature(sig)),
-			wang_south(Wang_Signature(sig)),
-			wang_west(Wang_Signature(sig)),
-		)))
 		for v in 0 ..< int(b.variants) {
-			tool_tile_select(&s, arguments_of(t, fmt.tprintf(`{"variant":%d}`, v)))
+			tool_tile_select(&s, select_arguments(t, Wang_Signature(sig), v))
 			tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":0,"width":64,"height":64,"material":"Gold"}`))
 		}
 	}
@@ -1474,7 +1488,7 @@ test_status_reports_every_part :: proc(t: ^testing.T) {
 
 	text := tool_world_status(&s)
 	testing.expect(t, strings.contains(text, "biome map"))
-	testing.expect(t, strings.contains(text, "no tile is open"))
+	testing.expect(t, strings.contains(text, "no tile set is open"))
 	testing.expect(t, strings.contains(text, "sandbox 128x72"))
 	testing.expect(t, strings.contains(text, "input delay 2 ticks"))
 	testing.expect(t, strings.contains(text, "checksum 0x"))
