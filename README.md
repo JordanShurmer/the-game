@@ -63,6 +63,7 @@ of, watch the world change, then save.
   of 512x512 world cells. The game writes a starter map if the file
   is absent.
 - `data/tiles/` holds the tile sets, one PNG per tile.
+- `data/sprites/wizard.png` holds the player, one row per animation.
 
 ### Wang tiles
 
@@ -108,11 +109,27 @@ disk to the seam rule.
 
 ### Controls
 
+The window opens on the wizard, standing at the top of the world beside
+a hole into the caves.
+
+| Key | Action |
+| --- | --- |
+| `A` `D` or left and right | Walk |
+| `SHIFT` | Run |
+| `SPACE`, `W` or `UP` | Jump; hold it in the air to fly |
+| Mouse wheel, `-`, `=` | Zoom out and in |
+| `TAB` | Open and close the world editor |
+
+Tap the jump key and he jumps. Hold it and the jetpack lights, which
+empties the tank in two seconds and fills it again in under one while
+he stands. `docs/player.md` says how he is built and what the phase
+leaves out.
+
+The world editor takes the camera back, so the same keys pan it again:
+
 | Key | Action |
 | --- | --- |
 | `WASD` or arrows | Pan the camera |
-| Mouse wheel, `-`, `=` | Zoom out and in |
-| `TAB` | Open and close the world editor |
 | Left mouse | Paint the selected biome |
 | Right mouse | Erase a map pixel |
 | `1` to `9` | Select a biome |
@@ -149,15 +166,19 @@ set is on screen beside it.
 src/       the game, package game, with the tests beside the code
 cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
-data/      the materials, the biomes, the biome map, the tiles
+data/      the materials, the biomes, the biome map, the tiles, the sprites
 docs/      the design notes and the toolchain
-tools/     the toolchain build, and the tile seeder
+tools/     the toolchain build, the tile seeder, and the wizard seeder
 ```
 
 The game is made of three parts. The biome map says which biome owns
 which region. A tile set says what a biome is made of. The
 sandbox says what a rectangle of that world does next: sand falls, oil
 burns, smoke climbs.
+
+The player walks on the first of those and not yet on the third, so the
+world does not move under him. `docs/player.md` says why, and names the
+step that joins them.
 
 | File | What it holds |
 | --- | --- |
@@ -167,6 +188,8 @@ burns, smoke climbs.
 | `src/wang.odin` | The tile lattice, the edge colors, the seam rule |
 | `src/editor.odin` | The world editor, model and window |
 | `src/tile_editor.odin` | The tile editor, model and window |
+| `src/player.odin` | The wizard: his body, his step, and where he starts |
+| `src/sprite.odin` | The sprite sheet, and which frame of it to draw |
 | `src/sandbox.odin` | The cell grid and the falling sand step |
 | `src/input_queue.odin` | The input queue |
 | `src/sim.odin` | The whole game state, with no window in it |
