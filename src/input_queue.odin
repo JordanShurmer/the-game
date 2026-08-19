@@ -37,10 +37,12 @@ INPUT_DELAY_MAX  :: 32
 #assert(INPUT_SLOT_COUNT & (INPUT_SLOT_COUNT - 1) == 0)
 
 Command_Kind :: enum u8 {
-	Noop,   // holds a tick without a change; useful to keep a stream alive
-	Spawn,  // fill a disc with a material
-	Erase,  // clear a disc back to air
-	Ignite, // set light material in a disc alight
+	Noop,    // holds a tick without a change; useful to keep a stream alive
+	Spawn,   // fill a disc with a material
+	Erase,   // clear a disc back to air
+	Ignite,  // set light material in a disc alight
+	Explode, // cast rays from a point; `material` carries the power
+	Dig,     // remove soft material in a disc; `material` carries the power
 }
 
 // Fields are ordered so the struct has no interior padding.

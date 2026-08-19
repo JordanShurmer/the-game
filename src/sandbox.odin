@@ -1,5 +1,6 @@
 package game
 
+import "core:math"
 import "core:mem"
 import "core:slice"
 import "core:testing"
@@ -25,6 +26,12 @@ The y axis points down, the same way it does in the world.
 
 SANDBOX_MAX_WIDTH  :: 1024
 SANDBOX_MAX_HEIGHT :: 1024
+
+// See docs/physics.md, "Explosions". A small blast still casts enough
+// rays to leave no gaps in its crater; a big one gets more rays so the
+// gaps do not open up again as the radius grows.
+EXPLODE_MIN_RAYS      :: 24
+EXPLODE_RAYS_PER_CELL :: 6
 
 // Index 0 of the material table is Air. A sandbox clears to zeroed
 // memory, so Air must be the value that zero means. sim_init checks it.
@@ -226,6 +233,34 @@ sandbox_paint :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: 
 }
 
 /*
+Turn one burning cell into fire, or set off a blast.
+
+sandbox_ignite and sandbox_spread_fire both reach a cell that is about
+to catch light. This is the one place that decides what "catching
+light" means for that cell, so the two callers cannot drift apart: a
+material with `explosive` above zero detonates, and everything else
+just burns. See docs/physics.md, "Explosions".
+*/
+sandbox_ignite_cell :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
+	index := sandbox_index(sb, x, y)
+	material := sb.cells[index]
+	m := table.materials[material]
+
+	if m.explosive > 0 {
+		// The grain itself clears to air before the blast starts. If
+		// it stayed as gunpowder, the first ray of its own blast
+		// would have to special-case the centre cell.
+		sandbox_put(sb, table, index, MATERIAL_AIR)
+		sb.moved[index] = true
+		sandbox_explode(sb, table, x, y, i32(m.explosive) / 4, m.explosive)
+		return
+	}
+
+	sandbox_put(sb, table, index, Cell(table.burns_to[material]))
+	sb.moved[index] = true
+}
+
+/*
 Set light material in a disc alight.
 
 Air does not catch fire, so an ignite over empty space does nothing.
@@ -246,7 +281,7 @@ sandbox_ignite :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius:
 			if material == MATERIAL_AIR do continue
 			if table.materials[material].flammability == 0 do continue
 
-			sandbox_put(sb, table, i, Cell(table.burns_to[material]))
+			sandbox_ignite_cell(sb, table, x, y)
 			changed += 1
 		}
 	}
@@ -291,6 +326,44 @@ sandbox_step_cell :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
 			sandbox_put(sb, table, index, Cell(table.decays_to[material]))
 			sb.moved[index] = true
 			return
+		}
+	}
+
+	// A cell that meets its reaction partner turns into the pair the
+	// table names. Only one of the four sides is tested, and only one
+	// reaction happens, per cell per tick: testing all four would cost
+	// four times as much and only make an already-certain reaction
+	// happen a little sooner, and letting a cell both react and fall
+	// in the same tick would need a second flag to stop it doubling
+	// up. `reacts` gates this so Air, which is in no row, pays one
+	// array read and nothing more. See docs/physics.md, "The reaction
+	// table".
+	if table.reacts[material] {
+		offsets := [4][2]i32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+		o := offsets[sandbox_rand(sb) & 3]
+		nx := x + o[0]
+		ny := y + o[1]
+
+		if sandbox_in_bounds(sb, nx, ny) {
+			ni := sandbox_index(sb, nx, ny)
+			// A neighbour that already changed this tick is not a
+			// safe partner: reacting with it now would overwrite
+			// whatever just wrote it there.
+			if !sb.moved[ni] {
+				neighbour := sb.cells[ni]
+				n := len(table.materials)
+				row := table.reaction_at[int(material)*n+int(neighbour)]
+				if row >= 0 {
+					r := table.reactions[row]
+					if sandbox_rand(sb) % 256 < u64(r.chance) {
+						sandbox_put(sb, table, index, Cell(r.c))
+						sandbox_put(sb, table, ni, Cell(r.d))
+						sb.moved[index] = true
+						sb.moved[ni] = true
+						return
+					}
+				}
+			}
 		}
 	}
 
@@ -513,10 +586,126 @@ sandbox_spread_fire :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> (
 		// Flammability 8 gives a one in four chance each tick.
 		if sandbox_rand(sb) % 256 >= u64(flammability) * 8 do continue
 
-		sandbox_put(sb, table, i, Cell(table.burns_to[material]))
-		sb.moved[i] = true
+		sandbox_ignite_cell(sb, table, nx, ny)
 	}
 	return fuel_nearby
+}
+
+/*
+Cast rays from a point. Hard material stops them.
+
+The model is Noita's: a blast is rays, not a disc, so a wall casts a
+shadow and a corridor channels the blast. The angles are fixed, not
+drawn from sandbox_rand: a replay must give the same crater, and a
+disc would clear straight through a wall the rays would have to stop
+at. See docs/physics.md, "Explosions".
+*/
+sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i32, power: u8) -> (broken: int) {
+	r := radius < 0 ? 0 : radius
+	if r == 0 || power == 0 do return 0
+
+	rays := max(EXPLODE_MIN_RAYS, r*EXPLODE_RAYS_PER_CELL)
+	inner_r := r / 3
+
+	// The table resolved Fire by name once, at load. A blast leaves
+	// fire in its inner third, and a chain of gunpowder is many blasts
+	// in one tick, so searching the table by name here would be the
+	// most expensive thing in the step.
+	fire_cell := Cell(table.fire)
+
+	for ray in 0 ..< rays {
+		angle := f32(ray) / f32(rays) * 2 * math.PI
+		dx := math.cos(angle)
+		dy := math.sin(angle)
+
+		// The energy is an i32. Bedrock costs 256 to cross, and a u8
+		// cannot hold that, so a ray with full power would wrap round
+		// to a small number and cross bedrock as if it were air.
+		energy := i32(power)
+
+		for step in i32(1) ..= r {
+			x := cx + i32(math.round(dx * f32(step)))
+			y := cy + i32(math.round(dy * f32(step)))
+			if !sandbox_in_bounds(sb, x, y) do break
+
+			i := sandbox_index(sb, x, y)
+			material := sb.cells[i]
+			cost := i32(table.materials[material].hardness) + 1
+			if energy < cost do break
+			energy -= cost
+
+			// Already open, either from the start or from an earlier
+			// ray that crossed this cell first. The ray still paid to
+			// cross it above; there is nothing left to clear.
+			if material == MATERIAL_AIR || material == fire_cell do continue
+
+			broken += 1
+			target := step <= inner_r ? fire_cell : MATERIAL_AIR
+			sandbox_put(sb, table, i, target)
+			// Every cell the blast writes is marked moved, so the
+			// same tick's scan does not reach it again. Without this
+			// a cleared cell that lands ahead of the scan position
+			// could spread fire and set off a second blast before
+			// this tick is over.
+			sb.moved[i] = true
+
+			sandbox_crumble_neighbours(sb, table, x, y)
+		}
+	}
+	return broken
+}
+
+/*
+Crumble the four neighbours of a cell the blast just cleared.
+
+crumbles_to defaults to the material itself, so this is a no-op for
+anything that does not crumble; only the few materials with a real row
+in the cold table change here. See docs/physics.md, "The materials".
+*/
+sandbox_crumble_neighbours :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
+	offsets := [4][2]i32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
+	for o in offsets {
+		nx := x + o[0]
+		ny := y + o[1]
+		if !sandbox_in_bounds(sb, nx, ny) do continue
+
+		ni := sandbox_index(sb, nx, ny)
+		neighbour := sb.cells[ni]
+		crumbled := Cell(table.crumbles_to[neighbour])
+		if crumbled == neighbour do continue
+
+		sandbox_put(sb, table, ni, crumbled)
+		sb.moved[ni] = true
+	}
+}
+
+/*
+Remove every cell in a disc that is soft enough.
+
+This is sandbox_paint's disc loop with a hardness test instead of an
+unconditional write; a cell that is too hard is left as it is. See
+docs/physics.md, "Digging and breaking".
+*/
+sandbox_dig :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i32, power: u8) -> (removed: int) {
+	r := radius < 0 ? 0 : radius
+	r2 := r * r
+
+	for y := max(cy-r, 0); y <= min(cy+r, sb.height-1); y += 1 {
+		for x := max(cx-r, 0); x <= min(cx+r, sb.width-1); x += 1 {
+			dx := x - cx
+			dy := y - cy
+			if dx*dx + dy*dy > r2 do continue
+
+			i := sandbox_index(sb, x, y)
+			material := sb.cells[i]
+			if material == MATERIAL_AIR do continue
+			if table.materials[material].hardness > power do continue
+
+			sandbox_put(sb, table, i, MATERIAL_AIR)
+			removed += 1
+		}
+	}
+	return removed
 }
 
 // Count the cells of each material. The result is indexed like the table.
@@ -785,4 +974,343 @@ test_same_seed_gives_the_same_checksum :: proc(t: ^testing.T) {
 
 	testing.expect(t, a == b, "the same seed must give the same world")
 	testing.expect(t, a != c, "a different seed must give a different world")
+}
+
+// ------------------------------------------------------------
+// Reactions, explosions, and digging (docs/physics.md, step 2)
+// ------------------------------------------------------------
+
+@(test)
+test_water_quenches_fire_into_steam :: proc(t: ^testing.T) {
+	// Without the reaction table, fire only ever dies from its own
+	// lifetime. Water sitting right beside a young flame would have
+	// no effect on it at all, and the flame would still be there long
+	// after the water fell past.
+	sb, table := test_sandbox(t, 8, 8, 9)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	fire, _ := find_material_index(table, "Fire")
+	steam, _ := find_material_index(table, "Steam")
+	rock, _ := find_material_index(table, "Rock")
+	water, _ := find_material_index(table, "Water")
+
+	for x in i32(0) ..< 8 do sandbox_paint(&sb, table, x, 7, 0, Cell(rock))
+	sandbox_paint(&sb, table, 4, 6, 0, Cell(fire))
+	sandbox_paint(&sb, table, 4, 5, 0, Cell(water))
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	found := false
+	for _ in 0 ..< 300 {
+		sandbox_step(&sb, table)
+		sandbox_census(&sb, counts)
+		if counts[fire] == 0 && counts[steam] > 0 {
+			found = true
+			break
+		}
+	}
+	testing.expect(t, found, "water must quench the fire and leave steam behind")
+}
+
+@(test)
+test_water_on_lava_leaves_obsidian :: proc(t: ^testing.T) {
+	// This is the reaction table's whole reason to exist: Noita's
+	// water-meets-lava moment. Without a [Reactions] row for the
+	// pair, water would just float on lava for ever and no obsidian
+	// would ever appear.
+	sb, table := test_sandbox(t, 8, 16, 4)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	lava, _ := find_material_index(table, "Lava")
+	water, _ := find_material_index(table, "Water")
+	obsidian, _ := find_material_index(table, "Obsidian")
+
+	for x in i32(0) ..< 8 do sandbox_paint(&sb, table, x, 7, 0, Cell(lava))
+	for x in i32(0) ..< 8 do sandbox_paint(&sb, table, x, 6, 0, Cell(water))
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	found := false
+	for _ in 0 ..< 2000 {
+		sandbox_step(&sb, table)
+		sandbox_census(&sb, counts)
+		if counts[obsidian] > 0 {
+			found = true
+			break
+		}
+	}
+	testing.expect(t, found, "water meeting lava must leave obsidian")
+}
+
+@(test)
+test_acid_eats_rock_and_runs_out :: proc(t: ^testing.T) {
+	// Acid + Rock -> Air + Air uses up the acid along with the rock it
+	// dissolves. Without that, an acid pool would either do nothing
+	// to solid rock, or eat straight through the floor of the world
+	// with nothing to stop it.
+	sb, table := test_sandbox(t, 6, 30, 6)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	acid, _ := find_material_index(table, "Acid")
+	rock, _ := find_material_index(table, "Rock")
+
+	for y in i32(0) ..< 3 {
+		for x in i32(0) ..< 6 do sandbox_paint(&sb, table, x, y, 0, Cell(acid))
+	}
+	for y in i32(3) ..< 30 {
+		for x in i32(0) ..< 6 do sandbox_paint(&sb, table, x, y, 0, Cell(rock))
+	}
+	rock_start := 6 * 27
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	for _ in 0 ..< 6000 do sandbox_step(&sb, table)
+	sandbox_census(&sb, counts)
+
+	testing.expect(t, counts[acid] == 0, "a small pool of acid must be used up")
+	testing.expectf(
+		t, counts[rock] > rock_start-6*3-1,
+		"the pool must stop after eating roughly its own size of rock, not bore for ever: %d of %d left",
+		counts[rock], rock_start,
+	)
+}
+
+@(test)
+test_wooden_beam_burns_to_ash_on_the_floor :: proc(t: ^testing.T) {
+	// This exercises burns_to, lifetime and decays_to end to end, with
+	// no new code in the step: light one end, the fire runs along the
+	// beam on contact, and 300 ticks later each cell is ash. Without
+	// the chain working, the beam would either not catch at all or
+	// stay wood for ever.
+	sb, table := test_sandbox(t, 24, 8, 15)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	wood, _ := find_material_index(table, "Wood")
+	burning_wood, _ := find_material_index(table, "Burning_Wood")
+	ash, _ := find_material_index(table, "Ash")
+	rock, _ := find_material_index(table, "Rock")
+
+	for x in i32(0) ..< 24 do sandbox_paint(&sb, table, x, 7, 0, Cell(rock))
+	for x in i32(0) ..< 24 do sandbox_paint(&sb, table, x, 6, 0, Cell(wood))
+
+	sandbox_ignite(&sb, table, 0, 6, 0)
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	burned_out := false
+	for _ in 0 ..< 3000 {
+		sandbox_step(&sb, table)
+		sandbox_census(&sb, counts)
+		if counts[wood] == 0 && counts[burning_wood] == 0 {
+			burned_out = true
+			break
+		}
+	}
+	testing.expect(t, burned_out, "the whole beam must finish burning")
+	testing.expect(t, counts[ash] == 24, "every cell of the beam must become ash")
+	for x in i32(0) ..< 24 {
+		testing.expectf(t, int(sandbox_cell(&sb, x, 6)) == ash, "cell %d must rest as ash on the floor", x)
+	}
+}
+
+@(test)
+test_explosion_casts_a_shadow_behind_bedrock :: proc(t: ^testing.T) {
+	// The point of rays over a disc: a wall stops what is behind it.
+	// A bedrock pillar sits between the blast and a patch of rock
+	// beyond it. Every straight line from the blast to that patch has
+	// to cross the pillar, so if the patch survives whole, the rule
+	// really is rays that a wall can block and not a circle drawn
+	// around the centre.
+	sb, table := test_sandbox(t, 41, 41, 3)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	rock, _ := find_material_index(table, "Rock")
+	bedrock, _ := find_material_index(table, "Bedrock")
+
+	for y in i32(0) ..< 41 {
+		for x in i32(0) ..< 41 do sandbox_paint(&sb, table, x, y, 0, Cell(rock))
+	}
+	// A wide, thick pillar directly above the blast centre.
+	for y in i32(15) ..< 20 {
+		for x in i32(16) ..< 25 do sandbox_paint(&sb, table, x, y, 0, Cell(bedrock))
+	}
+
+	broken := sandbox_explode(&sb, table, 20, 30, 25, 255)
+	testing.expect(t, broken > 0, "the blast must clear something")
+
+	shadow_whole := true
+	for y in i32(0) ..< 13 {
+		for x in i32(18) ..< 23 {
+			if int(sandbox_cell(&sb, x, y)) != rock do shadow_whole = false
+		}
+	}
+	testing.expect(t, shadow_whole, "the shadow of the pillar must stay whole rock")
+
+	side_cleared := false
+	for y in i32(5) ..< 15 {
+		for x in i32(0) ..< 15 {
+			if sandbox_cell(&sb, x, y) == MATERIAL_AIR do side_cleared = true
+		}
+	}
+	testing.expect(t, side_cleared, "the blast must clear rock beside the pillar, where nothing blocks the rays")
+}
+
+@(test)
+test_blasted_rock_leaves_gravel_that_falls :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 20, 20, 8)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	rock, _ := find_material_index(table, "Rock")
+	gravel, _ := find_material_index(table, "Gravel")
+
+	for y in i32(0) ..< 20 {
+		for x in i32(0) ..< 20 do sandbox_paint(&sb, table, x, y, 0, Cell(rock))
+	}
+
+	broken := sandbox_explode(&sb, table, 10, 5, 6, 80)
+	testing.expect(t, broken > 0, "the blast must clear rock")
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+	sandbox_census(&sb, counts)
+	testing.expect(t, counts[gravel] > 0, "the rock crumbling at the crater edge must leave gravel")
+
+	sum_y :: proc(sb: ^Sandbox, gravel: int) -> i64 {
+		total: i64 = 0
+		for y in i32(0) ..< sb.height {
+			for x in i32(0) ..< sb.width {
+				if int(sandbox_cell(sb, x, y)) == gravel do total += i64(y)
+			}
+		}
+		return total
+	}
+
+	before := sum_y(&sb, gravel)
+	for _ in 0 ..< 80 do sandbox_step(&sb, table)
+	after := sum_y(&sb, gravel)
+
+	testing.expect(t, after > before, "gravel is a powder, so it must fall once the blast opens space under it")
+}
+
+@(test)
+test_gunpowder_pile_chain_detonates_and_leaves_a_crater :: proc(t: ^testing.T) {
+	// The recursion guard is the point of this test. Every cell a
+	// blast writes is marked in `moved`, so a grain that goes off
+	// cannot set off a neighbour that is still ahead of the scan in
+	// the same tick. Without that rule a dense pile can cascade
+	// through itself inside one call and overflow the stack; with it,
+	// the pile still fully detonates, just spread over the ticks it
+	// takes for the fire to walk from grain to grain. Running to
+	// completion here is itself part of what this test checks.
+	sb, table := test_sandbox(t, 40, 40, 21)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	gunpowder, _ := find_material_index(table, "Gunpowder")
+
+	for y in i32(5) ..< 35 {
+		for x in i32(5) ..< 35 do sandbox_paint(&sb, table, x, y, 0, Cell(gunpowder))
+	}
+	start_count := 30 * 30
+
+	sandbox_ignite(&sb, table, 20, 20, 0)
+
+	for _ in 0 ..< 5000 do sandbox_step(&sb, table)
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+	sandbox_census(&sb, counts)
+
+	testing.expectf(
+		t, counts[gunpowder] < start_count/2,
+		"the pile must have detonated down substantially: %d of %d grains left",
+		counts[gunpowder], start_count,
+	)
+	testing.expect(t, counts[int(MATERIAL_AIR)] > 0, "the blast must leave a crater of air")
+}
+
+@(test)
+test_dig_removes_rock_but_not_steel_or_bedrock :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 10, 4, 1)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	rock, _ := find_material_index(table, "Rock")
+	steel, _ := find_material_index(table, "Steel")
+	bedrock, _ := find_material_index(table, "Bedrock")
+
+	sandbox_paint(&sb, table, 2, 2, 0, Cell(rock))
+	sandbox_paint(&sb, table, 5, 2, 0, Cell(steel))
+	sandbox_paint(&sb, table, 8, 2, 0, Cell(bedrock))
+
+	removed := sandbox_dig(&sb, table, 2, 2, 0, 8)
+	testing.expect(t, removed == 1, "rock at exactly the wizard's power must be dug")
+	testing.expect(t, sandbox_cell(&sb, 2, 2) == MATERIAL_AIR, "the rock cell must be gone")
+
+	removed_steel := sandbox_dig(&sb, table, 5, 2, 0, 8)
+	testing.expect(t, removed_steel == 0, "steel must resist the wizard's dig power")
+	testing.expect(t, int(sandbox_cell(&sb, 5, 2)) == steel, "steel must still be there")
+
+	removed_bedrock := sandbox_dig(&sb, table, 8, 2, 0, 8)
+	testing.expect(t, removed_bedrock == 0, "bedrock must resist the wizard's dig power")
+	testing.expect(t, int(sandbox_cell(&sb, 8, 2)) == bedrock, "bedrock must still be there")
+}
+
+@(test)
+test_same_seed_gives_the_same_checksum_with_explode_and_dig :: proc(t: ^testing.T) {
+	// This is the property the whole input queue depends on. Reactions
+	// draw from sandbox_rand and explosions do not, but a command list
+	// that mixes both must still replay bit for bit, or two clients
+	// running the same session would drift apart the first time
+	// either a bomb or a spell went off.
+	table, load_ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	testing.expect(t, load_ok)
+
+	sand, _ := find_material_index(table, "Sand")
+	water, _ := find_material_index(table, "Water")
+	rock, _ := find_material_index(table, "Rock")
+	gunpowder, _ := find_material_index(table, "Gunpowder")
+
+	run :: proc(table: Material_Table, seed: u64, sand, water, rock, gunpowder: Cell) -> u64 {
+		sb, _ := sandbox_make(48, 32, seed)
+		defer sandbox_destroy(&sb)
+
+		for y in i32(20) ..< 32 {
+			for x in i32(0) ..< 48 do sandbox_paint(&sb, table, x, y, 0, rock)
+		}
+
+		for step in 0 ..< 200 {
+			switch step {
+			case 0:
+				sandbox_paint(&sb, table, 24, 0, 3, sand)
+				sandbox_paint(&sb, table, 10, 0, 2, water)
+			case 40:
+				sandbox_paint(&sb, table, 30, 10, 3, gunpowder)
+			case 60:
+				sandbox_explode(&sb, table, 30, 10, 6, 60)
+			case 100:
+				sandbox_dig(&sb, table, 20, 25, 4, 8)
+			}
+			sandbox_step(&sb, table)
+		}
+		return sandbox_checksum(&sb)
+	}
+
+	a := run(table, 777, Cell(sand), Cell(water), Cell(rock), Cell(gunpowder))
+	b := run(table, 777, Cell(sand), Cell(water), Cell(rock), Cell(gunpowder))
+	c := run(table, 999, Cell(sand), Cell(water), Cell(rock), Cell(gunpowder))
+
+	testing.expect(t, a == b, "the same seed and the same command list must give the same checksum")
+	testing.expect(t, a != c, "a different seed must still diverge")
 }

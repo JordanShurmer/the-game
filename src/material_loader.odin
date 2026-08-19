@@ -32,6 +32,13 @@ Material_Table :: struct {
 	reactions:   []Reaction, // cold: every row, both ways round
 	reaction_at: []i16,      // cold: n*n; the row for a pair, or -1
 	reacts:      []bool,     // cold: n; whether this material is in any row
+
+	// Fire, resolved once here rather than searched for by name at
+	// each blast. A blast leaves fire in its inner third, and a chain
+	// of gunpowder is many blasts in one tick, so a linear name search
+	// there would be the most expensive thing in the step. Air when no
+	// material is called Fire: the blast then only clears.
+	fire:        u16,
 }
 
 // 12 bytes, and the #assert holds it there. A cell that reacts looks
@@ -256,6 +263,10 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.decays_to   = decays_to[:]
 	table.burns_to    = burns_to[:]
 	table.crumbles_to = crumbles_to[:]
+
+	if idx, found := find_material_index(table, "Fire"); found {
+		table.fire = u16(idx)
+	}
 
 	// A [Reactions] row is authored by hand and names both sides on
 	// purpose, unlike decays_to and burns_to which default quietly to
