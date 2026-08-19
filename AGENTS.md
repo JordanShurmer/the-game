@@ -93,9 +93,11 @@ Two rules there are easy to break and hard to see:
 
 - **His body is 13 cells tall because the world allows no more.** Two
   tiles that meet share a band, and the clear channel through it is 16
-  cells. A taller body fits every cave and leaves none of them.
-  `test_the_player_fits_the_world` measures the real tiles and fails
-  when a reseed closes the channel.
+  painted cells, which the world draws `TILE_SCALE` times wider: 32
+  cells today. A taller body fits every cave and leaves none of them.
+  `test_the_player_fits_the_world` measures the real tiles, converts to
+  world cells, and fails when a reseed or a smaller `TILE_SCALE` closes
+  the channel.
 - **The drawing and the collision box are two numbers that must agree.**
   `tools/seed_wizard.py` holds the body box, `src/sprite.odin` asserts
   it matches `src/player.odin`, and `--check` holds the sheet to it.

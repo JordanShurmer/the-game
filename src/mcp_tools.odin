@@ -437,7 +437,11 @@ tool_tile_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "%s\n", message)
-	fmt.sbprintf(&b, "every tile is %dx%d cells\n", i32(TILE_SIZE), i32(TILE_SIZE))
+	fmt.sbprintf(
+		&b,
+		"every tile is %dx%d painted cells, and covers %dx%d world cells\n",
+		i32(TILE_SIZE), i32(TILE_SIZE), i32(TILE_SPAN), i32(TILE_SPAN),
+	)
 	write_tile_set_lines(&b, s)
 	return strings.to_string(b), false
 }

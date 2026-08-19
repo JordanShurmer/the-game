@@ -63,6 +63,12 @@ AIR = (0, 0, 0, 0)
 # at. Widen these to open a biome up; the world reads as scratches in
 # ground below about a third air and as a hall with pillars above two
 # thirds. src/tile_png.odin holds a test at the same numbers.
+#
+# These are painted cells. The world draws each one TILE_SCALE cells
+# wide (src/tile.odin), so a passage of n here is n * TILE_SCALE cells
+# for a body to walk through. Scale the world, not these numbers, to
+# make room for a taller player: a wider mouth here costs the rock the
+# caves are cut from, and the scale costs nothing.
 MOUTH_LO, MOUTH_HI = 22, 41
 MOUTH_DEPTH = 8
 HUB_R = (10, 14)

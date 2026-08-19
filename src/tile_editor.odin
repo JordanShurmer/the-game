@@ -326,11 +326,13 @@ tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
 	app.tile_edit.saved_step = app.step
 	app.tile_edit.saved_zoom = app.zoom
 
-	// Show the world at native resolution, so one painted cell is one
-	// pixel on screen instead of one sample in eight. Forcing step to 1
-	// alone is not enough now that zoom exists: a zoom left above 1
-	// would blow the same oversized texels back up on screen, which is
-	// exactly what forcing step to 1 is here to avoid.
+	// Show the world at native resolution, so every cell of it is on
+	// screen instead of one sample in eight. A painted cell covers
+	// TILE_SCALE of them, so it draws as a block of that size, which
+	// is the size the paint really is. Forcing step to 1 alone is not
+	// enough now that zoom exists: a zoom left above 1 would blow the
+	// same oversized texels back up on screen, which is exactly what
+	// forcing step to 1 is here to avoid.
 	if app.step != 1 || app.zoom != 1 {
 		w0, h0 := app_view_cells(app)
 		centre_x := app.cam_x + (w0 * app.step) / 2

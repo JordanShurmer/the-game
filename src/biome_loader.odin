@@ -203,8 +203,9 @@ load_biomes :: proc(
 				if !vok || v <= 0 do return {}, .Bad_Value, line_index
 				// A region has to be a whole number of tiles across, or a
 				// biome border would cut a tile in half and the lattice
-				// would show a seam nobody drew.
-				if v % TILE_SIZE != 0 do return {}, .Region_Mismatch, line_index
+				// would show a seam nobody drew. The tile is measured in
+				// world cells here, so it is TILE_SPAN and not TILE_SIZE.
+				if v % TILE_SPAN != 0 do return {}, .Region_Mismatch, line_index
 				table.cells_per_pixel = i32(v)
 			case "origin_pixel":
 				v := value
@@ -332,7 +333,7 @@ test_load_biomes :: proc(t: ^testing.T) {
 	testing.expect(t, len(biomes.names) == len(biomes.biomes))
 	testing.expect(t, len(biomes.tile_prefixes) == len(biomes.biomes))
 	testing.expect(t, biomes.cells_per_pixel == 512)
-	testing.expect(t, biomes.cells_per_pixel % TILE_SIZE == 0, "a region is a whole number of tiles")
+	testing.expect(t, biomes.cells_per_pixel % TILE_SPAN == 0, "a region is a whole number of tiles")
 	testing.expect(t, biomes.origin_pixel_x == 8)
 	testing.expect(t, biomes.origin_pixel_y == 8)
 	testing.expect(t, biomes.map_image_path == "data/biome_map.png")

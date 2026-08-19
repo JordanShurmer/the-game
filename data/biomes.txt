@@ -19,16 +19,19 @@ cells_per_pixel = 512         # world cells along one edge of a region
 seed            = 20260818    # lays out the tile lattice; change it for another world
 biome_off_map   = Deep_Rock   # biome used outside the map image
 
-# cells_per_pixel must be a whole number of tiles (a multiple of 64),
-# or a biome border would cut a tile in half.
+# cells_per_pixel must be a whole number of tiles, or a biome border
+# would cut a tile in half. A tile is 64 painted cells and TILE_SCALE
+# world cells to each of them, so today that is a multiple of 128.
 
 # A biome fills its regions one of two ways.
 #
 #   generator = uniform   the whole region is fill_0
 #   generator = wang      the region is a lattice of tiles from a set
 #
-# A tile is a 64x64 PNG painted in material colors. A wang biome owns
-# a whole set of them, named after the prefix below:
+# A tile is a 64x64 PNG painted in material colors, and each of those
+# cells covers a TILE_SCALE by TILE_SCALE block of world cells, so the
+# tile is 128 world cells across. A wang biome owns a whole set of
+# them, named after the prefix below:
 #
 #   <tiles>_<N><E><S><W>_<variant>.png
 #

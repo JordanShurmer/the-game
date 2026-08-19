@@ -88,8 +88,22 @@ PLAYER_FUEL_ON_GROUND  :: 1.4  // tanks per second standing, so 0.71 seconds
 PLAYER_FUEL_IN_AIR     :: 0.22 // tanks per second falling, and not under thrust
 
 PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
-PLAYER_CLIMB        :: 3  // cells he walks up without jumping
 PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
+
+/*
+Cells he walks up without jumping.
+
+This is a number about the ground, not about the wizard, so it is
+written in the units the ground is authored in. The seeder's `ragged`
+pass moves a wall by one or two painted cells, and the world draws a
+painted cell TILE_SCALE cells wide, so the roughness he has to walk
+over is up to 2 * TILE_SCALE and this clears it.
+
+Left at a flat 3 while the world scaled, every bump in a wall would
+stop him and ask for a jump. A taller ledge than this is still a jump,
+which is what it is for.
+*/
+PLAYER_CLIMB :: 3 * TILE_SCALE
 
 SPAWN_MOUTH_DEPTH  :: 10   // cells a column must be clear to count as a way in
 SPAWN_CLEARANCE    :: 12   // cells from the mouth edge to the spawn
@@ -1138,6 +1152,13 @@ through every row (north or south) or every column (east or west) of
 the band, not just one of them. A body that only needs to clear one
 row of the band could still be pinched by rock in another, so the
 intersection across the whole band is what actually gets him through.
+
+It reads painted cells and answers in world cells. The band is
+authored at TILE_SIZE and the world draws it at TILE_SPAN, so a
+channel of n painted cells is n * TILE_SCALE cells of air to walk
+through. The player is measured in world cells, so the conversion
+belongs here rather than at each of the four places that compares one
+against his body.
 */
 @(private = "file")
 tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table, side: Wang_Band) -> int {
@@ -1186,7 +1207,7 @@ tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table,
 		}
 	case .Inside, .Corner:
 	}
-	return longest
+	return longest * TILE_SCALE
 }
 
 /*
@@ -1199,6 +1220,11 @@ north or south band's opening runs along x and so limits how wide he
 can be; an east or west band's opening runs along y and limits how
 tall. Reseed a tile set with a narrower mouth and this test says so
 before a player finds out.
+
+The channel comes back in world cells, so TILE_SCALE is already in it.
+Drop the scale back to 1 and this test fails on the shipped sets,
+which is the honest report: those tiles are drawn for a smaller
+wizard than the one who walks them.
 */
 @(test)
 test_the_player_fits_the_world :: proc(t: ^testing.T) {
@@ -1206,10 +1232,10 @@ test_the_player_fits_the_world :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
-	// The narrowest channel any tile offers. It is checked at the end,
-	// because a set drawn as solid rock would pass every test above by
-	// having no open side at all.
-	measured_min := int(TILE_SIZE)
+	// The narrowest channel any tile offers, in world cells. It is
+	// checked at the end, because a set drawn as solid rock would pass
+	// every test above by having no open side at all.
+	measured_min := int(TILE_SPAN)
 
 	for b, bi in s.world.biomes.biomes {
 		if b.tile_base == TILE_NONE do continue
@@ -1262,7 +1288,7 @@ test_the_player_fits_the_world :: proc(t: ^testing.T) {
 	// never entering one, and would be a world of sealed boxes.
 	testing.expectf(
 		t,
-		measured_min <= TILE_SIZE - 2 * WANG_SEAM,
+		measured_min <= (TILE_SIZE - 2 * WANG_SEAM) * TILE_SCALE,
 		"no tile of any shipped set carries an open edge, so nothing measured a channel",
 	)
 }
