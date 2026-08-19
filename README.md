@@ -35,9 +35,10 @@ odin test src       # run the tests
 make                # builds the binaries into bin/
 ```
 
-There is no toolchain in the box. `sudo tools/build-toolchain.sh`
-builds the Odin compiler and the raylib library it links, which takes
-about five minutes; `docs/toolchain.md` says what it does.
+There is no toolchain in the box. `sudo tools/install-toolchain.sh`
+downloads the Odin release archive, which holds the compiler and the
+raylib library it links, and takes about half a minute;
+`docs/toolchain.md` says what it does.
 
 `bin/shot` draws a rectangle of the world into a PNG with no window
 and no display, which is how to look at what an edit did:
@@ -171,7 +172,7 @@ cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
 data/      the materials, the biomes, the biome map, the tiles, the sprites
 docs/      the design notes and the toolchain
-tools/     the toolchain build, the tile seeder, and the wizard seeder
+tools/     the toolchain install, the tile seeder, and the wizard seeder
 ```
 
 The game is made of three parts. The biome map says which biome owns

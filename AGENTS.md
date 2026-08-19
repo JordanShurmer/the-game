@@ -11,9 +11,10 @@ odin test src           # the whole suite, about a second
 make                    # bin/the-game, bin/game-mcp, bin/shot
 ```
 
-If `odin` is not on the PATH, build it: `sudo tools/build-toolchain.sh`
-takes about five minutes and needs the network. See
-`docs/toolchain.md` for what it does and why raylib needs building.
+If `odin` is not on the PATH, install it:
+`sudo tools/install-toolchain.sh` takes about half a minute and needs
+the network. See `docs/toolchain.md` for what it does, and why the
+Odin repository must not be cloned to get raylib.
 
 ## Look at the world
 
@@ -81,7 +82,7 @@ of the whole world.
 | `cmd/shot/` | the world as a PNG |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain build, the tile seeder, and the wizard seeder |
+| `tools/` | the toolchain install, the tile seeder, and the wizard seeder |
 
 ## The player
 
