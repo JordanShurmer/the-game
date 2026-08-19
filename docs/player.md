@@ -20,12 +20,11 @@ This note says how, and says what the phase leaves out.
 ## The size of the wizard is not a choice
 
 Two tiles that meet share the cells within `WANG_SEAM` of the border.
-`tools/seed_tiles.py` carves a mouth 81 cells wide, then stamps the
-shared band over it, and the lip of that band wanders by up to 8 cells
-as it goes deeper. Only the cells clear through the whole band are a
-way out of the tile.
+`tools/seed_tiles.py` forces a mouth 41 cells wide through that band,
+and the lip of it wanders by up to 8 cells as the band goes deeper.
+Only the cells clear through the whole band are a way out of the tile.
 
-Measured over every shipped tile, that channel is **65 cells**.
+Measured over every shipped tile, that channel is **32 cells**.
 
 A body taller than the channel fits every cave and no exit from one,
 and the world reads as a lattice of sealed rooms. So:
@@ -37,15 +36,14 @@ and the world reads as a lattice of sealed rooms. So:
 | Body in frame | x 8, y 11 | so the art and the box cannot drift apart |
 | Feet | frame row 23 | the position the player struct holds |
 
-**The channel came off a reference, not off a preference.** In a Noita
-mine the player stands about 7 percent of the screen high and the cave
-he stands in is about five of him floor to ceiling. Our wizard is 13
-cells of the 180 the screen shows at zoom 4, which is that same 7
-percent, so the body and the camera were right from the start and only
-the cave was small. 65 cells against a body of 13 is that same five,
-and it is the tile art that carries it: a tile is 256 cells and one of
-them is one world cell, so the caves were drawn at the size they are
-walked at rather than magnified into it.
+**The channel came off a reference, not off a preference.** A capture
+of the Noita coal pits at one pixel per world cell is 51% open, and
+the mean unbroken run of open cells through it is 30 across and 21
+down. Against a player of about the size of ours, that is a cave a
+little under two of him at a time, not the one large cavern a
+promotional shot shows. The tile sets are drawn to those numbers, and
+32 cells of channel against a body of 13 is what they leave to walk
+through: room to jump in, and not a hall.
 
 `player_fits_the_world` is the test that holds this. It measures the
 clear channel through the band of every tile that carries an open edge
