@@ -88,12 +88,8 @@ PLAYER_FUEL_ON_GROUND  :: 1.4  // tanks per second standing, so 0.71 seconds
 PLAYER_FUEL_IN_AIR     :: 0.22 // tanks per second falling, and not under thrust
 
 PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
+PLAYER_CLIMB        :: 3  // cells he walks up without jumping
 PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
-
-// Cells he walks up without jumping. The seeder's `ragged` pass moves
-// a wall by a cell or two, so 3 walks over the roughness the caves
-// actually have, and a taller ledge stays a jump.
-PLAYER_CLIMB :: 3
 
 SPAWN_MOUTH_DEPTH  :: 10   // cells a column must be clear to count as a way in
 SPAWN_CLEARANCE    :: 12   // cells from the mouth edge to the spawn
@@ -1210,9 +1206,9 @@ test_the_player_fits_the_world :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
-	// The narrowest channel any tile offers. It is
-	// checked at the end, because a set drawn as solid rock would pass
-	// every test above by having no open side at all.
+	// The narrowest channel any tile offers. It is checked at the end,
+	// because a set drawn as solid rock would pass every test above by
+	// having no open side at all.
 	measured_min := int(TILE_SIZE)
 
 	for b, bi in s.world.biomes.biomes {

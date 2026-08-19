@@ -147,11 +147,12 @@ Fuel does not fill under thrust. A 2.0 second burn climbs 241 cells,
 which is more than a screen height. Standing fills the tank in 0.71
 seconds, and a long fall trickles back enough for a landing burn.
 
-`PLAYER_CLIMB` is 3, not 5. The seeder's `ragged` pass moves walls by
-one or two cells, so 3 walks over the roughness the caves actually
-have, and a taller ledge stays a jump. The caves grew and this did not
-have to: the roughening works a cell at a time whatever the tile size
-is, so a bigger cave has a finer wall, not a coarser one.
+`PLAYER_CLIMB` is 3, not 5. The seeder settles the edge of a cave with
+a 3x3 majority, which moves a wall by a cell or two, so 3 walks over
+the roughness the caves actually have and a taller ledge stays a jump.
+The tiles grew from 64 cells to 256 and this did not have to follow:
+the smoothing works a cell at a time whatever the tile size is, so a
+bigger cave has a finer wall, not a coarser one.
 
 ## Movement resolves one cell at a time
 
