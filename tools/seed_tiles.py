@@ -15,11 +15,23 @@ exist there to be seeded. Run it from the repository root.
 
 WHAT IT DRAWS
 
-A tile starts solid and the caves are cut out of it. Carving from stone
-gives what a cave system has, which is space inside a mass; smoothing
-noise gives the opposite, a void with islands of matter floating in it.
-Each tile has a hall, passages out to every open side that bend at a
-waypoint on the way, chambers off the hall, and dead ends.
+A tile is noise, cut at the level that leaves about half of it open,
+and smoothed until the edges are organic. What comes out is broad
+winding ground between large lobed masses, with the open and the solid
+both connected.
+
+This used to carve caves out of a solid block, on the argument that a
+cave system is space inside a mass. A capture of the Noita coal pits at
+one pixel per world cell says otherwise: 51% of it is open, the mean
+unbroken run of open cells is 30 across and 21 down, and neither phase
+is islands in the other. Carving cannot reach that. It leaves rooms
+joined by passages, which reads as a building.
+
+The grain is set here rather than left to a smoothing rule to settle
+on, because a rule run over even noise agrees with those run lengths
+and still comes out as speckle: a mean run says how long the open cells
+are and not how they are gathered. GRAIN_X and GRAIN_Y are the size of
+a mass, and GRAIN_X being the larger is what lays the masses down.
 
 THE RULE IT MUST NOT BREAK
 
@@ -28,7 +40,7 @@ the edge between them, and the WANG_SEAM cells along each side belong
 to the edge color rather than to the tile. So:
 
   - every tile that carries color c on its west side holds the same
-    sixteen columns there, and the same for the other three sides
+    four columns there, and the same for the other three sides
   - a corner cell is in two bands at once, so the whole set shares it
   - the material of a band cell may only depend on that band. A speckle
     or a wider rim drawn at random stops at the band and traces the
@@ -54,7 +66,7 @@ import sys
 import zlib
 
 TILE = 256
-SEAM = 16
+SEAM = 4
 
 SOLID, OPEN = 1, 0
 
@@ -66,14 +78,44 @@ AIR = (0, 0, 0, 0)
 # thirds. src/tile_png.odin holds a test at the same numbers.
 #
 # One cell is one world cell, so these are the sizes a body meets. The
-# wizard is 13 cells tall (docs/player.md). The mouth is 81 cells wide
-# and the band lip eats up to 8 of it from each side, which leaves a
-# channel of about 64: five of him, which is what a cave holds around
-# the player it was measured from.
-MOUTH_LO, MOUTH_HI = 88, 168
+# wizard is 13 cells tall (docs/player.md). The mouth is 41 cells wide
+# and the band lip eats up to 6 of it from each side, which leaves a
+# channel near 29: over two of him, which is room to walk and jump
+# through a border without the border being a hall.
+MOUTH_LO, MOUTH_HI = 108, 148
 MOUTH_DEPTH = 32
-HUB_R = (40, 56)
-TRUNK_R = (24, 32)
+TRUNK_R = (12, 16)
+
+# The cave texture, measured off the reference rather than chosen.
+#
+# A capture of the Noita coal pits at one pixel per world cell is 51%
+# open, and the mean unbroken run of open cells is 30 along x and 21
+# along y. That is not a hall with passages off it. It is broad
+# winding ground between large lobed masses, with both the open and
+# the solid connected, which is what noise gives and what carving out
+# of a solid block does not.
+#
+# The grain is the size of a mass, and it has to be set directly. A
+# smoothing rule run over even noise agrees with those two run lengths
+# and still comes out as speckle, because a mean run says how long the
+# open cells are and not how they are gathered. So the noise is drawn
+# on a coarse grid and smoothed up from there, and the grid spacing is
+# the feature size: wider than it is tall, which is where the 30
+# against 21 comes from.
+GRAIN_X = 22          # cells across one lobe of the noise
+GRAIN_Y = 15          # and down, so the masses lie down
+GRAIN_DETAIL = 0.32   # a second octave at half the spacing, this strong
+INTERIOR_OPEN = 0.45  # of the middle of a tile
+BAND_OPEN = 0.50      # of a band a passage crosses, the channel aside
+BAND_CLOSED_OPEN = 0.50  # of a band with no promised way through, the same
+                         # as the rest, or the border shows as a change of density
+SMOOTH_PASSES = 2     # of a plain 3x3 majority, to make the edges organic
+BLEND = 40            # cells a band fades into the middle of its tile
+
+# A component smaller than this is a pocket, which a cave may have. A
+# component larger is a room, and a room nothing reaches is a room
+# nobody sees.
+POCKET = 1500
 
 MATERIALS_PATH = "data/materials.txt"
 BIOMES_PATH = "data/biomes.txt"
@@ -238,45 +280,252 @@ def carve_disc(grid, cx, cy, r):
                 grid[y][x] = OPEN
 
 
-def carve_blob(grid, cx, cy, r, rng, rough=0.30):
-    """A room, which is not a circle.
+def smooth_once(grid):
+    """One pass of a 3x3 majority, which makes an edge organic.
 
-    A disc of radius 12 has an edge a cave could own. At radius 48 the
-    same edge reads as an arc of a compass, and a roughening pass that
-    moves a wall by a cell cannot break a curve that long. So the
-    radius follows the angle instead: three harmonics with random
-    phases, which gives the room bays and headlands of its own size
-    and costs one atan2 per cell of the box it sits in.
-
-    The walks need no such thing. A passage is a line of discs along a
-    wandering path, and the path is what its edge follows.
+    The shape of the caves is already decided by the grain of the
+    noise. This only settles the edge: it rounds off single cells and
+    leaves a wall that wanders by a cell or two, which is the detail a
+    256 cell tile is drawn at.
     """
-    p1, p2, p3 = (rng.uniform(0, 2 * math.pi) for _ in range(3))
-    k2 = rng.choice((2, 3))
-    k3 = rng.choice((5, 7))
-    reach = int(r * (1 + rough)) + 2
+    out = [row[:] for row in grid]
+    for y in range(1, TILE - 1):
+        up, here, down = grid[y - 1], grid[y], grid[y + 1]
+        there = out[y]
+        for x in range(1, TILE - 1):
+            n = (up[x - 1] + up[x] + up[x + 1]
+                 + here[x - 1] + here[x + 1]
+                 + down[x - 1] + down[x] + down[x + 1])
+            there[x] = SOLID if n >= 5 else OPEN
+    return out
 
-    for y in range(max(0, cy - reach), min(TILE, cy + reach + 1)):
-        for x in range(max(0, cx - reach), min(TILE, cx + reach + 1)):
-            dx, dy = x - cx, y - cy
-            d2 = dx * dx + dy * dy
-            if d2 > reach * reach:
-                continue
-            a = math.atan2(dy, dx)
-            edge = r * (
-                1
-                + rough
-                * (0.55 * math.sin(a + p1) + 0.30 * math.sin(k2 * a + p2) + 0.15 * math.sin(k3 * a + p3))
+
+def value_noise(rng, grain_x, grain_y):
+    """Smooth noise on a grid of the given spacing.
+
+    Random values on a coarse lattice, read back with a smoothstep
+    between them. One lobe of the result is one cell of that lattice,
+    which is the whole reason for drawing it this way: the size of a
+    rock mass is a number here rather than something a smoothing rule
+    happens to settle on.
+    """
+    gx, gy = TILE // grain_x + 2, TILE // grain_y + 2
+    lattice = [[rng.random() for _ in range(gx)] for _ in range(gy)]
+
+    def ease(t):
+        return t * t * (3 - 2 * t)
+
+    # The x weights repeat for every row, so they are worked out once.
+    xs = []
+    for x in range(TILE):
+        fx = x / grain_x
+        x0 = int(fx)
+        xs.append((x0, ease(fx - x0)))
+
+    field = []
+    for y in range(TILE):
+        fy = y / grain_y
+        y0 = int(fy)
+        ty = ease(fy - y0)
+        low, high = lattice[y0], lattice[y0 + 1]
+        row = [0.0] * TILE
+        for x, (x0, tx) in enumerate(xs):
+            a = low[x0] + (low[x0 + 1] - low[x0]) * tx
+            b = high[x0] + (high[x0 + 1] - high[x0]) * tx
+            row[x] = a + (b - a) * ty
+        field.append(row)
+    return field
+
+
+def noise_field(rng, grain_x=None, grain_y=None):
+    """The two octaves, summed, as floats.
+
+    The first says how big a mass is and the second gives it lobes and
+    inlets. It stays a float field because the bands and the middle of
+    a tile have to be mixed before either is cut, not after.
+    """
+    grain_x = grain_x or GRAIN_X
+    grain_y = grain_y or GRAIN_Y
+    coarse = value_noise(rng, grain_x, grain_y)
+    fine = value_noise(rng, max(2, grain_x // 2), max(2, grain_y // 2))
+    for y in range(TILE):
+        cr, fr = coarse[y], fine[y]
+        for x in range(TILE):
+            cr[x] += fr[x] * GRAIN_DETAIL
+    return coarse
+
+
+def field_cut(field, open_fraction):
+    """The level that leaves the asked fraction of a field open.
+
+    One cut serves a whole set. A cut worked out per tile would put a
+    different level on the same band in two tiles and the seam rule
+    would break, so it is measured once and used everywhere.
+    """
+    flat = sorted(v for row in field for v in row)
+    return flat[min(len(flat) - 1, int(open_fraction * len(flat)))]
+
+
+def field_grid(field, cut):
+    """Cut a field into ground and rock, then settle the edge."""
+    grid = [[OPEN if v <= cut else SOLID for v in row] for row in field]
+    for _ in range(SMOOTH_PASSES):
+        grid = smooth_once(grid)
+    return grid
+
+
+# Where in a field the strip that straddles a border is taken from.
+STRIP = TILE // 2 - SEAM
+
+
+def band_value(fields, side, color, x, y):
+    """The field value a band cell, or a cell near one, reads.
+
+    One field per axis and color, not one per side and color. The east
+    band of a tile and the west band of the tile beside it are two
+    strips that touch in the world, and drawing them from two fields
+    puts a straight line down every border no matter how well each one
+    is made. So one field is cut in half across the border: the left
+    half is the east band of the tile on the left and the right half is
+    the west band of the tile on the right, and the two join because
+    they were never apart.
+
+    Reading past the band is what the crossfade needs, and the strip
+    sits in the middle of its field so there is room either way.
+    """
+    if side == "W":
+        return fields[("V", color)][y][STRIP + SEAM + x]
+    if side == "E":
+        return fields[("V", color)][y][STRIP + x - TILE + SEAM]
+    if side == "N":
+        return fields[("H", color)][STRIP + SEAM + y][x]
+    return fields[("H", color)][STRIP + y - TILE + SEAM][x]
+
+
+def blend(middle, fields, corner, sig):
+    """Mix the middle of a tile into the bands around it.
+
+    A band belongs to its edge color, so it is the same field in every
+    tile that carries that color, while the middle is the tile's own.
+    Butt the two together and every tile has a ring of cut-off shapes
+    SEAM cells in from its border.
+
+    So the fields are crossfaded before either is cut. Inside a band
+    the edge field stands alone, which is what keeps the band shared.
+    Over the next BLEND cells the tile's own field takes over. What
+    comes out has no ring in it, because there is no longer a place
+    where one field stops and another starts.
+    """
+    colors = dict(zip("NESW", sig))
+    out = [row[:] for row in middle]
+    for y in range(TILE):
+        row = out[y]
+        for x in range(TILE):
+            reach = (
+                ("W", x - SEAM),
+                ("E", (TILE - 1 - x) - SEAM),
+                ("N", y - SEAM),
+                ("S", (TILE - 1 - y) - SEAM),
             )
-            if d2 <= edge * edge:
-                grid[y][x] = OPEN
+            inside = [side for side, d in reach if d < 0]
+            if len(inside) >= 2:
+                row[x] = corner[y][x]
+                continue
+            if inside:
+                side = inside[0]
+                row[x] = band_value(fields, side, colors[side], x, y)
+                continue
+            side, d = min(reach, key=lambda p: p[1])
+            if d >= BLEND:
+                continue
+            w = 1.0 - d / BLEND
+            row[x] = middle[y][x] * (1.0 - w) + band_value(fields, side, colors[side], x, y) * w
+    return out
 
 
-def carve_disc_solid(grid, cx, cy, r):
-    for y in range(max(0, cy - r), min(TILE, cy + r + 1)):
-        for x in range(max(0, cx - r), min(TILE, cx + r + 1)):
-            if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
-                grid[y][x] = SOLID
+def components(grid):
+    """Label every run of connected open cells, and say how big it is."""
+    label = [[-1] * TILE for _ in range(TILE)]
+    sizes = []
+    for sy in range(TILE):
+        for sx in range(TILE):
+            if grid[sy][sx] != OPEN or label[sy][sx] >= 0:
+                continue
+            index = len(sizes)
+            label[sy][sx] = index
+            stack = [(sx, sy)]
+            size = 0
+            while stack:
+                x, y = stack.pop()
+                size += 1
+                for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                    if 0 <= nx < TILE and 0 <= ny < TILE:
+                        if grid[ny][nx] == OPEN and label[ny][nx] < 0:
+                            label[ny][nx] = index
+                            stack.append((nx, ny))
+            sizes.append(size)
+    return label, sizes
+
+
+def nearest_of(label, want, x0, y0):
+    """The cell of one component closest to a place. None if it has none."""
+    best, best_d = None, None
+    for y in range(TILE):
+        row = label[y]
+        dy = y - y0
+        for x in range(TILE):
+            if row[x] != want:
+                continue
+            d = (x - x0) ** 2 + dy * dy
+            if best_d is None or d < best_d:
+                best, best_d = (x, y), d
+    return best
+
+
+def connect(grid, sig, rng):
+    """Join every mouth, and every room, to one network.
+
+    Noise says nothing about whether a tile can be walked across. A
+    mouth that opens onto rock is a border the world cannot pass, and
+    the lattice would come out as a field of sealed squares. So the
+    largest network is the one the tile keeps, every open side is dug
+    through to it, and any room too big to be a pocket is joined to it
+    as well.
+    """
+    label, sizes = components(grid)
+    if not sizes:
+        return grid
+    main = max(range(len(sizes)), key=lambda i: sizes[i])
+
+    mid = (MOUTH_LO + MOUTH_HI) // 2
+    inner = SEAM + MOUTH_DEPTH // 2
+    mouths = {
+        "N": (mid, inner),
+        "S": (mid, TILE - 1 - inner),
+        "W": (inner, mid),
+        "E": (TILE - 1 - inner, mid),
+    }
+
+    targets = []
+    for side, color in zip("NESW", sig):
+        if color == 1:
+            targets.append(mouths[side])
+    for index, size in enumerate(sizes):
+        if index != main and size >= POCKET:
+            targets.append(nearest_of(label, index, TILE // 2, TILE // 2))
+
+    for point in targets:
+        if point is None:
+            continue
+        x0, y0 = point
+        if label[y0][x0] == main:
+            continue
+        goal = nearest_of(label, main, x0, y0)
+        if goal is None:
+            continue
+        carve_disc(grid, x0, y0, rng.randint(*TRUNK_R))
+        carve_walk(grid, x0, y0, goal[0], goal[1], rng.randint(*TRUNK_R), rng, wobble=0.7)
+    return grid
 
 
 def carve_walk(grid, x0, y0, x1, y1, r, rng, wobble=0.55):
@@ -305,94 +554,30 @@ def carve_walk(grid, x0, y0, x1, y1, r, rng, wobble=0.55):
     carve_disc(grid, x1, y1, int(radius))
 
 
-def ragged(grid, rng, passes=2, open_p=0.45, close_p=0.30):
-    """Roughen the walls a carve left behind.
+def carve_interior(sig, rng, sides, corner, cut):
+    """The inside of a tile: ground and rock, from noise.
 
-    A disc has a smooth edge and a cave does not. This opens matter
-    that already has air on several sides and closes air that is nearly
-    surrounded, which frees the walls of arcs and fills in pinholes.
+    The first version of this cut caves out of a solid block, on the
+    argument that a cave system is space inside a mass. A capture of
+    the reference biome says otherwise. There the open and the solid
+    are both connected and about the same amount of the picture, which
+    is what noise gives and what carving does not reach: carving leaves
+    rooms joined by passages, and the reference has broad ground
+    between masses.
+
+    So the tile is noise, crossfaded into the bands around it, cut at
+    the level the whole set is cut at. The only thing drawn by hand
+    afterward is whatever it takes to make every mouth reach the same
+    network.
     """
-    for _ in range(passes):
-        out = [row[:] for row in grid]
-        for y in range(1, TILE - 1):
-            for x in range(1, TILE - 1):
-                n = sum(
-                    1
-                    for dy in (-1, 0, 1)
-                    for dx in (-1, 0, 1)
-                    if not (dx == 0 and dy == 0) and grid[y + dy][x + dx] == OPEN
-                )
-                if grid[y][x] == SOLID and n >= 3 and rng.random() < open_p:
-                    out[y][x] = OPEN
-                elif grid[y][x] == OPEN and n <= 2 and rng.random() < close_p:
-                    out[y][x] = SOLID
-        grid = out
-    return grid
+    grid = field_grid(blend(noise_field(rng), sides, corner, sig), cut)
 
-
-def apron(grid, sig, rng):
-    """Thicken the mass behind a wall by a wandering amount.
-
-    A band is the same SEAM cells in every tile that carries its edge
-    color, so a cave carved up to one comes out with a wall face that is
-    straight and always the same distance from the border. The apron
-    sits inside the tile, where every tile is free to differ, and gives
-    that face a thickness that wanders instead.
-    """
-    n, e, s, w = sig
-    for side, color in (("N", n), ("E", e), ("S", s), ("W", w)):
-        thickness = rng.randint(0, 16)
-        for along in range(TILE):
-            thickness = min(20, max(0, thickness + rng.randint(-1, 1)))
-            # A mouth must stay a mouth; the apron is for the wall
-            # either side of it.
-            if color == 1 and MOUTH_LO - 1 <= along <= MOUTH_HI + 1:
-                continue
-
-            for depth in range(SEAM, SEAM + thickness):
-                if side == "W":
-                    grid[along][depth] = SOLID
-                elif side == "E":
-                    grid[along][TILE - 1 - depth] = SOLID
-                elif side == "N":
-                    grid[depth][along] = SOLID
-                else:
-                    grid[TILE - 1 - depth][along] = SOLID
-
-
-def carve_interior(sig, rng):
-    """A tile starts solid, and the caves are cut out of it.
-
-    A passage never runs straight from a mouth to the middle. It bends
-    at a waypoint on the way, because a lattice of tiles whose passages
-    all run to the centre reads as a cross in every square.
-    """
-    n, e, s, w = sig
-    grid = [[SOLID] * TILE for _ in range(TILE)]
-
-    # The hall the passages meet at, off centre so the tile has no axis.
-    mid = (MOUTH_LO + MOUTH_HI) // 2
-    hx = mid + rng.randint(-32, 32)
-    hy = mid + rng.randint(-32, 32)
-    carve_blob(grid, hx, hy, rng.randint(*HUB_R), rng)
-
-    open_sides = [side for side, color in (("N", n), ("E", e), ("S", s), ("W", w)) if color == 1]
-    for side in open_sides:
-        end = {"N": (mid, 0), "S": (mid, TILE - 1), "W": (0, mid), "E": (TILE - 1, mid)}[side]
-
-        # A place to bend at, part of the way in and off to one side.
-        wx = round(end[0] + (hx - end[0]) * 0.45) + rng.randint(-40, 40)
-        wy = round(end[1] + (hy - end[1]) * 0.45) + rng.randint(-40, 40)
-        wx = min(TILE - SEAM - 12, max(SEAM + 12, wx))
-        wy = min(TILE - SEAM - 12, max(SEAM + 12, wy))
-
-        carve_walk(grid, end[0], end[1], wx, wy, rng.randint(*TRUNK_R), rng, wobble=0.5)
-        if rng.random() < 0.6:
-            carve_blob(grid, wx, wy, rng.randint(24, 36), rng)
-        carve_walk(grid, wx, wy, hx, hy, rng.randint(20, 32), rng, wobble=0.8)
-
-        # The mouth stays the full width the band promises, so the
-        # passage across the border does not pinch.
+    # The mouths have to be open before the network is measured, or a
+    # mouth that landed on rock would be dug out to a network it is
+    # already part of.
+    for side, color in zip("NESW", sig):
+        if color == 0:
+            continue
         if side in "WE":
             x0 = 0 if side == "W" else TILE - MOUTH_DEPTH
             for y in range(MOUTH_LO, MOUTH_HI + 1):
@@ -404,61 +589,56 @@ def carve_interior(sig, rng):
                 for y in range(y0, y0 + MOUTH_DEPTH):
                     grid[y][x] = OPEN
 
-    # Chambers off the hall, so a tile is a place and not a junction.
-    for _ in range(rng.randint(3, 4)):
-        cx = rng.randrange(SEAM + 20, TILE - SEAM - 20)
-        cy = rng.randrange(SEAM + 20, TILE - SEAM - 20)
-        carve_walk(grid, hx, hy, cx, cy, rng.randint(16, 24), rng, wobble=0.9)
-        carve_blob(grid, cx, cy, rng.randint(32, 48), rng)
-
-    # Dead ends: somewhere to explore that does not lead on.
-    for _ in range(rng.randint(1, 2)):
-        ax = rng.randrange(SEAM + 16, TILE - SEAM - 16)
-        ay = rng.randrange(SEAM + 16, TILE - SEAM - 16)
-        carve_walk(grid, hx, hy, ax, ay, rng.randint(12, 16), rng, wobble=1.0)
-
-    apron(grid, sig, rng)
-    grid = ragged(grid, rng)
-
-    # Pillars, where a chamber came out wide enough to hold one.
-    for _ in range(3):
-        px = rng.randrange(SEAM + 32, TILE - SEAM - 32)
-        py = rng.randrange(SEAM + 32, TILE - SEAM - 32)
-        clear = all(
-            grid[py + dy][px + dx] == OPEN for dy in range(-28, 29, 4) for dx in range(-28, 29, 4)
-        )
-        if not clear:
-            continue
-        # two lumps, so a pillar is not a circle
-        carve_disc_solid(grid, px, py, rng.randint(12, 16))
-        carve_disc_solid(
-            grid, px + rng.randint(-12, 12), py + rng.randint(-12, 12), rng.randint(8, 12)
-        )
-    return grid
+    return connect(grid, sig, rng)
 
 
 # ------------------------------------------------------------------ the bands
 
 
-def band_profile(color, rng):
+def band_profile(side, color, fields, cut, rng):
     """One border band, as a [SEAM][TILE] grid of SOLID and OPEN.
 
     It depends on the side and the color only, so every tile that
     carries that color holds the same band.
+
+    It is cut from the same field the middle of a tile is crossfaded
+    into, at the same level, so a band is not a strip of something else
+    laid over the cave: it is the cave, at the place the lattice needs
+    every tile to agree.
+
+    A color 1 band also carries a channel wide enough to walk through,
+    forced through every row, so the way from one tile to the next is a
+    promise and not something the noise happened to leave.
     """
     band = [[SOLID] * TILE for _ in range(SEAM)]
+    for depth in range(SEAM):
+        row = band[depth]
+        for along in range(TILE):
+            # depth runs into the tile and along runs down the border,
+            # and which of those is x in the world is what the side says.
+            if side == "W":
+                x, y = depth, along
+            elif side == "E":
+                x, y = TILE - 1 - depth, along
+            elif side == "N":
+                x, y = along, depth
+            else:
+                x, y = along, TILE - 1 - depth
+            row[along] = OPEN if band_value(fields, side, color, x, y) <= cut else SOLID
+
+    # The cut leaves single cells that the middle of a tile does not
+    # have, because the middle is smoothed and a band cannot be: a pass
+    # over a band would reach the cells beyond it, which belong to a
+    # different tile in every place the band is used.
+    for _ in range(SMOOTH_PASSES):
+        band = smooth_band(band)
+
     if color == 0:
         return band
 
-    # A jagged mouth: the opening is about the same width everywhere,
-    # and its lip is ragged, so a border does not read as a doorway.
-    #
-    # The lip wanders as the band goes deeper instead of being drawn
-    # again on every row. SEAM rows of independent jitter is a comb of
-    # SEAM teeth, and a comb standing in the mouth of every border is
-    # the lattice made visible, which is the one thing the bands exist
-    # to hide. The envelope is 8 cells, so the channel through the
-    # whole band stays about 64 whatever the walk does inside it.
+    # The channel: the lip wanders as the band goes deeper instead of
+    # being drawn again on every row. SEAM rows of independent jitter is
+    # a comb of SEAM teeth standing in the mouth of every border.
     lo, hi = MOUTH_LO + 4, MOUTH_HI - 4
     for depth in range(SEAM):
         lo = min(MOUTH_LO + 8, max(MOUTH_LO, lo + rng.randint(-2, 2)))
@@ -468,7 +648,29 @@ def band_profile(color, rng):
     return band
 
 
-def band_materials(band, base, rock, wall=8):
+def smooth_band(band):
+    """The 3x3 majority, along a band only.
+
+    A band is SEAM deep, and the rows beyond it belong to whichever
+    tile is using the band, so they cannot be looked at. The pass runs
+    along the band and treats what is past the ends of the depth axis
+    as more of the same, which keeps the rule the same shape without
+    reading anything it must not.
+    """
+    out = [row[:] for row in band]
+    for depth in range(SEAM):
+        up = band[max(0, depth - 1)]
+        here = band[depth]
+        down = band[min(SEAM - 1, depth + 1)]
+        for along in range(1, TILE - 1):
+            n = (up[along - 1] + up[along] + up[along + 1]
+                 + here[along - 1] + here[along + 1]
+                 + down[along - 1] + down[along] + down[along + 1])
+            out[depth][along] = SOLID if n >= 5 else OPEN
+    return out
+
+
+def band_materials(band, base, rock, wall=3):
     """The materials of one band, from the band alone.
 
     It may not look at the interior of any tile: two tiles that share
@@ -500,25 +702,31 @@ def stamp(target, sig, profiles, corner):
     `target` is a solid/open grid or a material grid, and `profiles`
     holds the matching kind. Both are stamped, because both have to be
     the same in every tile that carries the edge color.
+
+    `corner` is a whole grid rather than one value. A corner cell is in
+    two bands at once and so belongs to the whole set, which used to
+    make it a solid square; four solid squares on every tile is the
+    lattice drawn in the one place the bands cannot vary. A patch of
+    cave shared by the set is just as common to all of them and shows
+    nothing.
     """
-    n, e, s, w = sig
+    n, e, s_, w = sig
     for depth in range(SEAM):
         for along in range(TILE):
             target[along][depth] = profiles[("W", w)][depth][along]
             target[along][TILE - 1 - depth] = profiles[("E", e)][depth][along]
             target[depth][along] = profiles[("N", n)][depth][along]
-            target[TILE - 1 - depth][along] = profiles[("S", s)][depth][along]
-    # A corner is in two bands at once, so the whole set shares it.
+            target[TILE - 1 - depth][along] = profiles[("S", s_)][depth][along]
     for y in range(TILE):
         for x in range(TILE):
             if band_of(x, y) == "C":
-                target[y][x] = corner
+                target[y][x] = corner[y][x]
 
 
 # --------------------------------------------------------------- the material
 
 
-def to_materials(grid, base, rock, ore, ore_rate, rng, wall=8):
+def to_materials(grid, base, rock, ore, ore_rate, rng, wall=3):
     """Rock where the mass meets air, the base material deeper in.
 
     The rule may only ask how near a cell is to air, because the band
@@ -577,13 +785,30 @@ def seed_set(name, biome, colors, seed=None):
     rock = colors[style["rock"]]
     ore = colors[style["ore"]]
 
-    # One profile per side and color, shared by every tile of the set.
-    shape, paint = {}, {}
-    for i, side in enumerate("NESW"):
+    # One cut for the whole set, so the same band comes out the same in
+    # every tile that carries it.
+    cut = field_cut(noise_field(random.Random(seed + 4242)), INTERIOR_OPEN)
+
+    # One field per edge axis and color: a vertical border is one field
+    # cut in half, and so is a horizontal one. Plus the corners, which
+    # belong to every tile of the set at once.
+    fields = {}
+    for i, axis in enumerate("VH"):
         for color in (0, 1):
-            band = band_profile(color, random.Random(seed + i * 71 + color * 13))
+            fields[(axis, color)] = noise_field(random.Random(seed + i * 71 + color * 13))
+    corner_field = noise_field(random.Random(seed + 8191))
+
+    shape, paint = {}, {}
+    for side in "NESW":
+        for color in (0, 1):
+            band = band_profile(side, color, fields, cut,
+                                random.Random(seed + ord(side) * 31 + color * 13))
             shape[(side, color)] = band
             paint[(side, color)] = band_materials(band, base, rock)
+
+    corner_rng = random.Random(seed + 8191)
+    corner_shape = field_grid(corner_field, cut)
+    corner_paint = to_materials(corner_shape, base, rock, ore, style["ore_rate"], corner_rng)
 
     air = 0
     for sig in signatures():
@@ -591,10 +816,10 @@ def seed_set(name, biome, colors, seed=None):
         for v in range(biome["variants"]):
             rng = random.Random(seed * 31 + value * 977 + v * 104729)
 
-            grid = carve_interior(sig, rng)
-            stamp(grid, sig, shape, SOLID)
+            grid = carve_interior(sig, rng, fields, corner_field, cut)
+            stamp(grid, sig, shape, corner_shape)
             pix = to_materials(grid, base, rock, ore, style["ore_rate"], rng)
-            stamp(pix, sig, paint, base)
+            stamp(pix, sig, paint, corner_paint)
 
             air += sum(1 for row in pix for c in row if c == AIR)
             write_png(f"{biome['prefix']}_{sig[0]}{sig[1]}{sig[2]}{sig[3]}_{v}.png", pix)

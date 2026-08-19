@@ -172,7 +172,7 @@ the same four edges do not always give the same tile.
 which is also the end of its file name:
 `data/tiles/coalmine_0110_1.png`.
 
-The cells within 16 of a side belong to the edge color rather than
+The cells within 4 of a side belong to the edge color rather than
 to the tile. `tile_paint` writes a stroke there into every tile of the
 set that carries that color, because that is the same seam seen from
 another tile. `tile_view` says so before it prints the grid.

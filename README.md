@@ -87,9 +87,11 @@ pictures of one set of edges, and the lattice picks between them with
 a second hash, so the same four edges do not always give the same
 tile. The Coalmine set ships with two.
 
-Matching colors is only half of a seam. The cells within 16 of a
+Matching colors is only half of a seam. The cells within 4 of a
 side belong to the edge color rather than to the tile: every tile that
-carries color 1 on its west side holds the same 16 columns there. A
+carries color 1 on its west side holds the same 4 columns there. The
+seeder crossfades a tile's own noise into those columns, so the join
+is smooth well beyond them and the lattice leaves no line. A
 corner cell sits in two bands at once, so the whole set shares it,
 which is why the bands stay narrow. The tile editor keeps all of that
 true as you paint, and the save gate refuses a set where it is not.
@@ -103,7 +105,7 @@ data/tiles/coalmine_0110_1.png
 
 The sets are authored data, and the tile editor is how to change one.
 A whole set is 32 pictures, so `tools/seed_tiles.py` draws one: caves
-carved out of stone, about half of every tile open. It reads the
+cut from noise, about half of every tile open. It reads the
 material and biome tables, so a new biome only needs `generator = wang`
 and a `tiles` prefix to be seeded, and `--check` holds the files on
 disk to the seam rule.

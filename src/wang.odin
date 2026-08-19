@@ -55,9 +55,15 @@ WANG_SIGNATURES :: WANG_COLORS * WANG_COLORS * WANG_COLORS * WANG_COLORS
 
 // Cells along each side that belong to the edge color instead of to
 // the tile. Wide enough to carry a tunnel mouth through the border,
-// narrow enough that the shared corners stay invisible. It is the
-// same sixteenth of a tile it always was, counted at TILE_SIZE.
-WANG_SEAM :: 16
+// narrow enough that the shared corners stay invisible.
+//
+// A corner is the one place the scheme cannot make continuous: it
+// belongs to two bands at once, so the whole set has to hold it, and
+// whatever is drawn there agrees with neither band. That square is
+// WANG_SEAM on a side, so this is kept small for the same reason it
+// always was: 4 of 256 leaves a square no eye finds, and the crossfade
+// in the seeder carries the rest of the way across a border.
+WANG_SEAM :: 4
 
 #assert(WANG_SEAM > 0 && WANG_SEAM * 2 < TILE_SIZE, "the two seams of an axis must not meet")
 
