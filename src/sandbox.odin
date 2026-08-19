@@ -381,7 +381,14 @@ sandbox_ignite_cell :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
 		// would have to special-case the centre cell.
 		sandbox_put(sb, table, index, MATERIAL_AIR)
 		sb.moved[index] = true
-		sandbox_explode(sb, table, x, y, i32(m.explosive) / 4, m.explosive)
+		// The reach is the power, not a fraction of it. A ray spends at
+		// least 1 energy on every cell it crosses, so a blast of power
+		// p can never reach further than p cells even through open
+		// air. A smaller radius would stop rays that still had energy
+		// to spend, and the crater would end at a circle the material
+		// did nothing to earn: tnt beside a rock wall cleared the air
+		// and left the wall standing.
+		sandbox_explode(sb, table, x, y, i32(m.explosive), m.explosive)
 		return
 	}
 
@@ -661,6 +668,29 @@ sandbox_move_powder :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32, m: M
 sandbox_move_liquid :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32, m: Material) {
 	cx, cy := x, y
 	steps := int(m.fall_speed)
+
+	// A lighter liquid under a heavier one floats up through it.
+	//
+	// Without this rule a liquid only ever tries to sink, and a pair
+	// that needs to change places is decided by which of the two the
+	// scan reaches first. The scan runs bottom up, so the lighter cell
+	// below is always stepped first, spreads sideways within its own
+	// pool, and marks itself moved; the heavier cell above is then
+	// refused for the whole tick, every tick. Oil, water and toxic
+	// sludge poured into one tank settled part of the way and stopped,
+	// with 27 heavy cells resting on lighter ones for ever.
+	//
+	// The rule is the one gases already have. Rise refuses a target of
+	// the same density, so a pool of one liquid does not jitter, and
+	// after the swap the pair is in the order it wanted, so it does
+	// not swap back.
+	above := sandbox_cell(sb, cx, cy-1)
+	if above != MATERIAL_AIR {
+		am := table.materials[above]
+		if am.state == .Liquid && am.density > m.density {
+			if sandbox_try_move(sb, table, cx, cy, cx, cy-1, .Rise) do return
+		}
+	}
 
 	fell := false
 	for _ in 0 ..< steps {
@@ -1055,6 +1085,79 @@ test_a_flat_liquid_layer_stays_still :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 7 {
 		for x in i32(0) ..< 16 {
 			testing.expect(t, sandbox_cell(&sb, x, y) == MATERIAL_AIR, "nothing must climb out")
+		}
+	}
+}
+
+@(test)
+test_a_lighter_liquid_rises_through_a_heavier_one :: proc(t: ^testing.T) {
+	// Oil under water must change places with it. Without the rise
+	// rule a liquid only ever tries to sink, so which of a pair moves
+	// is decided by which one the scan reaches first. The scan runs
+	// bottom up, so the lighter cell below is stepped first, spreads
+	// sideways inside its own pool, and marks itself moved; the
+	// heavier cell above is refused for that whole tick, and for every
+	// tick after it. A tank of oil, water and toxic sludge settled
+	// part of the way and then held 27 heavy cells resting on lighter
+	// ones for ever.
+	sb, table := test_sandbox(t, 8, 24, 31)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	water, _ := find_material_index(table, "Water")
+	oil, _ := find_material_index(table, "Oil")
+
+	// Oil on the floor with water stacked on top of it: upside down.
+	for y in i32(12) ..< 18 {
+		for x in i32(0) ..< 8 do sandbox_paint(&sb, table, x, y, 0, Cell(water))
+	}
+	for y in i32(18) ..< 24 {
+		for x in i32(0) ..< 8 do sandbox_paint(&sb, table, x, y, 0, Cell(oil))
+	}
+
+	for _ in 0 ..< 200 do sandbox_step(&sb, table)
+
+	// The deepest oil must lie no lower than the shallowest water.
+	lowest_oil := i32(-1)
+	shallowest_water := i32(1 << 20)
+	for y in i32(0) ..< sb.height {
+		for x in i32(0) ..< sb.width {
+			switch int(sandbox_cell(&sb, x, y)) {
+			case oil:   if y > lowest_oil do lowest_oil = y
+			case water: if y < shallowest_water do shallowest_water = y
+			}
+		}
+	}
+	testing.expect(t, lowest_oil >= 0, "the oil must still exist")
+	testing.expectf(
+		t,
+		lowest_oil <= shallowest_water,
+		"every oil cell must float above every water cell, but oil reaches %d and water starts at %d",
+		lowest_oil, shallowest_water,
+	)
+}
+
+@(test)
+test_one_liquid_on_a_flat_floor_does_not_jitter :: proc(t: ^testing.T) {
+	// The rise rule refuses a target of the same density, or a settled
+	// pool of one liquid would swap up and down for ever and never
+	// let its chunk go back to sleep.
+	sb, table := test_sandbox(t, 12, 12, 41)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	water, _ := find_material_index(table, "Water")
+	for y in i32(8) ..< 12 {
+		for x in i32(0) ..< 12 do sandbox_paint(&sb, table, x, y, 0, Cell(water))
+	}
+	for _ in 0 ..< 60 do sandbox_step(&sb, table)
+	for _ in 0 ..< 60 do sandbox_step(&sb, table)
+
+	// Only the tick counter and the generator state may differ, so the
+	// cells themselves have to be identical.
+	for y in i32(8) ..< 12 {
+		for x in i32(0) ..< 12 {
+			testing.expect(t, int(sandbox_cell(&sb, x, y)) == water, "the pool must hold its shape")
 		}
 	}
 }

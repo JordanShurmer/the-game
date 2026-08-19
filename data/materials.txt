@@ -357,7 +357,7 @@ contact     =
 immersion   =
 tags        = Fuel Oxidizer
 glyph       = g
-explosive   = 48
+explosive   = 12
 
 [Tnt]
 state       = Solid

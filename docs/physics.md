@@ -18,7 +18,7 @@ behaviour the game is known for.
 | What Noita does | What we do |
 | --- | --- |
 | Powder falls and piles | Already done |
-| Liquid falls, pools, and layers by density | Already done |
+| Liquid falls, pools, and layers by density | Falling and pooling were done. Layering was not: see "The rise rule" below |
 | Gas climbs and gathers under a ceiling | Already done |
 | Fire spreads along fuel and leaves smoke | Already done |
 | Wood burns for a time, then becomes ash | Data only: `burns_to` a burning material with a `lifetime` and a `decays_to` |
@@ -46,9 +46,17 @@ reader knows the gap is a decision and not an oversight.
   is local to the damage that caused it. The rung that adds it is a
   flood fill from the anchored cells of a chunk, run only where a
   chunk was cut.
-- **No pressure.** A pool settles into one body and holds its shape,
-  but it can keep a slope. Noita does not equalise across a U bend
-  either, so this is a match with the reference and not a debt.
+- **No pressure, and no sideways exchange between liquids.** A pool
+  settles into one body and holds its shape, but it can keep a slope.
+  Noita does not equalise across a U bend either, so that part is a
+  match with the reference and not a debt. The second half is a real
+  limit: a liquid swaps with a lighter one below it and never with one
+  beside it, so two liquids poured into a wide tank settle with no
+  cell resting on anything lighter and still read as a diagonal smear
+  rather than as layers. The density room is a narrow column for that
+  reason. The rung that would lift it is a sideways swap gated on
+  density, which has to be written so that a settled pool of one
+  liquid does not jitter for ever.
 - **No temperature field.** A number per cell for heat would cost as
   much memory as the cells and buy behaviour that the reaction table
   already gives. Fire, melting, freezing and boiling are all pairs of
@@ -92,7 +100,7 @@ room shows.
 | `Ice` | Solid | 0.92 | 2 | melts near heat |
 | `Snow` | Powder | 0.4 | 1 | melts faster |
 | `Obsidian` | Solid | 2.6 | 9 | what water leaves in lava |
-| `Gunpowder` | Powder | 1.7 | 1 | a pile that goes off |
+| `Gunpowder` | Powder | 1.7 | 1 | one grain pops, and a pile is many of them |
 | `Tnt` | Solid | 1.6 | 2 | a block that goes off harder |
 | `Gravel` | Powder | 2.2 | 2 | what blasted rock falls as |
 | `Flammable_Gas` | Gas | 0.15 | 0 | a pocket that lights all at once |
@@ -200,6 +208,35 @@ This is rung two of the ladder: the mechanism is already in the step,
 and burning wood is a use of it. Coal is the same shape with a longer
 lifetime.
 
+## The rise rule
+
+A liquid only ever tried to sink. That is not enough to make two
+liquids layer, and the reason is the scan order.
+
+The scan runs from the bottom row up, so of a heavy cell resting on a
+lighter one, the lighter cell below is always stepped first. It
+spreads sideways within its own pool, marks itself moved, and the
+heavy cell above is then refused for the whole of that tick. It is
+refused again on the next tick, and every tick after it, because
+nothing about the arrangement has changed.
+
+Measured: oil, water and toxic sludge poured into one tank settled
+part of the way and then held **27 heavy cells resting on lighter
+ones, unchanged from tick 800 to tick 12000**.
+
+So a liquid now also rises. A liquid whose upstairs neighbour is a
+denser liquid changes places with it, which is the rule gases already
+have. The same measurement then reaches **zero** by tick 800, and the
+three layers separate further than they ever did.
+
+Two things make the rule safe:
+
+- `Rise` refuses a target of the same density, so a settled pool of
+  one liquid does not swap up and down for ever, and its chunk still
+  goes back to sleep.
+- After the swap the pair is in the order it wanted, so it does not
+  swap back.
+
 ## Explosions
 
 ```odin
@@ -231,7 +268,15 @@ A `power` of 64 crosses 64 cells of air or 7 cells of rock.
 **A material with `explosive` above zero detonates instead of
 burning.** When `sandbox_ignite` or `sandbox_spread_fire` reaches such
 a cell, the cell becomes Air and a blast starts there with
-`power = explosive` and `radius = explosive / 4`. A pile of gunpowder
+`power = explosive` and `radius = explosive`.
+
+The reach is the power, and not a fraction of it. A ray spends at
+least 1 energy on every cell it crosses, so a blast of power p can
+never reach further than p cells, even through open air. A smaller
+radius stops rays that still have energy to spend, and the crater then
+ends at a circle the material did nothing to earn. It showed as a
+block of tnt that cleared the air around itself and left a rock wall
+32 cells away untouched. A pile of gunpowder
 therefore goes off grain by grain, each grain lighting the next,
 which is the chain a pile should have.
 
