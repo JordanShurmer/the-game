@@ -45,10 +45,30 @@ It is a power of two for the same reason TILE_SIZE is: the generator
 turns a world coordinate into an authored cell once per texel, and a
 mask and a shift cost nothing where a division would show. A scale of
 three would also make a region stop being a whole number of tiles,
-because cells_per_pixel is 512.
+because cells_per_pixel is 512, which leaves 1, 2, 4 and 8.
+
+Four is what the reference asks for. Measured off a Noita mine, the
+player stands about 7 percent of the screen high and the cave he
+stands in is about five of him floor to ceiling. Our wizard is already
+7 percent of the screen at zoom 4, so only the cave was wrong: at this
+scale the channel between two tiles is 64 cells against a body of 13,
+which is that same five. Eight would give the one huge cavern of a
+promotional shot and put a single tile across a whole region.
+
+What it costs, said plainly: the ground is drawn at a quarter of the
+resolution of the wizard. One painted cell is one sample, so a wall of
+rock steps in blocks of TILE_SCALE while the sprite beside it carries
+detail in single cells, and a shot of a cave edge shows the stairs.
+This scale buys size and cannot buy detail.
+
+The rung that buys the detail back is a larger TILE_SIZE with the same
+span: the same caves painted at 128 or 256 cells and drawn at a
+smaller TILE_SCALE. It costs a reseed of every authored set, a tile
+editor that works at that size, and the cache budget the set is sized
+for above, which is why it is a rung and not this one.
 */
-TILE_SCALE :: 2
-TILE_SCALE_BITS :: 1
+TILE_SCALE :: 4
+TILE_SCALE_BITS :: 2
 
 #assert(1 << TILE_SCALE_BITS == TILE_SCALE, "TILE_SCALE must be a power of two")
 
