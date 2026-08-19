@@ -38,6 +38,7 @@ World :: struct {
 	biomes:    Biome_Table,
 	biome_map: Biome_Map,
 	tiles:     Tile_Set,
+	images:    [][]Cell, // one picture per image biome, indexed by Biome.variants
 	seed:      u64, // colors the tile lattice; change it for another world
 }
 
@@ -81,6 +82,18 @@ ceil_div :: proc(a, b: i32) -> i32 {
 	return q
 }
 
+/*
+Where a world coordinate lands inside its region, 0 up to cpp - 1.
+
+Like tile_offset, but cpp is a value chosen at load time, not a
+compile time power of two, so it cannot use a mask: it has to go
+through floor_div the same way world_biome_at finds the region
+itself.
+*/
+region_offset :: proc(w, cpp: i32) -> i32 {
+	return w - floor_div(w, cpp) * cpp
+}
+
 // The biome that owns a world cell. Cells outside the map, and cells
 // in map pixels nobody painted, belong to the off-map biome.
 world_biome_at :: proc(world: World, wx, wy: i32) -> Biome_Id {
@@ -114,7 +127,15 @@ tests. One place decides what a cell is, so the editor and the game
 cannot drift apart.
 */
 world_cell_at :: proc(world: World, wx, wy: i32) -> Cell {
-	b := world.biomes.biomes[world_biome_at(world, wx, wy)]
+	id := world_biome_at(world, wx, wy)
+	b := world.biomes.biomes[id]
+
+	if b.generator == .Image {
+		cpp := world.biomes.cells_per_pixel
+		img := world.images[id]
+		return img[int(region_offset(wy, cpp)) * int(cpp) + int(region_offset(wx, cpp))]
+	}
+
 	if b.tile_base == TILE_NONE do return Cell(b.fill_0)
 
 	tile := world_tile_at(world, b, wx, wy)
@@ -155,10 +176,12 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 			b := world.biomes.biomes[id]
 
 			// The run cannot outlast the region, because the biome
-			// changes there.
+			// changes there. That bound alone is enough for a flat fill
+			// and for an image, since both draw the whole region as one
+			// piece; only a Wang lattice can change again inside it.
 			limit := (region_x + 1) * cpp
 			slot_x := tile_slot(wx)
-			if b.tile_base != TILE_NONE {
+			if b.generator == .Wang {
 				// Nor the tile square, because the tile changes there.
 				limit = min(limit, (slot_x + 1) * TILE_SIZE)
 			}
@@ -166,9 +189,10 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 			tx_end := ceil_div(limit - view.x, view.step)
 			tx_end = clamp(tx_end, tx + 1, view.w)
 
-			if b.tile_base == TILE_NONE {
+			switch b.generator {
+			case .Uniform:
 				slice.fill(row[tx:tx_end], Cell(b.fill_0))
-			} else {
+			case .Wang:
 				// One row of one tile. The tile and the y wrap are the
 				// same for every texel in the run, so both are lifted out
 				// of the loop.
@@ -176,6 +200,15 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 				tile_row := tile_cells(world.tiles, tile)[int(tile_offset(wy)) * TILE_SIZE:][:TILE_SIZE]
 				for t in tx ..< tx_end {
 					row[t] = tile_row[tile_offset(view.x + t * view.step)]
+				}
+			case .Image:
+				// One row of the picture. Same idea as the tile row above:
+				// the region and the y wrap do not change within the run,
+				// so the row is sliced out once.
+				img := world.images[id]
+				img_row := img[int(region_offset(wy, cpp)) * int(cpp):][:cpp]
+				for t in tx ..< tx_end {
+					row[t] = img_row[region_offset(view.x + t * view.step, cpp)]
 				}
 			}
 			tx = tx_end
@@ -776,4 +809,176 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 		len(regions_touched) > 1,
 		"the set belongs to the biome, so every region of it must change",
 	)
+}
+
+// ------------------------------------------------------------
+// Image biome tests
+// ------------------------------------------------------------
+
+/*
+A small world with one image biome (Gallery) and one uniform biome
+(Ground) beside it. cells_per_pixel is 256, the same as TILE_SIZE, so
+the fixture picture can be written with save_tile_png exactly the way
+a tile is.
+
+origin_pixel puts Gallery's region at world x -256 to -1 and Ground's
+region right beside it at world x 0 to 255. The two meet at the
+origin, which is where floor_div has to earn its keep: a truncating
+divide would fold Gallery's region the wrong way and every cell in it
+would read one region over.
+*/
+@(private = "file")
+IMAGE_TEST_PNG :: "worldgen_image_biome.tmp.png"
+@(private = "file")
+IMAGE_TEST_TXT :: "worldgen_image_biome.tmp.txt"
+
+@(private = "file")
+make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, ok: bool) {
+	materials, mat_ok := load_materials("data/materials.txt")
+	if !testing.expect(t, mat_ok, "materials must load") do return {}, nil, false
+
+	rock, _ := find_material_index(materials, "Rock")
+	air, _ := find_material_index(materials, "Air")
+	gold, _ := find_material_index(materials, "Gold")
+
+	// A picture with something in every corner and the middle, so a
+	// wrong offset or a transposed axis shows up as a wrong material
+	// rather than as a match by luck.
+	painted = make([]Cell, TILE_AREA)
+	slice.fill(painted, Cell(rock))
+	painted[0] = Cell(air)                                          // top-left
+	painted[TILE_SIZE - 1] = Cell(gold)                              // top-right
+	painted[(TILE_SIZE - 1) * TILE_SIZE] = Cell(gold)                 // bottom-left
+	painted[(TILE_SIZE - 1) * TILE_SIZE + TILE_SIZE - 1] = Cell(air)  // bottom-right
+	painted[100 * TILE_SIZE + 40] = Cell(gold)                        // interior
+
+	if !testing.expect(t, save_tile_png(painted, materials, IMAGE_TEST_PNG), "the fixture must save") {
+		delete(painted)
+		destroy_material_table(materials)
+		return {}, nil, false
+	}
+	defer os.remove(IMAGE_TEST_PNG)
+
+	body := "[Map]\nbiome_off_map = Ground\norigin_pixel = 1 0\ncells_per_pixel = 256\n" +
+		"[Ground]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
+		"[Gallery]\ncolor = 0xFF000002\nfill_0 = Rock\ngenerator = image\nimage = " + IMAGE_TEST_PNG + "\n"
+	if !testing.expect(t, os.write_entire_file(IMAGE_TEST_TXT, transmute([]byte)body) == nil, "write temp biomes.txt") {
+		delete(painted)
+		destroy_material_table(materials)
+		return {}, nil, false
+	}
+	defer os.remove(IMAGE_TEST_TXT)
+
+	biomes, err, line := load_biomes(IMAGE_TEST_TXT, materials)
+	if !testing.expectf(t, err == .None, "biomes must load, got %v at line %d", err, line) {
+		delete(painted)
+		destroy_material_table(materials)
+		return {}, nil, false
+	}
+
+	images, img_result, bad_biome := load_image_set(biomes, materials)
+	if !testing.expectf(t, img_result.err == .None, "images must load, got %v for biome %d", img_result.err, bad_biome) {
+		delete(painted)
+		destroy_biome_table(biomes)
+		destroy_material_table(materials)
+		return {}, nil, false
+	}
+
+	gallery, gallery_found := find_biome_index(biomes, "Gallery")
+	ground, ground_found := find_biome_index(biomes, "Ground")
+	if !testing.expect(t, gallery_found && ground_found, "both biomes must load") {
+		delete(painted)
+		destroy_image_set(images)
+		destroy_biome_table(biomes)
+		destroy_material_table(materials)
+		return {}, nil, false
+	}
+
+	m := make_biome_map(2, 1)
+	biome_map_set(m, 0, 0, Biome_Id(gallery)) // world x -256..-1
+	biome_map_set(m, 1, 0, Biome_Id(ground))  // world x 0..255
+
+	world = World {
+		materials = materials,
+		biomes    = biomes,
+		biome_map = m,
+		tiles     = make_tile_set(0),
+		images    = images,
+		seed      = biomes.world_seed,
+	}
+	return world, painted, true
+}
+
+@(private = "file")
+destroy_image_test_world :: proc(world: World, painted: []Cell) {
+	delete(painted)
+	destroy_tile_set(world.tiles)
+	destroy_image_set(world.images)
+	destroy_biome_map(world.biome_map)
+	destroy_biome_table(world.biomes)
+	destroy_material_table(world.materials)
+}
+
+/*
+An image biome draws exactly the picture it names, cell for cell,
+including in the negative-coordinate region this test puts it in.
+Without this, an off-by-one in region_offset would show up as a
+picture that reads correctly near the region's own origin and drifts
+everywhere else.
+*/
+@(test)
+test_image_biome_generates_the_painted_picture :: proc(t: ^testing.T) {
+	world, painted, ok := make_image_test_world(t)
+	if !ok do return
+	defer destroy_image_test_world(world, painted)
+
+	// Gallery's region is world x -256..-1, y 0..255.
+	for ly in i32(0) ..< TILE_SIZE {
+		for lx in i32(0) ..< TILE_SIZE {
+			wx := lx - TILE_SIZE
+			wy := ly
+			testing.expectf(
+				t,
+				world_cell_at(world, wx, wy) == painted[ly * TILE_SIZE + lx],
+				"cell %d,%d must be what the picture painted at %d,%d",
+				wx, wy, lx, ly,
+			)
+		}
+	}
+}
+
+/*
+The fast run fill must still agree with the plain version once a view
+crosses a region border into an image biome. Without this, the run
+limit added for Image in the generate loop could let a run spill past
+the region edge, or the lifted image row could sample the wrong
+offset once the step is not 1.
+*/
+@(test)
+test_generate_matches_naive_across_a_border_into_an_image_biome :: proc(t: ^testing.T) {
+	world, painted, ok := make_image_test_world(t)
+	if !ok do return
+	defer destroy_image_test_world(world, painted)
+
+	views := []World_View {
+		{x = -40, y = 10, w = 80, h = 64, step = 1},  // crosses x = 0 at step 1
+		{x = -37, y = 3, w = 90, h = 48, step = 3},   // unaligned start, strided
+		{x = -256, y = 0, w = 256, h = 64, step = 5}, // whole Gallery region, pulled back
+	}
+
+	for view in views {
+		fast := make([]Cell, int(view.w) * int(view.h))
+		slow := make([]Cell, int(view.w) * int(view.h))
+		defer delete(fast)
+		defer delete(slow)
+
+		generate(world, view, fast)
+		generate_naive(world, view, slow)
+		testing.expectf(
+			t,
+			slice.equal(fast, slow),
+			"run fill must match the plain version for view %v crossing into an image biome",
+			view,
+		)
+	}
 }

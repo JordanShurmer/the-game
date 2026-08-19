@@ -16,6 +16,7 @@ biome owns, picking each one so its edges match its neighbours.
 Biome_Generator :: enum u8 {
 	Uniform, // the whole region is fill_0
 	Wang,    // the region is a lattice of tiles from the biome's set
+	Image,   // the region is one PNG, one pixel to one world cell
 }
 
 // A biome id indexes Biome_Table.biomes. Ids are u8, so a map cell is
@@ -32,13 +33,24 @@ the trailing pair of small fields leaves.
 `tile_base` is the first tile of the set this biome owns, or
 TILE_NONE. The set runs from there for WANG_SIGNATURES * variants
 tiles, in signature order, so the generator finds a tile by arithmetic
-and never by search.
+and never by search. An image biome owns no tile set, so tile_base
+stays TILE_NONE for it too: every place in the codebase that reads
+`tile_base == TILE_NONE` to mean "no Wang set here" stays right
+without change.
+
+`variants` does two jobs, because an image biome has no variants to
+count and the byte would otherwise sit idle. For a Wang biome it is
+the tile count per signature, as the name says. For an image biome it
+is instead the index of this biome's picture in World.images: the
+loader hands out these indexes in file order, the same way it hands
+out tile_base for a Wang set, so the generator finds the picture by
+one array index and never by search.
 */
 Biome :: struct {
 	key_color: u32,             // 0xAARRGGBB key in the biome map image
 	fill_0:    u16,             // material id; index into Material_Table
 	tile_base: Tile_Id,         // first tile of the set, or TILE_NONE
-	variants:  u8,              // tiles per signature; at least 1
+	variants:  u8,              // Wang: tiles per signature. Image: index into World.images.
 	generator: Biome_Generator,
 }
 
@@ -56,6 +68,7 @@ Biome_Table :: struct {
 	biomes:          []Biome,
 	names:           []string, // cold data, parallel to biomes
 	tile_prefixes:   []string, // cold data, parallel to biomes; "" for a flat biome
+	image_paths:     []string, // cold data, parallel to biomes; "" for a biome with no image
 	map_image_path:  string,
 	cells_per_pixel: i32,      // world cells along one edge of a region
 	origin_pixel_x:  i32,      // map pixel that holds world cell (0,0)
