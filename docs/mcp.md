@@ -156,7 +156,8 @@ how any edit to the map or to a tile reaches a running sandbox.
 ## The tile sets
 
 A biome with `generator = wang` owns a set of 64x64 tiles, and the
-world lays them out on a lattice of tile squares. Each tile carries a
+world lays them out on a lattice of tile squares, drawing each painted
+cell as a `TILE_SCALE` block of world cells. Each tile carries a
 color on each of its four sides. The lattice colors every edge from a
 hash of its own position, and a square takes the tile whose four sides
 match the four edges around it, so two tiles side by side always agree

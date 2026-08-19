@@ -25,10 +25,16 @@ shared band over it, and each of the four band rows jitters its own
 opening by up to two cells. Only the cells clear through all four are a
 way out of the tile.
 
-Measured over every shipped tile, that channel is **16 cells**.
+Measured over every shipped tile, that channel is **16 painted cells**.
+The world draws a painted cell `TILE_SCALE` cells wide, so the wizard
+walks through **32 world cells** of it.
 
-A body taller than 16 cells fits every cave and no exit from one, and
-the world reads as a lattice of sealed rooms. So:
+A body taller than the channel fits every cave and no exit from one,
+and the world reads as a lattice of sealed rooms. At `TILE_SCALE` 1
+the body had 3 cells of room in 16 and the caves were tunnels he only
+just cleared; at 2 he has 19 in 32 and they read as caves. The body
+itself did not change, and the numbers below are the ones it was
+picked with:
 
 | Thing | Cells | Why |
 | --- | --- | --- |
@@ -38,9 +44,10 @@ the world reads as a lattice of sealed rooms. So:
 | Feet | frame row 23 | the position the player struct holds |
 
 `player_fits_the_world` is the test that holds this. It measures the
-clear channel through the band of every tile that carries an open edge
-and fails if any is under `PLAYER_BODY_H + 2`. Reseed the sets with a
-wider mouth and the test says so before a player finds out.
+clear channel through the band of every tile that carries an open edge,
+converts it to world cells, and fails if any is under
+`PLAYER_BODY_H + 2`. Reseed the sets with a narrower mouth, or drop
+`TILE_SCALE` back to 1, and the test says so before a player finds out.
 
 ## Collision reads the generated world
 
@@ -129,7 +136,7 @@ Cells and seconds, because that is what the world is measured in.
 | `PLAYER_FUEL_ON_GROUND` | 1.4 | tanks per second standing, so 0.71 seconds |
 | `PLAYER_FUEL_IN_AIR` | 0.22 | tanks per second falling, and **not** under thrust |
 | `PLAYER_COYOTE_TICKS` | 5 | ticks after a ledge where a jump still works |
-| `PLAYER_CLIMB` | 3 | cells he walks up without jumping |
+| `PLAYER_CLIMB` | `3 * TILE_SCALE` | cells he walks up without jumping |
 | `PLAYER_DIG_OUT` | 24 | cells he searches upward when buried |
 | `SPAWN_MOUTH_DEPTH` | 10 | cells a column must be clear to count as a way in |
 | `SPAWN_CLEARANCE` | 12 | cells from the mouth edge to the spawn |
@@ -139,9 +146,12 @@ Fuel does not fill under thrust. A 2.0 second burn climbs 241 cells,
 which is more than a screen height. Standing fills the tank in 0.71
 seconds, and a long fall trickles back enough for a landing burn.
 
-`PLAYER_CLIMB` is 3, not 5. The seeder's `ragged` pass moves walls by
-one or two cells, so 3 walks over the roughness the caves actually
-have, and a taller ledge stays a jump.
+`PLAYER_CLIMB` is `3 * TILE_SCALE`, not a flat 5. The seeder's
+`ragged` pass moves walls by one or two painted cells, and the world
+draws each of those `TILE_SCALE` cells wide, so this walks over the
+roughness the caves actually have and a taller ledge stays a jump. It
+is a number about the ground, so it is written in the units the ground
+is authored in.
 
 ## Movement resolves one cell at a time
 
