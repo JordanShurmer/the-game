@@ -44,6 +44,13 @@ json_has_field :: proc(object: json.Object, key: string) -> bool {
 	return found
 }
 
+json_bool_field :: proc(object: json.Object, key: string, fallback: bool) -> bool {
+	value, found := object[key]
+	if !found do return fallback
+	b, ok := value.(json.Boolean)
+	return ok ? bool(b) : fallback
+}
+
 // An array of strings, which is how both editors take a picture.
 json_rows_field :: proc(object: json.Object, key: string, allocator := context.temp_allocator) -> (rows: []string, found: bool) {
 	value, has := object[key]

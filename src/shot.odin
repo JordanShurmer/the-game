@@ -23,6 +23,16 @@ The wizard draws the same way. He is optional and carried on Shot
 itself, not a second argument to world_shot: the proc still takes
 exactly one World, one Shot and one path, and everything about whether
 and how to draw him lives inside the Shot the caller already builds.
+
+The sandbox follows the same rule, for the same reason. `ticks=` on
+`bin/shot` (docs/physics.md, "Looking at it") needs to draw what the
+physics did, not what the generator would still say is there, and
+`world_shot` learns this without a second code path: when shot.sandbox
+is set, the fill loop below reads sandbox_cell instead of calling
+generate. The caller (cmd/shot/main.odin) is the one that opens the
+sandbox, runs the ticks, and points shot.sandbox at it; world_shot
+itself only ever reads, never steps.
+
 Three compositing choices are worth saying outright, because a picture
 does not explain its own rules:
 
@@ -44,11 +54,12 @@ does not explain its own rules:
 SHOT_MAX_PIXELS :: 8192 * 8192
 
 Shot :: struct {
-	view:   World_View,
-	scale:  i32,  // image pixels along one edge of a texel; 1 or more
-	grid:   bool, // draw the tile lattice and the region borders
-	player: Maybe(Player), // draw him here, from `sprite`, if set
-	sprite: Sprite_Sheet,  // the wizard sheet; read only when player is set
+	view:    World_View,
+	scale:   i32,  // image pixels along one edge of a texel; 1 or more
+	grid:    bool, // draw the tile lattice and the region borders
+	player:  Maybe(Player), // draw him here, from `sprite`, if set
+	sprite:  Sprite_Sheet,  // the wizard sheet; read only when player is set
+	sandbox: ^Sandbox, // read cells from here instead of the generator, if set
 }
 
 // The lattice, and the borders between regions. Both are drawn over
@@ -71,7 +82,20 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 
 	cells := make([]Cell, int(shot.view.w) * int(shot.view.h))
 	defer delete(cells)
-	generate(world, shot.view, cells)
+	if shot.sandbox != nil {
+		// The physics already ran; read what it left rather than
+		// asking the generator, which knows nothing of a tick.
+		sb := shot.sandbox
+		for ty in 0 ..< shot.view.h {
+			wy := shot.view.y + ty * shot.view.step
+			for tx in 0 ..< shot.view.w {
+				wx := shot.view.x + tx * shot.view.step
+				cells[int(ty)*int(shot.view.w) + int(tx)] = sandbox_cell(sb, wx - sb.origin_x, wy - sb.origin_y)
+			}
+		}
+	} else {
+		generate(world, shot.view, cells)
+	}
 
 	// One color per material, composited once instead of per pixel.
 	lut: [256]rl.Color
@@ -139,6 +163,34 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	defer delete(cpath, context.temp_allocator)
 	return bool(rl.ExportImage(img, cpath))
+}
+
+// Why shot_open_sandbox refused to open. See docs/physics.md, "Looking
+// at it": ticks=N needs the exact rectangle the shot asks for to be a
+// sandbox, and a sandbox has rules a picture alone does not.
+Shot_Sandbox_Error :: enum u8 {
+	None,
+	Too_Large,   // the rectangle does not fit SANDBOX_MAX_WIDTH/HEIGHT
+	Wrong_Step,  // step is not 1: a sandbox is one cell per cell
+	Open_Failed, // sim_open_sandbox itself refused
+}
+
+/*
+Open a sandbox on exactly the rectangle a shot asks for.
+
+This is the whole of what `ticks=` needs beyond world_shot itself and
+a call to sim_run, pulled out of cmd/shot/main.odin so odin test src
+can drive it directly rather than only through the command line tool.
+The caller still runs the ticks (sim_run) and any ignite or explode
+command (sim_apply) itself, in that order, and then points
+Shot.sandbox at s.sandbox before calling world_shot: this proc only
+ever opens.
+*/
+shot_open_sandbox :: proc(s: ^Sim, view: World_View) -> Shot_Sandbox_Error {
+	if view.step != 1 do return .Wrong_Step
+	if view.w > SANDBOX_MAX_WIDTH || view.h > SANDBOX_MAX_HEIGHT do return .Too_Large
+	if sim_open_sandbox(s, view.w, view.h, view.x, view.y, 1, 0) != .None do return .Open_Failed
+	return .None
 }
 
 /*
@@ -471,5 +523,78 @@ test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: pro
 		"scale must multiply both edges, got %dx%d",
 		img.width,
 		img.height,
+	)
+}
+
+/*
+The point of `ticks=`: a shot taken after the physics ran must not be
+the same picture as a shot taken before it. Sand is painted at the top
+of an Air-filled rectangle so gravity gives a scene that certainly
+moves, the same shape test_a_shot_with_the_player_differs_from_the_same_shot_without_him
+uses for the player.
+*/
+@(test)
+test_a_shot_with_ticks_differs_from_the_same_shot_without_them :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sand, sand_found := find_material_index(s.world.materials, "Sand")
+	if !testing.expect(t, sand_found, "Sand must exist") do return
+
+	// Inside the Sky biome, which fills with Air, so nothing behind the
+	// sandbox hides the fall (the same coordinate test_tick_runs_the_
+	// queued_command in mcp_tools.odin already trusts for this).
+	view := World_View{x = 0, y = -4000, w = 40, h = 40, step = 1}
+
+	err := shot_open_sandbox(&s, view)
+	testing.expectf(t, err == .None, "the sandbox must open, got %v", err)
+	sandbox_paint(&s.sandbox, s.world.materials, 20, 0, 3, Cell(sand))
+
+	before_path := "shot_ticks_before.tmp.png"
+	after_path := "shot_ticks_after.tmp.png"
+	defer os.remove(before_path)
+	defer os.remove(after_path)
+
+	shot := Shot{view = view, scale = 1, sandbox = &s.sandbox}
+	testing.expect(t, world_shot(s.world, shot, before_path), "the before shot must be written")
+
+	sim_run(&s, 200)
+	testing.expect(t, world_shot(s.world, shot, after_path), "the after shot must be written")
+
+	before_bytes, err1 := os.read_entire_file_from_path(before_path, context.allocator)
+	defer delete(before_bytes)
+	after_bytes, err2 := os.read_entire_file_from_path(after_path, context.allocator)
+	defer delete(after_bytes)
+	if !testing.expect(t, err1 == nil && err2 == nil, "both shots must be written") do return
+
+	differs := len(before_bytes) != len(after_bytes)
+	if !differs {
+		for i in 0 ..< len(before_bytes) {
+			if before_bytes[i] != after_bytes[i] {
+				differs = true
+				break
+			}
+		}
+	}
+	testing.expect(t, differs, "running ticks must change the picture")
+}
+
+@(test)
+test_shot_open_sandbox_refuses_what_a_sandbox_cannot_hold :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	too_large := World_View{x = 0, y = 0, w = SANDBOX_MAX_WIDTH + 1, h = 64, step = 1}
+	testing.expectf(
+		t, shot_open_sandbox(&s, too_large) == .Too_Large,
+		"a rectangle past SANDBOX_MAX_WIDTH must be refused, not silently clamped",
+	)
+
+	coarse_step := World_View{x = 0, y = 0, w = 64, h = 64, step = 2}
+	testing.expectf(
+		t, shot_open_sandbox(&s, coarse_step) == .Wrong_Step,
+		"ticks needs step 1: a sandbox is one cell per cell",
 	)
 }

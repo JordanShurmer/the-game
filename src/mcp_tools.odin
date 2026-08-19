@@ -2,6 +2,7 @@ package game
 
 import "core:encoding/json"
 import "core:fmt"
+import "core:math"
 import "core:strings"
 import "core:testing"
 
@@ -98,14 +99,17 @@ MCP_TOOLS_JSON :: `{"tools":[
 {"name":"enqueue_input",
  "description":"Put one command in the input queue. The command does not run now. It runs at the start of its execution tick, which the reply reports. Call tick to reach that tick. Coordinates are sandbox cells, not world cells.",
  "inputSchema":{"type":"object","properties":{
-   "kind":{"type":"string","enum":["spawn","erase","ignite","noop"],"description":"spawn fills a disc with a material. erase clears a disc to air. ignite sets light material in a disc alight; it does nothing to empty air. noop holds a tick."},
-   "x":{"type":"integer","description":"Centre column in the sandbox. 0 is the left edge."},
-   "y":{"type":"integer","description":"Centre row in the sandbox. 0 is the top edge and y grows downward."},
-   "radius":{"type":"integer","description":"Disc radius in cells. 0 writes one cell. Default 0.","minimum":0,"maximum":512},
+   "kind":{"type":"string","enum":["spawn","erase","ignite","explode","dig","move","noop"],"description":"spawn fills a disc with a material. erase clears a disc to air. ignite sets light material in a disc alight; it does nothing to empty air. explode casts rays from the point, breaking what power lets them reach; a wall casts a shadow. dig removes a disc of material soft enough for the given power; rock is hardness 8. move drives the wizard for one tick with buttons and pressed. noop holds a tick."},
+   "x":{"type":"integer","description":"Centre column in the sandbox, or unused for move. 0 is the left edge."},
+   "y":{"type":"integer","description":"Centre row in the sandbox, or unused for move. 0 is the top edge and y grows downward."},
+   "radius":{"type":"integer","description":"Disc radius in cells, for spawn, erase, ignite, explode and dig. 0 writes one cell. Default 0.","minimum":0,"maximum":512},
    "material":{"type":"string","description":"Material name for spawn, as listed by list_materials."},
+   "power":{"type":"integer","description":"Blast or dig power, for explode and dig. Explode: the energy a ray starts with; each cell it crosses costs hardness+1, so air costs 1 and bedrock stops any blast in one cell. Dig: the hardness that can be removed; the wizard digs at 8. Required for explode and dig.","minimum":0,"maximum":255},
+   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons are held this tick."},
+   "pressed":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons went down fresh this tick, for the jump edge."},
    "source":{"type":"integer","description":"Sender number (0 to 7). Commands from different sources run in source order on the same tick. Default 0.","minimum":0,"maximum":7},
    "tick":{"type":"integer","description":"Exact execution tick. Leave this out to use the input delay. A tick that has already run is moved to the next tick and reported as late."}},
-  "required":["kind","x","y"],"additionalProperties":false}},
+  "required":["kind"],"additionalProperties":false}},
 {"name":"tick",
  "description":"Run the sandbox forward. Commands due on a tick run at the start of that tick, then the physics step runs. Reports the checksum and the material counts afterwards.",
  "inputSchema":{"type":"object","properties":{
@@ -126,6 +130,16 @@ MCP_TOOLS_JSON :: `{"tools":[
  "description":"List the commands that wait in the input queue, by execution tick, without running anything.",
  "inputSchema":{"type":"object","properties":{
    "ticks":{"type":"integer","description":"How many ticks ahead to look (1 to 64). Default 16.","minimum":1,"maximum":64}},
+  "additionalProperties":false}},
+{"name":"player_status",
+ "description":"Report where the wizard is: his position, what he is standing on, his velocity, his jetpack fuel, and whether the play sandbox is following him.",
+ "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
+{"name":"player_move",
+ "description":"Drive the wizard for a number of ticks with a set of held buttons, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to his region so he stands on the running physics rather than a picture of it; after that it follows him across region borders on its own.",
+ "inputSchema":{"type":"object","properties":{
+   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"Buttons held for every tick of this call."},
+   "jump":{"type":"boolean","description":"Whether jump is a fresh press on the first tick of this call, for the jump edge. A held jump that was already pressed in an earlier call should be false. Default false."},
+   "ticks":{"type":"integer","description":"Ticks to run (1 to 6000, which is 100 seconds). Default 1.","minimum":1,"maximum":6000}},
   "additionalProperties":false}}
 ]}`
 
@@ -185,6 +199,11 @@ mcp_call_tool :: proc(s: ^Sim, out: ^strings.Builder, id: json.Value, request: j
 		mcp_write_tool_text(out, id, text, failed)
 	case "queue_peek":
 		mcp_write_tool_text(out, id, tool_queue_peek(s, arguments))
+	case "player_status":
+		mcp_write_tool_text(out, id, tool_player_status(s))
+	case "player_move":
+		text, failed := tool_player_move(s, arguments)
+		mcp_write_tool_text(out, id, text, failed)
 	case:
 		mcp_write_tool_text(out, id, fmt.tprintf("unknown tool: %s", name), true)
 	}
@@ -652,7 +671,7 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	kind_name := json_string_field(arguments, "kind", "")
 	kind, kind_ok := parse_command_kind(kind_name)
 	if !kind_ok {
-		return fmt.tprintf("unknown kind %q. Use spawn, erase, ignite, or noop.", kind_name), true
+		return fmt.tprintf("unknown kind %q. Use spawn, erase, ignite, explode, dig, move, or noop.", kind_name), true
 	}
 
 	command := Input_Command {
@@ -673,6 +692,32 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 			return fmt.tprintf("unknown material %q. Call list_materials to see the names.", material_name), true
 		}
 		command.material = u16(index)
+	}
+
+	// explode and dig carry their power in the same u16 spawn carries a
+	// material index in: command_power (src/sim.odin) reads it back as a
+	// plain number. There is no default a blast or a dig tool should
+	// guess at, so both require it, the same way spawn requires a name.
+	if kind == .Explode || kind == .Dig {
+		if !json_has_field(arguments, "power") {
+			return fmt.tprintf("%s needs a power (0 to 255). Explode: energy per ray. Dig: hardness removed; rock is 8.", kind_name), true
+		}
+		command.material = u16(clamp(json_int_field(arguments, "power", 0), 0, 255))
+	}
+
+	if kind == .Move {
+		buttons, _ := json_rows_field(arguments, "buttons")
+		held, bad_held, held_ok := parse_player_buttons(buttons)
+		if !held_ok {
+			return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad_held), true
+		}
+		pressed, _ := json_rows_field(arguments, "pressed")
+		edge, bad_pressed, pressed_ok := parse_player_buttons(pressed)
+		if !pressed_ok {
+			return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad_pressed), true
+		}
+		command.buttons = held
+		command.pressed = edge
 	}
 
 	at_tick := i64(-1)
@@ -700,8 +745,16 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "queued %v", out.kind)
-	if kind == .Spawn do fmt.sbprintf(&b, " %s", s.world.materials.names[out.material])
-	fmt.sbprintf(&b, " at (%d,%d) radius %d\n", out.x, out.y, out.radius)
+	switch kind {
+	case .Spawn:
+		fmt.sbprintf(&b, " %s at (%d,%d) radius %d\n", s.world.materials.names[out.material], out.x, out.y, out.radius)
+	case .Explode, .Dig:
+		fmt.sbprintf(&b, " power %d at (%d,%d) radius %d\n", out.material, out.x, out.y, out.radius)
+	case .Move:
+		fmt.sbprintf(&b, " buttons %v pressed %v\n", out.buttons, out.pressed)
+	case .Erase, .Ignite, .Noop:
+		fmt.sbprintf(&b, " at (%d,%d) radius %d\n", out.x, out.y, out.radius)
+	}
 	fmt.sbprintf(
 		&b, "runs on tick %d (now %d, delay %d), source %d, seq %d\n",
 		out.tick, s.sandbox.tick, s.queue.delay, out.source, out.seq,
@@ -836,17 +889,113 @@ tool_queue_peek :: proc(s: ^Sim, arguments: json.Object) -> string {
 }
 
 // ------------------------------------------------------------
+// The player
+// ------------------------------------------------------------
+
+/*
+Where the wizard is, in a sentence a model can act on: his position,
+what holds him up, how fast he is moving, how much jetpack fuel is
+left, and whether the play sandbox is under him at all. "Standing on"
+reads the same Terrain sim_step_player builds, so what this reports is
+exactly what his feet are resting on, not a guess from the generator
+alone.
+*/
+tool_player_status :: proc(s: ^Sim) -> string {
+	p := s.player
+	t := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "wizard at (%.1f,%.1f), facing %s\n", p.x, p.y, p.facing > 0 ? "right" : "left")
+
+	if p.on_ground {
+		cell := terrain_cell_at(t, i32(math.floor(p.x)), i32(math.floor(p.y)))
+		fmt.sbprintf(&b, "on the ground, standing on %s\n", s.world.materials.names[cell])
+	} else {
+		strings.write_string(&b, "in the air\n")
+	}
+
+	fmt.sbprintf(&b, "velocity (%.1f,%.1f) cells per second\n", p.vx, p.vy)
+	fmt.sbprintf(&b, "fuel %.2f of %.2f\n", p.fuel, f32(PLAYER_FUEL_MAX))
+
+	if s.follow_player {
+		fmt.sbprintf(&b, "the play sandbox is following him, at world (%d,%d)\n", s.sandbox.origin_x, s.sandbox.origin_y)
+	} else {
+		strings.write_string(&b, "the play sandbox is not following him yet; call player_move to start\n")
+	}
+	return strings.to_string(b)
+}
+
+/*
+Drive the wizard for `ticks` ticks with `buttons` held, calling
+sim_step_player each tick: the same procedure the game window's fixed
+step calls and the Move command applies (docs/player.md, "one path for
+a hand and a model"). There is no second way to move him in here.
+
+The first call turns on following (sim_play_begin), so a model that
+has never touched sandbox_open still gets a wizard standing on running
+physics rather than a picture of it. Later calls pay almost nothing
+for calling it again: sim_follow_player only reopens the sandbox once
+he has actually left the region it already covers.
+*/
+tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
+	names, _ := json_rows_field(arguments, "buttons")
+	held, bad, buttons_ok := parse_player_buttons(names)
+	if !buttons_ok {
+		return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad), true
+	}
+
+	ticks := int(clamp(json_int_field(arguments, "ticks", 1), 1, 6000))
+	jump := json_bool_field(arguments, "jump", false)
+
+	sim_play_begin(s)
+	for i in 0 ..< ticks {
+		sim_step_player(s, held, i == 0 && jump)
+	}
+
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "ran %d ticks holding %v\n", ticks, held)
+	fmt.sbprintf(&b, "wizard now at (%.1f,%.1f), on_ground %v\n", s.player.x, s.player.y, s.player.on_ground)
+	fmt.sbprintf(&b, "the play sandbox is at world (%d,%d)\n", s.sandbox.origin_x, s.sandbox.origin_y)
+	return strings.to_string(b), false
+}
+
+// ------------------------------------------------------------
 // Shared pieces
 // ------------------------------------------------------------
 
 parse_command_kind :: proc(name: string) -> (Command_Kind, bool) {
 	switch name {
-	case "noop":   return .Noop, true
-	case "spawn":  return .Spawn, true
-	case "erase":  return .Erase, true
-	case "ignite": return .Ignite, true
+	case "noop":    return .Noop, true
+	case "spawn":   return .Spawn, true
+	case "erase":   return .Erase, true
+	case "ignite":  return .Ignite, true
+	case "explode": return .Explode, true
+	case "dig":     return .Dig, true
+	case "move":    return .Move, true
 	}
 	return .Noop, false
+}
+
+/*
+The buttons a JSON array of strings names, for enqueue_input's "move"
+kind and for player_move. Both read the same names, so the reply from
+list of buttons and the argument that sets them never drift apart.
+An unknown name fails the whole call rather than being dropped, the
+same rule tile_paint and biome_map_paint use for an unknown glyph.
+*/
+parse_player_buttons :: proc(names: []string) -> (held: Player_Input, bad: string, ok: bool) {
+	for name in names {
+		switch name {
+		case "left":  held += {.Left}
+		case "right": held += {.Right}
+		case "jump":  held += {.Jump}
+		case "run":   held += {.Run}
+		case "dig":   held += {.Dig}
+		case:
+			return {}, name, false
+		}
+	}
+	return held, "", true
 }
 
 check_map_size :: proc(columns, rows: i32) -> (string, bool) {
@@ -1057,7 +1206,7 @@ test_tool_list_is_valid_json :: proc(t: ^testing.T) {
 
 	array, is_array := tools.(json.Array)
 	testing.expect(t, is_array)
-	testing.expect(t, len(array) == 17, "seventeen tools must be listed")
+	testing.expect(t, len(array) == 19, "nineteen tools must be listed")
 
 	for entry in array {
 		tool, tool_ok := entry.(json.Object)
@@ -1404,7 +1553,7 @@ test_enqueue_rejects_bad_arguments :: proc(t: ^testing.T) {
 	testing.expect(t, failed, "an unknown material must fail")
 	testing.expect(t, strings.contains(text, "list_materials"), "the reply must say how to recover")
 
-	_, kind_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"explode","x":1,"y":1}`))
+	_, kind_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"boom","x":1,"y":1}`))
 	testing.expect(t, kind_failed, "an unknown kind must fail")
 
 	far, far_failed := tool_enqueue_input(&s, arguments_of(t, `{"kind":"noop","x":0,"y":0,"tick":100000}`))
@@ -1545,4 +1694,78 @@ test_a_slow_client_and_a_fast_client_agree :: proc(t: ^testing.T) {
 		sandbox_checksum(&planned.sandbox) == sandbox_checksum(&stepped.sandbox),
 		"the send pattern must not change the sandbox",
 	)
+}
+
+// ------------------------------------------------------------
+// explode, dig and move on the queue; the player tools
+// ------------------------------------------------------------
+
+@(test)
+test_enqueue_input_accepts_the_new_kinds :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	rock, rock_found := find_material_index(s.world.materials, "Rock")
+	if !testing.expect(t, rock_found, "Rock must exist") do return
+	sandbox_paint(&s.sandbox, s.world.materials, 32, 30, 20, Cell(rock))
+
+	counts := make([]int, len(s.world.materials.materials))
+	defer delete(counts)
+	sandbox_census(&s.sandbox, counts)
+	before_rock := counts[rock]
+
+	explode_text, explode_failed := tool_enqueue_input(
+		&s, arguments_of(t, `{"kind":"explode","x":32,"y":30,"radius":6,"power":80}`),
+	)
+	testing.expect(t, !explode_failed, explode_text)
+
+	dig_text, dig_failed := tool_enqueue_input(
+		&s, arguments_of(t, `{"kind":"dig","x":32,"y":30,"radius":4,"power":8}`),
+	)
+	testing.expect(t, !dig_failed, dig_text)
+
+	move_text, move_failed := tool_enqueue_input(
+		&s, arguments_of(t, `{"kind":"move","buttons":["right","run"],"pressed":["right"]}`),
+	)
+	testing.expect(t, !move_failed, move_text)
+
+	sim_run(&s, 5) // reach the default input delay of 2, and then some
+
+	sandbox_census(&s.sandbox, counts)
+	testing.expectf(
+		t, counts[rock] < before_rock,
+		"explode and dig together must have removed some rock, got %d of %d before", counts[rock], before_rock,
+	)
+}
+
+@(test)
+test_enqueue_input_rejects_a_bad_button_and_a_missing_power :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	_, bad_button := tool_enqueue_input(&s, arguments_of(t, `{"kind":"move","buttons":["fly"]}`))
+	testing.expect(t, bad_button, "an unknown button name must fail")
+
+	_, no_power := tool_enqueue_input(&s, arguments_of(t, `{"kind":"explode","x":1,"y":1,"radius":2}`))
+	testing.expect(t, no_power, "explode without a power must fail")
+}
+
+@(test)
+test_player_move_moves_the_wizard_and_player_status_reports_it :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	before := tool_player_status(&s)
+	testing.expect(t, strings.contains(before, "wizard at"), "status must report a position")
+	testing.expect(t, !strings.contains(before, "is following him"), "sim_load must not yet be following him")
+
+	start_x := s.player.x
+
+	text, failed := tool_player_move(&s, arguments_of(t, `{"buttons":["right","run"],"ticks":60}`))
+	testing.expect(t, !failed, text)
+	testing.expect(t, s.follow_player, "player_move must turn on following")
+	testing.expectf(t, s.player.x > start_x, "holding right must move him right, got %f from %f", s.player.x, start_x)
+
+	after := tool_player_status(&s)
+	testing.expect(t, strings.contains(after, "is following him"), "status must say the sandbox is following him now")
 }
