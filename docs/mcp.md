@@ -31,6 +31,7 @@ The tools follow the three things the game is made of.
 | The biome map | Which biome owns which region | `biome_map_view`, `biome_map_paint`, `biome_map_save` |
 | The tile sets | What a biome is made of, tile by tile | `tile_open`, `tile_select`, `tile_view`, `tile_paint`, `tile_repair`, `tile_save` |
 | The sandbox | What a rectangle of that world does next | `sandbox_open`, `enqueue_input`, `tick`, `observe`, `queue_peek` |
+| The wizard | Where he stands, and driving him | `player_status`, `player_move` |
 
 Three more tools read the tables: `world_status`, `list_materials`,
 and `list_biomes`.
@@ -54,6 +55,12 @@ step, and a rule added to the editor reaches both at once.
 mouse ---> editor_paint_pixel ---> the biome map
 MCP -----------^
 ```
+
+The wizard follows the same rule (docs/player.md, "one path for a hand
+and a model"). `player_move` calls `sim_step_player`, which is exactly
+what the game window's fixed step calls and what a queued `move`
+command applies. There is no path into his movement that only a model
+can reach, or only a hand can.
 
 ## Painting with glyphs
 
@@ -153,6 +160,58 @@ observe
 `sandbox_open` with no arguments reloads the same rectangle. That is
 how any edit to the map or to a tile reaches a running sandbox.
 
+## Reactions, explosions, digging, and the wizard
+
+`enqueue_input` carries three more kinds beyond spawn, erase and
+ignite, one per new mechanic in docs/physics.md:
+
+- `explode` casts rays from the point, the way `sandbox_explode` does:
+  a wall casts a shadow, and each cell a ray crosses costs its
+  `hardness + 1` until the ray runs out of `power`.
+- `dig` clears a disc of material soft enough for `power`; the wizard
+  himself digs at power 8, which is exactly the hardness of rock.
+- `move` drives the wizard for one tick: `buttons` is what is held,
+  `pressed` is what went down fresh this tick, for the jump edge.
+
+`explode` and `dig` both need a `power` argument (0 to 255); there is
+no default worth guessing at a blast or a dig strength from. `move`
+needs neither `x`, `y`, nor `radius` — a wizard is not a point on the
+map, he is `s.player` — so only `kind` is required on this tool now.
+
+Reactions need no command at all. `Water + Fire -> Steam + Steam` and
+the rest of the reaction table run on their own, one probe per cell
+per tick, whenever two reacting materials end up beside each other; a
+model does not enqueue a reaction, it enqueues the spawn or the ignite
+that brings the two materials together.
+
+## The wizard
+
+`player_status` reports where he is: his position, what he is
+standing on, his velocity, his jetpack fuel, and whether the play
+sandbox is following him.
+
+`player_move` drives him: give it `buttons` and a tick count, and it
+calls `sim_step_player` that many times, the same procedure the game
+window's fixed step calls and a queued `move` command applies
+(docs/player.md, "one path for a hand and a model"). The first call
+turns on following (`sim_play_begin`), which snaps the play sandbox to
+his region so his feet rest on the running physics rather than on a
+picture of it; later calls keep it following him across region
+borders on their own.
+
+```
+player_status
+  -> wizard at (12.0,-2530.0), facing right
+     on the ground, standing on Bedrock
+     velocity (0.0,0.0) cells per second
+     fuel 1.00 of 1.00
+     the play sandbox is not following him yet; call player_move to start
+player_move   buttons=["right","run"] ticks=120
+  -> ran 120 ticks holding {Right, Run}
+     wizard now at (155.3,-2530.0), on_ground true
+     the play sandbox is at world (0,-2560)
+```
+
 ## The tile sets
 
 A biome with `generator = wang` owns a set of 256x256 tiles, and the
@@ -214,10 +273,32 @@ replay them, and compare. A match proves the replay was exact.
 - Fire sets light material alight. The chance comes from
   `flammability`, and the result comes from `burns_to`. A flame holds
   still while fuel sits beside it, so fire runs along a trail of oil.
+- Two materials that meet react, and both change: water quenches fire
+  into steam, water on lava leaves obsidian and steam, acid eats rock
+  and is used up itself, ice melts near fire. `[Reactions]` in
+  `data/materials.txt` is the whole list; one probe per cell per tick
+  is enough to make it happen without scanning every neighbour.
+- An explosion casts rays from a point, the way `sandbox_explode`
+  does. A wall stops the ray that meets it and casts a shadow; a
+  corridor channels the blast on past it. A material with `explosive`
+  above zero does not just burn: reaching it sets off a blast of its
+  own, so a pile of gunpowder goes off grain by grain.
+- A blast crumbles what it breaks open. A neighbour with `crumbles_to`
+  set — rock into gravel, for instance — turns into that material and
+  falls, instead of leaving a clean hole.
+- A spell or a tool digs what it is strong enough for: `sandbox_dig`
+  removes any cell whose `hardness` is no more than the digger's
+  power. The wizard digs at power 8, which is exactly rock's hardness,
+  so obsidian, steel and bedrock stay real walls to him.
 
-All of it is in `data/materials.txt`. A new material and a new reaction
-need no code.
+All of it is in `data/materials.txt` and the `[Reactions]` section
+inside it. A new material and a new reaction need no code.
 
 A liquid finds its level only in part. A pool settles into one body and
 holds its shape, but it can keep a slope and a few holes. A pressure
 model would fix that and is not written yet.
+
+See `docs/physics.md` for the numbers behind all of this — the
+material table, the reaction table, and the gallery of rooms built to
+show each mechanic on its own — and `docs/player.md` for the wizard
+who now stands on it.

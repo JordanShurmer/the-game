@@ -121,6 +121,7 @@ a hole into the caves.
 | `A` `D` or left and right | Walk |
 | `SHIFT` | Run |
 | `SPACE`, `W` or `UP` | Jump; hold it in the air to fly |
+| `E` or left mouse | Dig: clear a disc of terrain soft enough for him, ahead of where he faces |
 | Mouse wheel, `-`, `=` | Zoom out and in |
 | `TAB` | Open and close the world editor |
 
@@ -180,9 +181,13 @@ which region. A tile set says what a biome is made of. The
 sandbox says what a rectangle of that world does next: sand falls, oil
 burns, smoke climbs.
 
-The player walks on the first of those and not yet on the third, so the
-world does not move under him. `docs/player.md` says why, and names the
-step that joins them.
+The player walks on all three. Where the play sandbox covers him the
+world moves under him — dig a hole and he falls in it — and everywhere
+else he still walks on the picture the generator paints. `Terrain` is
+the join, and `docs/player.md` and `docs/physics.md` ("The wizard
+meets the sandbox") say how it works and what it still leaves out: a
+region regenerates from the map, not from what he changed in it, once
+he leaves it and comes back.
 
 | File | What it holds |
 | --- | --- |

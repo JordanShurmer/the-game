@@ -32,27 +32,57 @@ Arguments are key=value in any order:
 	step    world cells per texel                (1)
 	scale   image pixels per texel               (2)
 	grid    1 draws the tile lattice and the region borders (0)
+	ticks   open a sandbox on exactly x,y,w,h and run this many
+	        ticks before drawing, instead of drawing the world as
+	        the generator paints it. Needs step=1 and w,h inside
+	        SANDBOX_MAX_WIDTH/HEIGHT.
+	ignite  x,y[,r]         set light material alight there before
+	                        the ticks run. Needs ticks.
+	explode x,y[,r][,power] set off a blast there before the ticks
+	                        run. Needs ticks.
 
 This is the check on the sprite and its collision box lining up:
 player=1 draws through the same Sprite_Sheet and the same
 sprite_frame_origin the game window will later use, so a wizard who is
 off by a cell here would be off by a cell there too.
 
+	./bin/shot biome=Gallery out=shots/gallery.png               # as painted
+	./bin/shot biome=Gallery ticks=600 out=shots/g600.png        # after 10 seconds
+	./bin/shot biome=Gallery x=0 y=-2560 w=128 h=128 scale=2 \
+	           ticks=300 ignite=64,64,4 out=shots/room11.png     # light the gunpowder first
+
 The data paths are relative, so run it from the repository root.
 */
 
+// Defaults for explode= when a radius or a power is left out. Chosen so
+// the default reads as a fair-sized blast rather than a firecracker:
+// power/4 is the same ratio sandbox_ignite_cell uses to turn a lit
+// explosive's own power into the radius of the blast it sets off.
+EXPLODE_DEFAULT_POWER  :: 64
+EXPLODE_DEFAULT_RADIUS :: EXPLODE_DEFAULT_POWER / 4
+
+Point_Command :: struct {
+	x, y, r: i32,
+	power:   u8, // Explode only
+	set:     bool,
+}
+
 Options :: struct {
-	out:    string,
-	biome:  string,
-	x:      i32,
-	y:      i32,
-	w:      i32,
-	h:      i32,
-	step:   i32,
-	scale:  i32,
-	grid:   bool,
-	player: bool,
-	aimed:  bool, // x or y was given, so a biome or the player must not move the camera
+	out:     string,
+	biome:   string,
+	x:       i32,
+	y:       i32,
+	w:       i32,
+	h:       i32,
+	step:    i32,
+	scale:   i32,
+	grid:    bool,
+	player:  bool,
+	aimed:   bool, // x or y was given, so a biome or the player must not move the camera
+	ticks:      i32,
+	ticks_set:  bool, // the key was given at all; ticks=0 still opens a sandbox
+	ignite:     Point_Command,
+	explode:    Point_Command,
 }
 
 main :: proc() {
@@ -131,16 +161,67 @@ main :: proc() {
 		}
 	}
 
+	view := game.World_View{x = options.x, y = options.y, w = options.w, h = options.h, step = options.step}
+
+	if !options.ticks_set && (options.ignite.set || options.explode.set) {
+		fmt.eprintfln("ignite and explode need ticks=N too, so there is a sandbox to place them in")
+		os.exit(1)
+	}
+
+	if options.ticks_set {
+		// See docs/physics.md, "Looking at it": the rectangle a shot with
+		// ticks= draws is the exact rectangle it opens the sandbox on.
+		if err := game.shot_open_sandbox(&sim, view); err != .None {
+			switch err {
+			case .Wrong_Step:
+				fmt.eprintfln("ticks needs step=1 (a sandbox is one cell per cell), got step=%d", options.step)
+			case .Too_Large:
+				fmt.eprintfln(
+					"ticks needs a rectangle no larger than %dx%d cells, got %dx%d",
+					game.SANDBOX_MAX_WIDTH, game.SANDBOX_MAX_HEIGHT, options.w, options.h,
+				)
+			case .Open_Failed:
+				fmt.eprintfln("the sandbox could not be opened on world (%d,%d) %dx%d", options.x, options.y, options.w, options.h)
+			case .None:
+			}
+			os.exit(1)
+		}
+
+		// Both go through sim_apply, the one procedure a hand-driven
+		// window and every MCP tool also call (docs/physics.md, "one
+		// path for a hand and a model"), rather than calling
+		// sandbox_ignite/sandbox_explode directly. A shot runs to
+		// completion in one process with nobody else to keep in step
+		// with, so there is no reason to route them through the input
+		// queue's delay: they are applied at once, before the ticks run.
+		if options.ignite.set {
+			game.sim_apply(&sim, game.Input_Command{
+				kind   = .Ignite,
+				x      = options.ignite.x - options.x,
+				y      = options.ignite.y - options.y,
+				radius = u16(options.ignite.r),
+			})
+		}
+		if options.explode.set {
+			game.sim_apply(&sim, game.Input_Command{
+				kind     = .Explode,
+				x        = options.explode.x - options.x,
+				y        = options.explode.y - options.y,
+				radius   = u16(options.explode.r),
+				material = u16(options.explode.power),
+			})
+		}
+
+		game.sim_run(&sim, int(options.ticks))
+	}
+
 	shot := game.Shot {
-		view = game.World_View {
-			x = options.x,
-			y = options.y,
-			w = options.w,
-			h = options.h,
-			step = options.step,
-		},
+		view  = view,
 		scale = options.scale,
-		grid = options.grid,
+		grid  = options.grid,
+	}
+	if options.ticks_set {
+		shot.sandbox = &sim.sandbox
 	}
 	if options.player {
 		shot.player = player
@@ -215,6 +296,13 @@ read_options :: proc(options: ^Options) -> bool {
 			options.grid = value != "0" && value != "false"
 		case "player":
 			options.player = value != "0" && value != "false"
+		case "ticks":
+			options.ticks, ok = number(key, value)
+			options.ticks_set = true
+		case "ignite":
+			options.ignite, ok = point_command(key, value, 0, 0)
+		case "explode":
+			options.explode, ok = point_command(key, value, EXPLODE_DEFAULT_RADIUS, EXPLODE_DEFAULT_POWER)
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false
@@ -222,4 +310,34 @@ read_options :: proc(options: ^Options) -> bool {
 		if !ok do return false
 	}
 	return true
+}
+
+// Parses "x,y[,r]" or "x,y[,r][,power]": a comma separated list of two
+// to four whole numbers, with a radius and (for explode=) a power that
+// fall back to the given defaults when they are left out.
+point_command :: proc(key, value: string, default_r: i32, default_power: u8) -> (Point_Command, bool) {
+	parts := strings.split(value, ",", context.temp_allocator)
+	if len(parts) < 2 || len(parts) > 4 {
+		fmt.eprintfln("%s wants x,y[,r][,power], and %q is not that shape", key, value)
+		return {}, false
+	}
+
+	nums: [4]i64
+	for part, i in parts {
+		v, ok := strconv.parse_i64(part)
+		if !ok {
+			fmt.eprintfln("%s wants whole numbers, and %q is not one", key, part)
+			return {}, false
+		}
+		nums[i] = v
+	}
+
+	out := Point_Command{
+		x     = i32(nums[0]),
+		y     = i32(nums[1]),
+		r     = len(parts) > 2 ? i32(nums[2]) : default_r,
+		power = len(parts) > 3 ? u8(clamp(nums[3], 0, 255)) : default_power,
+		set   = true,
+	}
+	return out, true
 }
