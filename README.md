@@ -71,7 +71,7 @@ A biome with `generator = wang` owns a set of 64x64 tiles. The world
 is cut into a lattice of tile squares, and each square draws one tile
 of the set of the biome that owns it. A tile is painted at 64 cells
 and drawn at `TILE_SCALE` world cells to each of them, so a square is
-128 world cells across today: the art is authored at a size a person
+256 world cells across today: the art is authored at a size a person
 can paint and drawn at a size a wizard can walk through. Borders between biomes stay hard
 cuts; inside one biome the lattice runs on unbroken, across region
 borders as well.

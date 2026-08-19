@@ -91,19 +91,31 @@ PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
 PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
 
 /*
+The roughness the ground throws up, in world cells.
+
+The seeder's `ragged` pass moves a wall by one or two painted cells,
+and the world draws a painted cell TILE_SCALE cells wide, so a bump in
+a wall is up to 2 * TILE_SCALE and this clears it with a margin. It is
+a number about the ground, so it is written in the units the ground is
+authored in.
+*/
+PLAYER_STEP_ROUGHNESS :: 3 * TILE_SCALE
+
+/*
 Cells he walks up without jumping.
 
-This is a number about the ground, not about the wizard, so it is
-written in the units the ground is authored in. The seeder's `ragged`
-pass moves a wall by one or two painted cells, and the world draws a
-painted cell TILE_SCALE cells wide, so the roughness he has to walk
-over is up to 2 * TILE_SCALE and this clears it.
+Two numbers meet here and only one of them scales. Left at a flat 3
+while the world grew, every bump in a wall would stop a walk and ask
+for a jump. Left at the roughness alone, a scale of 4 would give a
+climb of 12 against a body of 13, and he would walk up a wall his own
+height without a jump, which is not a step: it is levitation.
 
-Left at a flat 3 while the world scaled, every bump in a wall would
-stop him and ask for a jump. A taller ledge than this is still a jump,
-which is what it is for.
+So he steps over what the ground throws up, and never more than half
+his own height. Past TILE_SCALE 2 the ground wins and the tallest
+bumps become jumps, which is the honest outcome of a world drawn
+bigger than the body walking it, and what the jetpack is for.
 */
-PLAYER_CLIMB :: 3 * TILE_SCALE
+PLAYER_CLIMB :: min(PLAYER_STEP_ROUGHNESS, PLAYER_BODY_H / 2)
 
 SPAWN_MOUTH_DEPTH  :: 10   // cells a column must be clear to count as a way in
 SPAWN_CLEARANCE    :: 12   // cells from the mouth edge to the spawn

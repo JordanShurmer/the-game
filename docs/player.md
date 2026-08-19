@@ -27,14 +27,21 @@ way out of the tile.
 
 Measured over every shipped tile, that channel is **16 painted cells**.
 The world draws a painted cell `TILE_SCALE` cells wide, so the wizard
-walks through **32 world cells** of it.
+walks through **64 world cells** of it.
 
 A body taller than the channel fits every cave and no exit from one,
-and the world reads as a lattice of sealed rooms. At `TILE_SCALE` 1
-the body had 3 cells of room in 16 and the caves were tunnels he only
-just cleared; at 2 he has 19 in 32 and they read as caves. The body
-itself did not change, and the numbers below are the ones it was
-picked with:
+and the world reads as a lattice of sealed rooms. At `TILE_SCALE` 1 the
+body had 3 cells of room in 16 and the caves were tunnels he only just
+cleared. The body itself did not change; the world grew around it, and
+the numbers below are the ones it was picked with:
+
+**The size came off a reference, not off a preference.** In a Noita
+mine the player stands about 7 percent of the screen high and the cave
+he stands in is about five of him floor to ceiling. Our wizard is 13
+cells of the 180 the screen shows at zoom 4, which is that same 7
+percent, so the body and the camera were already right and only the
+cave was small. At `TILE_SCALE` 4 the channel is 64 cells against a
+body of 13, which is that same five.
 
 | Thing | Cells | Why |
 | --- | --- | --- |
