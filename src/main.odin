@@ -102,7 +102,13 @@ main :: proc() {
 	for !rl.WindowShouldClose() {
 		app_handle_input(&app)
 
-		if app.dirty {
+		// While play is following him, the sandbox is alive: sand
+		// falls and fire spreads with no camera move at all, so the
+		// view has to be redrawn every frame, not only when app.dirty
+		// says the camera moved. The editors pause this: they read the
+		// static generated world, and app.dirty already drives them.
+		playing := !app.editor.open && !app.tile_edit.open
+		if app.dirty || (playing && app.follow_player) {
 			app_regenerate(&app)
 			app.dirty = false
 		}
@@ -139,6 +145,12 @@ starts at zoom 4, step 1, 320 by 180 cells on screen.
 */
 app_load_data :: proc(app: ^App) -> bool {
 	if err := sim_load(&app.sim); err != .None do return false
+
+	// The play sandbox follows him from here on: docs/physics.md, "The
+	// wizard meets the sandbox". sim_load itself never turns this on,
+	// so the MCP server and every test that opens a sandbox by hand
+	// still get exactly the sandbox they asked for.
+	sim_play_begin(&app.sim)
 
 	for m, i in app.world.materials.materials {
 		app.color_lut[i] = rl_from_argb(m.color)
@@ -217,13 +229,18 @@ app_view_cells :: proc(app: ^App) -> (w, h: i32) {
 Generate what the window shows, then turn material ids into colors.
 
 This is the one generate path. The editor calls it after every paint
-stroke, and the game calls it after every camera move.
+stroke, and the game calls it after every camera move, and now after
+every physics tick too while play is following: the sandbox is what
+he actually collides with, and a view that only ever redrew the
+generator would show him standing on a picture again.
 
 Only the visible w by h texels are asked for and converted, not the
 whole WINDOW_W by WINDOW_H buffer: at zoom 4 that is 57600 texels
 converted instead of 921600. generate writes rows of exactly `w`, so
 the first w*h entries of app.cells are already the tightly packed w by
 h rectangle rl.UpdateTextureRec wants; there is nothing to repack.
+app_draw_sandbox below holds to the same w*h bound, so drawing the
+sandbox over the view costs no more than drawing the view itself did.
 */
 app_regenerate :: proc(app: ^App) {
 	w, h := app_view_cells(app)
@@ -235,12 +252,42 @@ app_regenerate :: proc(app: ^App) {
 		step = app.step,
 	}
 	generate(app.world, view, app.cells)
+	if app.follow_player do app_draw_sandbox(app, view)
 
 	count := int(w) * int(h)
 	for i in 0 ..< count {
 		app.pixels[i] = app.color_lut[app.cells[i]]
 	}
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
+}
+
+/*
+Overwrite the generated view with the running sandbox, wherever the
+two cover the same ground. This is the join made visible: the
+generator draws the picture, and the sandbox is what actually moves
+under the wizard's feet, so what the window shows has to be the
+second one wherever it exists.
+
+Bounded to the same w by h texels app_regenerate already asked for, at
+whatever step the view is sampled at: a texel that falls outside the
+sandbox rectangle is left as the generator drew it.
+*/
+@(private = "file")
+app_draw_sandbox :: proc(app: ^App, view: World_View) {
+	sb := &app.sandbox
+	for ty in i32(0) ..< view.h {
+		wy := view.y + ty * view.step
+		sy := wy - sb.origin_y
+		if sy < 0 || sy >= sb.height do continue
+
+		row := app.cells[int(ty) * int(view.w):][:view.w]
+		for tx in i32(0) ..< view.w {
+			wx := view.x + tx * view.step
+			sx := wx - sb.origin_x
+			if sx < 0 || sx >= sb.width do continue
+			row[tx] = sandbox_cell(sb, sx, sy)
+		}
+	}
 }
 
 app_handle_input :: proc(app: ^App) {
@@ -356,8 +403,9 @@ app_apply_zoom :: proc(app: ^App, dir: i32) {
 
 /*
 Play: A/D or LEFT/RIGHT walk, SHIFT runs, SPACE/W/UP jumps and, held in
-the air, flies. Wheel and -/= still zoom; docs/player.md lists zoom as
-a control of its own, not one the editor owns alone.
+the air, flies, E or the left mouse button digs. Wheel and -/= still
+zoom; docs/player.md lists zoom as a control of its own, not one the
+editor owns alone.
 */
 @(private = "file")
 app_handle_play :: proc(app: ^App) {
@@ -366,6 +414,7 @@ app_handle_play :: proc(app: ^App) {
 	if rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT) do held += {.Right}
 	if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) do held += {.Run}
 	if rl.IsKeyDown(.SPACE) || rl.IsKeyDown(.W) || rl.IsKeyDown(.UP) do held += {.Jump}
+	if rl.IsKeyDown(.E) || rl.IsMouseButtonDown(.LEFT) do held += {.Dig}
 
 	// The edge, not the level: player_step reads a press as a launch and
 	// a held key in the air, past its delay, as the jetpack. Collapsing
@@ -402,6 +451,11 @@ app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bo
 	jp := jump_pressed
 	for app.tick_accum >= tick_dt && steps < PLAYER_MAX_CATCHUP_STEPS {
 		sim_step_player(&app.sim, held, jp)
+		// Physics and the wizard advance together, one sandbox tick per
+		// player tick: docs/physics.md, "The window shows the physics".
+		// sim_run does this for the queue's own ticks; the window's
+		// direct path into sim_step_player has to do it itself.
+		sandbox_step(&app.sandbox, app.world.materials)
 		app.tick_accum -= tick_dt
 		jp = false // the press is one tick's edge, not every catch-up tick's
 		steps += 1
@@ -545,7 +599,7 @@ draw_hud :: proc(app: ^App) {
 		rl.RAYWHITE,
 	)
 
-	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
 }
 
 // ------------------------------------------------------------

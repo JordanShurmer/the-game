@@ -43,19 +43,32 @@ Command_Kind :: enum u8 {
 	Ignite,  // set light material in a disc alight
 	Explode, // cast rays from a point; `material` carries the power
 	Dig,     // remove soft material in a disc; `material` carries the power
+	Move,    // one tick of the wizard's input; see buttons and pressed below
 }
 
-// Fields are ordered so the struct has no interior padding.
+/*
+Fields are ordered so the struct has no interior padding.
+
+buttons and pressed live in what used to be two spare pad bytes at the
+tail, unread by every command but Move: docs/player.md names this the
+rung that lets a model walk the wizard the way a hand does, and the
+struct was already shaped to hold it without growing. buttons is what
+Player_Input.player_step calls `held`; pressed is the edge, for the
+jump check, not a plain bool, because Input_Command has no room for a
+field that only Move would ever set alongside a byte that already
+covers it.
+*/
 Input_Command :: struct {
 	tick:     u64, // execution tick, set by the queue
 	seq:      u32, // per source counter, set by the queue
 	x:        i32,
 	y:        i32,
 	radius:   u16,
-	material: u16, // index into the material table
+	material: u16,     // index into the material table
 	kind:     Command_Kind,
-	source:   u8, // which sender issued the command
-	_pad:     [2]u8,
+	source:   u8,      // which sender issued the command
+	buttons:  Player_Input, // Move: what is held this tick
+	pressed:  Player_Input, // Move: what went down this tick, for the jump edge
 }
 
 // Two commands per 64-byte cache line; keep it that way.
