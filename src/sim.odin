@@ -37,6 +37,11 @@ SANDBOX_DEFAULT_WIDTH  :: 128
 SANDBOX_DEFAULT_HEIGHT :: 72
 SANDBOX_DEFAULT_DELAY  :: 2
 
+// See docs/physics.md, "The wizard meets the sandbox". One region, in
+// the shipped data: cells_per_pixel is 512, so a sandbox this size
+// covers exactly the region he stands in.
+SANDBOX_PLAY_SIZE :: 512
+
 Sim :: struct {
 	world:     World,       // the authored world: materials, biomes, map, tiles
 	player:    Player,      // the wizard; see docs/player.md
@@ -44,7 +49,14 @@ Sim :: struct {
 	tile_edit: Tile_Editor, // tile editing state
 	sandbox:   Sandbox,     // the rectangle that runs physics
 	queue:     Input_Queue, // commands waiting for their tick
-	loaded:    bool,
+
+	// Whether the sandbox follows the wizard's region. sim_load leaves
+	// this false, so the MCP server and every test that opens a sandbox
+	// by hand keep exactly the sandbox they asked for; only a caller
+	// that says sim_play_begin gets the sandbox re-snapped under him.
+	follow_player: bool,
+
+	loaded: bool,
 }
 
 Sim_Error :: enum u8 {
@@ -216,6 +228,10 @@ sim_apply :: proc(s: ^Sim, command: Input_Command) {
 		sandbox_explode(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), command_power(command))
 	case .Dig:
 		sandbox_dig(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), command_power(command))
+	case .Move:
+		// The same single implementation the window's direct path
+		// calls: docs/physics.md's "one path for a hand and a model."
+		sim_step_player(s, command.buttons, .Jump in command.pressed)
 	}
 }
 
@@ -242,12 +258,74 @@ He is not on the Input_Queue (docs/player.md says why: held movement
 keys through the queue's delay is input lag, not fairness), so this is
 a second, simpler path into the Sim, taken directly rather than
 through sim_apply. The window keeps the fixed-step accumulator and
-calls this a whole number of times per frame; anything else that ever
-drives him calls it the same way, so it never has to reach into
-Player or World itself.
+calls this a whole number of times per frame; the Move command above
+calls it too, so both paths still run the one player_step.
+
+The Terrain built here is the whole of the join (docs/physics.md, "The
+wizard meets the sandbox"): a sandbox pointer only when s.follow_player
+says he is standing on the running physics, nil otherwise, so a caller
+that never asked to follow gets the same World-only collision the
+wizard always had. Following also re-snaps the sandbox after the
+move, in case this tick carried him over a region border.
 */
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool) {
-	player_step(&s.player, s.world, held, jump_pressed)
+	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+	player_step(&s.player, terrain, held, jump_pressed)
+	if s.follow_player do sim_follow_player(s)
+}
+
+/*
+Start following: open the play sandbox on the region the wizard is
+already standing in, and turn on the flag that keeps it there.
+
+sim_load does not call this. It opens its own sandbox at the world
+origin for the MCP server and for every test that wants a sandbox of
+its own choosing, and follow_player defaults to false, so none of
+those callers see their sandbox move out from under them. Only a
+caller that wants the play experience asks for it.
+*/
+sim_play_begin :: proc(s: ^Sim) {
+	s.follow_player = true
+	sim_follow_player(s)
+}
+
+/*
+Re-snap the play sandbox to the region the wizard is standing in, if
+it has moved.
+
+The sandbox origin is the region's own corner: floor_div, not
+truncating division, because a region can sit on the negative side of
+zero. SANDBOX_PLAY_SIZE is fixed at 512 regardless of cells_per_pixel;
+it is one region only because the shipped data's cells_per_pixel is
+also 512. A biome ever set with a larger cells_per_pixel cannot be
+followed at all, because SANDBOX_MAX_WIDTH bounds how big a sandbox
+can open: this checks that first and leaves the sandbox as it is
+rather than asserting, the graceful fallback docs/physics.md asks for.
+
+What this costs, said plainly: a region he leaves and returns to is
+regenerated from the world, not restored from what he changed in it.
+That is the documented limit of this rung (docs/physics.md), not a bug
+— the rung that fixes it is a store of touched regions, keyed by
+region coordinate, which this phase does not build. A re-snap also
+runs through sim_open_sandbox, which resets the input queue the same
+way any other call to it always has; a border crossing is rare enough,
+and the loss small enough, that this phase accepts it rather than
+adding a second way to open a sandbox that preserves one.
+*/
+sim_follow_player :: proc(s: ^Sim) {
+	if !s.follow_player do return
+
+	cpp := s.world.biomes.cells_per_pixel
+	if cpp > SANDBOX_MAX_WIDTH do return // cannot fit one region in a sandbox at all
+
+	ox := floor_div(i32(s.player.x), cpp) * cpp
+	oy := floor_div(i32(s.player.y), cpp) * cpp
+
+	already_there := s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE &&
+		s.sandbox.origin_x == ox && s.sandbox.origin_y == oy
+	if already_there do return
+
+	sim_open_sandbox(s, SANDBOX_PLAY_SIZE, SANDBOX_PLAY_SIZE, ox, oy, s.sandbox.seed, s.queue.delay)
 }
 
 // ------------------------------------------------------------
@@ -595,4 +673,107 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 	defer delete(counts)
 	sandbox_census(&s.sandbox, counts)
 	testing.expect(t, counts[gold] == 128*128, "the painted set must fill the sandbox")
+}
+
+// ------------------------------------------------------------
+// The join: sim_play_begin, sim_follow_player, and the Move command
+// ------------------------------------------------------------
+
+@(test)
+test_sim_load_leaves_following_off_so_a_hand_opened_sandbox_stays_put :: proc(t: ^testing.T) {
+	s := new_sim(t)
+	defer sim_unload(&s)
+
+	testing.expect(t, !s.follow_player, "sim_load must not turn on following: only sim_play_begin does")
+	testing.expect(
+		t, s.sandbox.origin_x == 0 && s.sandbox.origin_y == 0,
+		"sim_load must still open its sandbox at the world origin, unmoved by a wizard it also spawns",
+	)
+}
+
+@(test)
+test_sim_play_begin_opens_the_sandbox_on_the_players_region :: proc(t: ^testing.T) {
+	s := new_sim(t)
+	defer sim_unload(&s)
+
+	sim_play_begin(&s)
+
+	cpp := s.world.biomes.cells_per_pixel
+	want_x := floor_div(i32(s.player.x), cpp) * cpp
+	want_y := floor_div(i32(s.player.y), cpp) * cpp
+
+	testing.expect(t, s.follow_player, "sim_play_begin must turn following on")
+	testing.expectf(
+		t, s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE,
+		"the play sandbox must be one region, got %dx%d", s.sandbox.width, s.sandbox.height,
+	)
+	testing.expectf(
+		t, s.sandbox.origin_x == want_x && s.sandbox.origin_y == want_y,
+		"the sandbox must snap to the region he spawned in, got %d,%d want %d,%d",
+		s.sandbox.origin_x, s.sandbox.origin_y, want_x, want_y,
+	)
+}
+
+/*
+Crossing a region border re-snaps the sandbox origin to the new
+region. This carries him a whole region to the side directly, rather
+than walking him there tick by tick, because the border is what the
+test is about, not the walk that reaches it.
+*/
+@(test)
+test_sim_follow_player_re_snaps_the_sandbox_at_a_region_border :: proc(t: ^testing.T) {
+	s := new_sim(t)
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+	before_x := s.sandbox.origin_x
+
+	cpp := s.world.biomes.cells_per_pixel
+	s.player.x += f32(cpp)
+	sim_follow_player(&s)
+
+	want_x := floor_div(i32(s.player.x), cpp) * cpp
+	testing.expectf(
+		t, s.sandbox.origin_x == want_x,
+		"crossing a region border must re-snap the sandbox origin, got %d want %d", s.sandbox.origin_x, want_x,
+	)
+	testing.expect(t, s.sandbox.origin_x != before_x, "the origin must actually have moved")
+}
+
+/*
+A Move command through the queue must move him exactly as the direct
+path does, given the same inputs. This is the check docs/player.md
+asks for: "one path for a hand and a model" only holds if both paths
+call the same player_step and reach the same position.
+*/
+@(test)
+test_a_move_command_through_the_queue_matches_the_direct_path :: proc(t: ^testing.T) {
+	Recorded :: struct {
+		held:    Player_Input,
+		pressed: Player_Input,
+	}
+	inputs := []Recorded {
+		{{.Right}, {}}, {{.Right}, {}}, {{.Right, .Run}, {}},
+		{{.Right, .Run, .Jump}, {.Jump}}, {{.Jump}, {}}, {{.Jump}, {}},
+		{{}, {}}, {{.Left}, {}},
+	}
+
+	direct := new_sim(t)
+	defer sim_unload(&direct)
+	for step in inputs {
+		sim_step_player(&direct, step.held, .Jump in step.pressed)
+	}
+
+	queued := new_sim(t)
+	defer sim_unload(&queued)
+	for step, i in inputs {
+		cmd := Input_Command{kind = .Move, buttons = step.held, pressed = step.pressed}
+		sim_enqueue(&queued, cmd, i64(i))
+	}
+	sim_run(&queued, len(inputs))
+
+	testing.expectf(
+		t, direct.player.x == queued.player.x && direct.player.y == queued.player.y,
+		"a Move command through the queue must move him exactly as the direct path does, got (%v,%v) vs (%v,%v)",
+		queued.player.x, queued.player.y, direct.player.x, direct.player.y,
+	)
 }

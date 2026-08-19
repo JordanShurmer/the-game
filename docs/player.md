@@ -50,39 +50,47 @@ clear channel through the band of every tile that carries an open edge
 and fails if any is under `PLAYER_BODY_H + 2`. Reseed the sets with a
 narrower mouth and the test says so before a player finds out.
 
-## Collision reads the generated world
+## Collision reads Terrain
 
-`world_cell_at` answers for any cell of an unbounded world and holds no
-state. The sandbox is a 128x72 rectangle at the origin that the window
-does not draw; a player inside it would reach the wall in a few
-seconds.
+Collision no longer reads a bare `World`. `docs/physics.md`, "The
+wizard meets the sandbox", adds `Terrain`: a `World` plus a `Sandbox`
+pointer that may be `nil`. `terrain_cell_at` reads the sandbox where it
+covers the cell asked for and the generator everywhere else, so the
+same collision code walks on a picture, on the running physics, or on
+both at once depending only on which `Terrain` it was handed.
 
 ```odin
 // Whether a world cell stops the player.
-player_solid_at :: proc(world: World, x, y: i32) -> bool
+player_solid_at :: proc(t: Terrain, x, y: i32) -> bool
 ```
 
 Solid is `state == .Solid || state == .Powder`. Rock, Gold, Dirt and
 Sand hold him up. Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do
 not.
 
-`world_cell_at` is not cheap: it costs a biome lookup and five
-splitmix64 hashes, and `worldgen.odin` says so where it explains why
-generation works in runs. So a move tests **only the leading edge** of
-the body: 13 cells for a sideways move and 8 for a vertical one, never
-the whole 104 cell box.
+The generator's own answer, `world_cell_at`, is not cheap: it costs a
+biome lookup and five splitmix64 hashes, and `worldgen.odin` says so
+where it explains why generation works in runs. A sandbox read is one
+bounds check and one array index, so wherever the sandbox covers him
+`Terrain` is cheaper to ask than the generator alone, not more
+expensive. Either way, a move tests **only the leading edge** of the
+body: 13 cells for a sideways move and 8 for a vertical one, never the
+whole 104 cell box.
 
-**What this costs, said plainly:** the world does not fall. Dig a hole
-and the sand above it hangs there. The player and the sandbox are in
-one `Sim` and never meet.
+**What this costs, said plainly:** he only falls with ground that is
+in a `Sandbox`. `sim_play_begin` opens one on the region he stands in
+and slides it with him as he crosses a border, and only a caller that
+asks for that gets it: the MCP server and most tests still build a
+`Terrain` with `sandbox = nil`, and there the world is exactly the
+static picture it always was.
 
 ## A fixed step driven by held buttons
 
 ```odin
-Player_Button :: enum u8 { Left, Right, Jump, Run }
+Player_Button :: enum u8 { Left, Right, Jump, Run, Dig }
 Player_Input  :: bit_set[Player_Button; u8]
 
-player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: bool)
+player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool)
 ```
 
 The step is a whole tick at `PLAYER_TICK_HZ` (60). The window keeps an
@@ -98,18 +106,22 @@ and the order has to be written down.
 jumps; holding the same key in the air runs the jetpack. Without that
 split there is no jump at all, because a held key would always fly.
 
-**The player is not on the `Input_Queue`.** The queue holds a command
-for a few ticks to hide latency between machines, and held movement
-keys through a delay is input lag. This phase therefore gives up two
-things the rest of the codebase keeps, and says so rather than
-pretending otherwise:
+**The window does not put his held keys on the `Input_Queue`.** The
+queue holds a command for a few ticks to hide latency between
+machines, and held movement keys through a delay is input lag, so the
+window still calls `sim_step_player` directly rather than pretending
+otherwise.
 
-- `Sim` is no longer a function of seed, region and commands alone.
-- There is no MCP tool for the player, so the "one path for a hand and
-  a model" rule does not yet cover him.
-
-The rung that restores both is one `Move` command carrying a
-`Player_Input` byte per tick. The queue is already shaped for it.
+A `Move` command now rides the queue beside it (`docs/physics.md`,
+"The wizard on the queue"), carrying a `Player_Input` for what is held
+and a second, `pressed`, for the jump edge, in the two bytes
+`Input_Command` had left spare. `sim_apply` routes it into the same
+`player_step` the window calls, so a caller willing to pay the queue's
+delay gets a replayable, deterministic path to move him — `Sim` is a
+function of seed, region and commands alone again, for that caller.
+One thing is still missing: there is no MCP tool built on top of
+`Move` yet, so "one path for a hand and a model" does not fully cover
+him until `docs/physics.md` step 7 adds one.
 
 ## The numbers
 
@@ -324,20 +336,31 @@ a new file, and both `cmd/` targets depend on it.
 | `A` `D` or `LEFT` `RIGHT` | Walk |
 | `SHIFT` | Run |
 | `SPACE` or `W` or `UP` | Jump; hold in the air to fly |
+| `E` or left mouse button | Dig, in the direction he faces |
 | `TAB` | The world editor, where the camera pans freely again |
 | Wheel, `-`, `=` | Zoom |
 
 ## What this phase leaves out
 
-No health, damage, combat, wands, spells, inventory, digging, sound, or
+No health, damage, combat, wands, spells, inventory, sound, or
 networked movement.
 
-Three things are worth naming because they are visible:
+Digging is built (`docs/physics.md`, "Digging and breaking"), but only
+where a `Sandbox` is under him: `PLAYER_DIG_POWER` and
+`PLAYER_DIG_RADIUS` live in `src/player.odin` beside the rest of his
+numbers, because rock is hardness 8 there on purpose, matching the
+world he digs.
 
-- **The world does not move under him.** He walks on a static picture.
-- **Liquids are not solid.** Lake, Oilfield, Acidpool and Magma are
-  free fall, which is a drop of some 3500 cells from the caves to the
-  deep rock.
-- **The sandbox and the player never meet.** `sim_load` opens a sandbox
-  at world (0,0), which is Sandcave; the wizard spawns near y -2560 in
-  Coalmine.
+Two things this note used to name here are closed, and one is not:
+
+- **The world moves under him, where a `Sandbox` is following him.**
+  `sim_play_begin` opens one on his region and the window steps it
+  every tick alongside him; dig a hole in it and the sand above falls.
+  See `docs/physics.md`, "The wizard meets the sandbox".
+- **The sandbox and the player meet, the same way.** A caller that
+  never asks to follow — the MCP server, most tests that open a
+  sandbox of their own — still gets the old, static `Terrain`, so for
+  them nothing here has changed.
+- **Liquids are not solid**, still. Lake, Oilfield, Acidpool and Magma
+  are free fall, which is a drop of some 3500 cells from the caves to
+  the deep rock, and nothing above touches that.

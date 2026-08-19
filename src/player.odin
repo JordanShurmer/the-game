@@ -10,21 +10,20 @@ field of the window, because both the MCP server and the game window
 drive one Sim and neither owns the other; docs/player.md calls this
 out as a decision the rest of the codebase already made for us.
 
-He collides with the generated World, not with the mutable Sandbox.
-world_cell_at is not cheap: it costs a biome lookup and five
-splitmix64 hashes, which worldgen.odin explains is the price of a
-world that generates any rectangle in any order with no state kept
-between calls. The sandbox and the player share one Sim and never
-meet, so digging a hole in the sandbox does not open a hole under the
-wizard's feet. That is a real gap this phase leaves open, not an
-oversight, and docs/player.md says so.
+He collides with Terrain, not with World directly. Terrain reads the
+running Sandbox where it covers him and the generator everywhere
+else, which is the join docs/physics.md calls "the whole point of the
+gallery": dig a hole in the sandbox under his feet and he falls in
+it, because his collision and the physics now read the same cells.
+See terrain_cell_at below for the whole of that join; it is two
+fields and one proc, on purpose.
 
-Because the world is not cheap to ask, collision asks it as little as
-it can. Resolving a tick's move one cell at a time only ever tests the
-leading edge of the body: PLAYER_BODY_H cells for a sideways step,
-PLAYER_BODY_W for a vertical one, never the full 104 cell box. The
-full box is still tested, but only twice: once to place a fresh spawn,
-and once at the start of every tick, because the world editor
+Because the generator is not cheap to ask, collision asks it as
+little as it can. Resolving a tick's move one cell at a time only ever
+tests the leading edge of the body: PLAYER_BODY_H cells for a sideways
+step, PLAYER_BODY_W for a vertical one, never the full 104 cell box.
+The full box is still tested, but only twice: once to place a fresh
+spawn, and once at the start of every tick, because the world editor
 regenerates the world under a running game on every paint stroke and a
 player can wake up inside rock through no fault of his own.
 
@@ -49,6 +48,7 @@ Player_Button :: enum u8 {
 	Right,
 	Jump,
 	Run,
+	Dig, // remove terrain in front of him; see PLAYER_DIG_POWER below
 }
 
 Player_Input :: bit_set[Player_Button; u8]
@@ -60,6 +60,11 @@ Player_Input :: bit_set[Player_Button; u8]
 // See docs/player.md for what each one does and why it is this value;
 // the names and values here must match that table exactly, because it
 // is the one place both a reader and a future editor go to check them.
+// The digging constants at the end of this block are the one
+// exception: PLAYER_DIG_POWER and PLAYER_DIG_RADIUS are documented in
+// docs/physics.md's own numbers table instead, and that is the place
+// to check them against. PLAYER_DIG_REACH is new here, with no table
+// of its own; the comment above it says what it does.
 // ------------------------------------------------------------
 
 PLAYER_TICK_HZ :: 60 // steps per second
@@ -94,6 +99,19 @@ PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
 SPAWN_MOUTH_DEPTH  :: 10   // cells a column must be clear to count as a way in
 SPAWN_CLEARANCE    :: 12   // cells from the mouth edge to the spawn
 SPAWN_SEARCH_RANGE :: 4096 // cells either side of x 0 that the scan covers
+
+// Digging. See docs/physics.md, "Digging and breaking": rock is
+// hardness 8, exactly PLAYER_DIG_POWER, so he digs the world he lives
+// in and nothing harder; obsidian, steel and bedrock stay real walls
+// to him. This is not PLAYER_DIG_OUT above, which is de-penetration
+// searching for open air, not a tool cutting into solid ground.
+PLAYER_DIG_POWER  :: 8 // hardness he can remove
+PLAYER_DIG_RADIUS :: 5 // cells
+
+// Cells from his center to the dig point, in the direction he faces:
+// a few cells past his chest, clear of his own body, so he does not
+// dig the ground he is standing in.
+PLAYER_DIG_REACH :: 6
 
 // ------------------------------------------------------------
 // Motion, for the sprite sheet
@@ -169,13 +187,61 @@ Player :: struct {
 // Collision
 // ------------------------------------------------------------
 
+/*
+What the wizard collides with: the running Sandbox where it covers
+him, and the generator everywhere else. This is the whole join
+between the physics and the player (docs/physics.md, "The wizard
+meets the sandbox"); every player_* collision helper below takes a
+Terrain instead of a World, and nothing about the numbers or the walk
+itself changes.
+
+World does NOT gain a sandbox pointer. worldgen.odin's header says why:
+generate is stateless and answers any rectangle in any order, which is
+the property that lets the world be unbounded, and a mutable pointer
+inside World would end that. So the two stay separate fields on a
+small struct built fresh by whoever is calling, not a change to World
+itself.
+
+sandbox may be nil: the spawn scan builds a Terrain with no sandbox at
+all, because a wizard is placed before any physics runs, and a caller
+that never asked to follow the play sandbox (a test, the MCP server
+opening its own) gets ordinary World collision by passing nil too.
+*/
+Terrain :: struct {
+	world:   World,
+	sandbox: ^Sandbox, // may be nil
+}
+
+/*
+The material at a world cell: the sandbox's, where the sandbox covers
+it, or the generator's otherwise.
+
+This is CHEAPER than reading the generator alone, not more expensive:
+a sandbox read is one bounds check and one array index, against
+world_cell_at's biome lookup and five splitmix64 hashes (worldgen.odin
+says why generation costs that). A reader used to the sandbox being
+the "slow, mutable" half of the world would assume the opposite, so
+this is worth saying plainly: the join makes the wizard faster where
+he stands, not slower.
+*/
+terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
+	if t.sandbox != nil {
+		sx := wx - t.sandbox.origin_x
+		sy := wy - t.sandbox.origin_y
+		if sandbox_in_bounds(t.sandbox, sx, sy) {
+			return sandbox_cell(t.sandbox, sx, sy)
+		}
+	}
+	return world_cell_at(t.world, wx, wy)
+}
+
 // Whether a world cell stops the player. Rock, Gold, Dirt and Sand
 // hold him up; Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do
 // not, because only Solid and Powder resist a falling body.
-player_solid_at :: proc(world: World, x, y: i32) -> bool {
-	c := world_cell_at(world, x, y)
-	if int(c) >= len(world.materials.materials) do return false
-	state := world.materials.materials[c].state
+player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
+	c := terrain_cell_at(t, x, y)
+	if int(c) >= len(t.world.materials.materials) do return false
+	state := t.world.materials.materials[c].state
 	return state == .Solid || state == .Powder
 }
 
@@ -206,12 +272,12 @@ call here would multiply that cost by up to 14 substeps a tick. Spawn
 and de-penetration each run at most once a tick, which is a cost the
 world can afford that the inner loop below cannot.
 */
-player_body_clear :: proc(world: World, x, y: f32) -> bool {
+player_body_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, y1 := player_body_y_bounds(y)
 	for cy in y0 ..< y1 {
 		for cx in x0 ..< x1 {
-			if player_solid_at(world, cx, cy) do return false
+			if player_solid_at(t, cx, cy) do return false
 		}
 	}
 	return true
@@ -222,11 +288,11 @@ player_body_clear :: proc(world: World, x, y: f32) -> bool {
 // which matches the edge test below: the same row blocks a downward
 // move for the same reason.
 @(private = "file")
-player_on_ground :: proc(world: World, x, y: f32) -> bool {
+player_on_ground :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	_, y1 := player_body_y_bounds(y)
 	for cx in x0 ..< x1 {
-		if player_solid_at(world, cx, y1) do return true
+		if player_solid_at(t, cx, y1) do return true
 	}
 	return false
 }
@@ -240,12 +306,12 @@ x and y here are the candidate position, so a caller who wants to test
 "can I move to nx" passes nx directly; there is no separate delta.
 */
 @(private = "file")
-player_edge_clear_x :: proc(world: World, x, y: f32, dir: i32) -> bool {
+player_edge_clear_x :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, y1 := player_body_y_bounds(y)
 	edge := dir > 0 ? x1 - 1 : x0
 	for cy in y0 ..< y1 {
-		if player_solid_at(world, edge, cy) do return false
+		if player_solid_at(t, edge, cy) do return false
 	}
 	return true
 }
@@ -262,12 +328,12 @@ which is always clear, and he would sink a whole cell into every floor
 before the next row down finally refused him.
 */
 @(private = "file")
-player_edge_clear_y :: proc(world: World, x, y: f32, dir: i32) -> bool {
+player_edge_clear_y :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, y1 := player_body_y_bounds(y)
 	edge := dir > 0 ? y1 : y0
 	for cx in x0 ..< x1 {
-		if player_solid_at(world, cx, edge) do return false
+		if player_solid_at(t, cx, edge) do return false
 	}
 	return true
 }
@@ -276,11 +342,11 @@ player_edge_clear_y :: proc(world: World, x, y: f32, dir: i32) -> bool {
 // is the ceiling a climb must clear: raising the body past a step is
 // no good if his head has nowhere to go once he gets there.
 @(private = "file")
-player_ceiling_clear :: proc(world: World, x, y: f32) -> bool {
+player_ceiling_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, _ := player_body_y_bounds(y)
 	for cx in x0 ..< x1 {
-		if player_solid_at(world, cx, y0 - 1) do return false
+		if player_solid_at(t, cx, y0 - 1) do return false
 	}
 	return true
 }
@@ -296,9 +362,9 @@ real floor is; this walks him back down onto it, one cell at a time,
 for at most the cells he was just raised.
 */
 @(private = "file")
-player_settle :: proc(world: World, x: f32, y: ^f32, max_drop: i32) {
+player_settle :: proc(t: Terrain, x: f32, y: ^f32, max_drop: i32) {
 	for _ in 0 ..< max_drop {
-		if !player_edge_clear_y(world, x, y^ + 1, 1) do break
+		if !player_edge_clear_y(t, x, y^ + 1, 1) do break
 		y^ += 1
 	}
 }
@@ -313,14 +379,14 @@ tests use the candidate x, so a step he could never fit through
 sideways is refused before he is ever moved.
 */
 @(private = "file")
-player_climb :: proc(world: World, p: ^Player, nx: f32, dir: i32) -> bool {
+player_climb :: proc(t: Terrain, p: ^Player, nx: f32, dir: i32) -> bool {
 	raised_y := p.y - PLAYER_CLIMB
-	if !player_edge_clear_x(world, nx, raised_y, dir) do return false
-	if !player_ceiling_clear(world, nx, raised_y) do return false
+	if !player_edge_clear_x(t, nx, raised_y, dir) do return false
+	if !player_ceiling_clear(t, nx, raised_y) do return false
 
 	p.x = nx
 	p.y = raised_y
-	player_settle(world, p.x, &p.y, PLAYER_CLIMB)
+	player_settle(t, p.x, &p.y, PLAYER_CLIMB)
 	return true
 }
 
@@ -350,7 +416,7 @@ A press launches him; holding the same key in the air, past
 PLAYER_JET_DELAY_TICKS, lights the jetpack instead. Without that
 split a held key would always fly, and there would be no jump at all.
 */
-player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: bool) {
+player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool) {
 	dt : f32 = 1.0 / PLAYER_TICK_HZ
 
 	// De-penetration. The world editor regenerates the world on every
@@ -358,10 +424,10 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 	// fault of his own. Without this he freezes there for ever: every
 	// candidate move starts from a position already inside solid, so
 	// the leading edge test never once finds a clear step to take.
-	if !player_body_clear(world, p.x, p.y) {
+	if !player_body_clear(t, p.x, p.y) {
 		for up in i32(1) ..= PLAYER_DIG_OUT {
 			ny := p.y - f32(up)
-			if player_body_clear(world, p.x, ny) {
+			if player_body_clear(t, p.x, ny) {
 				p.y = ny
 				break
 			}
@@ -370,7 +436,7 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 		}
 	}
 
-	on_ground := player_on_ground(world, p.x, p.y)
+	on_ground := player_on_ground(t, p.x, p.y)
 	can_jump := on_ground || p.coyote > 0
 
 	// --- horizontal velocity ---
@@ -452,9 +518,9 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 		dir : i32 = d > 0 ? 1 : -1
 		nx := p.x + d
 
-		if player_edge_clear_x(world, nx, p.y, dir) {
+		if player_edge_clear_x(t, nx, p.y, dir) {
 			p.x = nx
-		} else if on_ground && player_climb(world, p, nx, dir) {
+		} else if on_ground && player_climb(t, p, nx, dir) {
 			// p.x and p.y were updated inside player_climb.
 		} else {
 			p.vx = 0 // this axis only: a wall must not cancel a fall
@@ -469,7 +535,7 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 		dir : i32 = d > 0 ? 1 : -1
 		ny := p.y + d
 
-		if player_edge_clear_y(world, p.x, ny, dir) {
+		if player_edge_clear_y(t, p.x, ny, dir) {
 			p.y = ny
 		} else {
 			// Land flush on the row that stopped him rather than
@@ -485,8 +551,35 @@ player_step :: proc(p: ^Player, world: World, held: Player_Input, jump_pressed: 
 		remaining_y -= d
 	}
 
-	p.on_ground = player_on_ground(world, p.x, p.y)
+	p.on_ground = player_on_ground(t, p.x, p.y)
 	p.anim += dt
+
+	// Digging happens after the move resolves, so the dig point uses
+	// where he actually ended the tick, not where he started it. It
+	// runs every tick the button is held, the same level a walk key
+	// reads at: docs/physics.md gives digging no separate edge.
+	if .Dig in held do player_dig(p^, t)
+}
+
+/*
+Dig the terrain in front of him: a disc of PLAYER_DIG_RADIUS centred
+PLAYER_DIG_REACH cells ahead of his center, in the direction he faces,
+at chest height. No cursor is needed and a test can drive it with
+nothing but a button and a facing.
+
+Nothing happens with no sandbox under him. sandbox_dig mutates a
+running Sandbox; the generator has no dig at all, so a Terrain built
+with sandbox = nil (the spawn scan, a caller that never asked to
+follow) leaves the world untouched rather than failing.
+*/
+player_dig :: proc(p: Player, t: Terrain) -> int {
+	if t.sandbox == nil do return 0
+
+	wx := i32(p.x) + i32(p.facing) * PLAYER_DIG_REACH
+	wy := i32(p.y) - PLAYER_BODY_H / 2
+	sx := wx - t.sandbox.origin_x
+	sy := wy - t.sandbox.origin_y
+	return sandbox_dig(t.sandbox, t.world.materials, sx, sy, PLAYER_DIG_RADIUS, PLAYER_DIG_POWER)
 }
 
 // ------------------------------------------------------------
@@ -515,19 +608,19 @@ world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 // nearest one to the middle of the map, not just the first in scan
 // order.
 @(private = "file")
-world_find_mouth :: proc(world: World, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
-	is_mouth :: proc(world: World, x, surface_y: i32) -> bool {
+world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
+	is_mouth :: proc(t: Terrain, x, surface_y: i32) -> bool {
 		for dy in i32(0) ..< SPAWN_MOUTH_DEPTH {
-			if player_solid_at(world, x, surface_y + dy) do return false
+			if player_solid_at(t, x, surface_y + dy) do return false
 		}
 		return true
 	}
 
 	for dist in i32(0) ..= SPAWN_SEARCH_RANGE {
 		right := dist
-		if right <= max_x && is_mouth(world, right, surface_y) do return right, true
+		if right <= max_x && is_mouth(t, right, surface_y) do return right, true
 		left := -dist
-		if dist != 0 && left >= min_x && is_mouth(world, left, surface_y) do return left, true
+		if dist != 0 && left >= min_x && is_mouth(t, left, surface_y) do return left, true
 	}
 	return 0, false
 }
@@ -539,12 +632,12 @@ world_find_mouth :: proc(world: World, surface_y, min_x, max_x: i32) -> (x: i32,
 // falls in on the first tick, which is why the search starts a full
 // SPAWN_CLEARANCE out rather than at the mouth itself.
 @(private = "file")
-world_find_ground_near :: proc(world: World, mouth_x, surface_y: i32) -> (x: i32, found: bool) {
+world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, found: bool) {
 	for dist := i32(SPAWN_CLEARANCE); dist < SPAWN_SEARCH_RANGE; dist += 1 {
 		for side in ([2]i32{1, -1}) {
 			cx := mouth_x + side * dist
-			if !player_solid_at(world, cx, surface_y) do continue
-			if !player_body_clear(world, f32(cx), f32(surface_y)) do continue
+			if !player_solid_at(t, cx, surface_y) do continue
+			if !player_body_clear(t, f32(cx), f32(surface_y)) do continue
 			return cx, true
 		}
 	}
@@ -559,15 +652,15 @@ solidity too, not assumed clear: a fallback that itself buries him is
 worse than no fallback.
 */
 @(private = "file")
-world_spawn_fallback :: proc(world: World) -> (x, y: i32, found: bool) {
-	surface_row, row_found := world_find_surface_row(world)
+world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
+	surface_row, row_found := world_find_surface_row(t.world)
 	if !row_found do return 0, 0, false
 
-	cpp := world.biomes.cells_per_pixel
-	surface_y := (surface_row - world.biomes.origin_pixel_y) * cpp
+	cpp := t.world.biomes.cells_per_pixel
+	surface_y := (surface_row - t.world.biomes.origin_pixel_y) * cpp
 	fx, fy := i32(0), surface_y - SPAWN_CLEARANCE
 
-	if !player_body_clear(world, f32(fx), f32(fy)) do return 0, 0, false
+	if !player_body_clear(t, f32(fx), f32(fy)) do return 0, 0, false
 	return fx, fy, true
 }
 
@@ -582,10 +675,18 @@ Where he starts: beside a hole, not in it.
 	   with a clear body box above it.
 
 Any step that finds nothing falls back to world_spawn_fallback.
+
+This builds its own Terrain with no sandbox, because a wizard is
+placed before any physics runs (docs/physics.md, "The wizard meets the
+sandbox"): there is nothing yet for the scan to read but the
+generator. player_spawn keeps taking a plain World, so nothing outside
+this file has to know a Terrain exists just to place him.
 */
 world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
+	t := Terrain{world = world}
+
 	surface_row, row_found := world_find_surface_row(world)
-	if !row_found do return world_spawn_fallback(world)
+	if !row_found do return world_spawn_fallback(t)
 
 	cpp := world.biomes.cells_per_pixel
 	surface_y := (surface_row - world.biomes.origin_pixel_y) * cpp
@@ -594,11 +695,11 @@ world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	min_x := (0 - world.biomes.origin_pixel_x) * cpp
 	max_x := (m.width - world.biomes.origin_pixel_x) * cpp - 1
 
-	mouth_x, mouth_found := world_find_mouth(world, surface_y, min_x, max_x)
-	if !mouth_found do return world_spawn_fallback(world)
+	mouth_x, mouth_found := world_find_mouth(t, surface_y, min_x, max_x)
+	if !mouth_found do return world_spawn_fallback(t)
 
-	ground_x, ground_found := world_find_ground_near(world, mouth_x, surface_y)
-	if !ground_found do return world_spawn_fallback(world)
+	ground_x, ground_found := world_find_ground_near(t, mouth_x, surface_y)
+	if !ground_found do return world_spawn_fallback(t)
 
 	return ground_x, surface_y, true
 }
@@ -622,7 +723,7 @@ player_spawn :: proc(world: World) -> Player {
 		y         = f32(y),
 		facing    = 1,
 		fuel      = PLAYER_FUEL_MAX,
-		on_ground = player_on_ground(world, f32(x), f32(y)),
+		on_ground = player_on_ground(Terrain{world = world}, f32(x), f32(y)),
 	}
 }
 
@@ -704,14 +805,15 @@ test_a_dropped_wizard_lands_on_the_floor :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 40)
+	terrain := Terrain{world = world}
 
 	p := Player{x = 32, y = 10, facing = 1}
-	for _ in 0 ..< 300 do player_step(&p, world, {}, false)
+	for _ in 0 ..< 300 do player_step(&p, terrain, {}, false)
 
 	testing.expectf(t, i32(math.floor(p.y)) == 40, "the feet must rest on the floor row, got y=%f", p.y)
 	testing.expectf(t, p.vy == 0, "he must stop falling once he lands, got vy=%f", p.vy)
 	testing.expect(t, p.on_ground, "on_ground must be true once he has landed")
-	testing.expect(t, player_body_clear(world, p.x, p.y), "the body must be clear of the floor he stands on")
+	testing.expect(t, player_body_clear(terrain, p.x, p.y), "the body must be clear of the floor he stands on")
 }
 
 @(test)
@@ -724,11 +826,12 @@ test_he_does_not_pass_through_a_wall :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 20 {
 		for x in i32(60) ..< 70 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
+	terrain := Terrain{world = world}
 
 	p := Player{x = 10, y = 20, facing = 1}
 	for _ in 0 ..< 400 {
-		player_step(&p, world, {.Right, .Run}, false)
-		testing.expect(t, player_body_clear(world, p.x, p.y), "the body must never overlap solid at the end of a tick")
+		player_step(&p, terrain, {.Right, .Run}, false)
+		testing.expect(t, player_body_clear(terrain, p.x, p.y), "the body must never overlap solid at the end of a tick")
 	}
 
 	testing.expect(t, p.vx == 0, "the wall must stop his horizontal speed")
@@ -748,9 +851,10 @@ test_hitting_a_wall_does_not_cancel_a_fall :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 2000 {
 		for x in i32(15) ..< 25 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
+	terrain := Terrain{world = world}
 
 	p := Player{x = 5, y = 1000, facing = 1}
-	for _ in 0 ..< 60 do player_step(&p, world, {.Right, .Run}, false)
+	for _ in 0 ..< 60 do player_step(&p, terrain, {.Right, .Run}, false)
 
 	testing.expect(t, p.vx == 0, "the wall must have stopped him by now")
 	testing.expect(t, !p.on_ground, "there is no floor here: he must still be airborne")
@@ -763,11 +867,12 @@ test_walking_and_running_hold_their_speeds :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 20)
+	terrain := Terrain{world = world}
 
 	walk := Player{x = 100, y = 20, facing = 1}
 	max_walk := f32(0)
 	for _ in 0 ..< 180 {
-		player_step(&walk, world, {.Right}, false)
+		player_step(&walk, terrain, {.Right}, false)
 		max_walk = max(max_walk, walk.vx)
 	}
 	testing.expectf(t, max_walk <= PLAYER_WALK_SPEED + 0.01, "walking must never exceed PLAYER_WALK_SPEED, got %f", max_walk)
@@ -776,7 +881,7 @@ test_walking_and_running_hold_their_speeds :: proc(t: ^testing.T) {
 	run := Player{x = 100, y = 20, facing = 1}
 	max_run := f32(0)
 	for _ in 0 ..< 180 {
-		player_step(&run, world, {.Right, .Run}, false)
+		player_step(&run, terrain, {.Right, .Run}, false)
 		max_run = max(max_run, run.vx)
 	}
 	testing.expectf(t, max_run <= PLAYER_RUN_SPEED + 0.01, "running must never exceed PLAYER_RUN_SPEED, got %f", max_run)
@@ -789,15 +894,16 @@ test_a_jump_from_the_ground_rises_and_returns_to_the_ground :: proc(t: ^testing.
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 150)
+	terrain := Terrain{world = world}
 
 	p := Player{x = 20, y = 150, facing = 1}
 	start_y := p.y
 	min_y := p.y
 
-	player_step(&p, world, {.Jump}, true)
+	player_step(&p, terrain, {.Jump}, true)
 	min_y = min(min_y, p.y)
 	for _ in 0 ..< 300 {
-		player_step(&p, world, {}, false) // released: no thrust, a pure arc
+		player_step(&p, terrain, {}, false) // released: no thrust, a pure arc
 		min_y = min(min_y, p.y)
 		if p.on_ground && p.vy == 0 do break
 	}
@@ -813,10 +919,11 @@ test_a_jump_press_with_no_ground_and_no_coyote_does_not_change_vy :: proc(t: ^te
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_all_air(world)
+	terrain := Terrain{world = world}
 
 	p := Player{x = 10, y = 10, vy = 50, facing = 1} // already falling, coyote already spent
 	before := p.vy
-	player_step(&p, world, {}, true)
+	player_step(&p, terrain, {}, true)
 
 	testing.expectf(t, p.vy != -PLAYER_JUMP_SPEED, "a jump with no ground and no coyote must not launch him, got vy=%f", p.vy)
 	testing.expectf(t, p.vy > before, "gravity must still apply, got vy=%f from %f", p.vy, before)
@@ -835,10 +942,11 @@ test_coyote_time_lets_him_jump_soon_after_a_ledge_but_not_later :: proc(t: ^test
 	for y in i32(20) ..< 250 {
 		for x in i32(40) ..< 100 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
+	terrain := Terrain{world = world}
 
 	p := Player{x = 30, y = 20, facing = 1}
 	for _ in 0 ..< 500 {
-		player_step(&p, world, {.Right}, false)
+		player_step(&p, terrain, {.Right}, false)
 		if !p.on_ground do break
 	}
 	// p now holds the state right after the first tick off the platform.
@@ -846,8 +954,8 @@ test_coyote_time_lets_him_jump_soon_after_a_ledge_but_not_later :: proc(t: ^test
 	first_failing_tick := -1
 	for tick in 0 ..< int(PLAYER_COYOTE_TICKS) + 4 {
 		trial := p
-		for _ in 0 ..< tick do player_step(&trial, world, {}, false)
-		player_step(&trial, world, {}, true)
+		for _ in 0 ..< tick do player_step(&trial, terrain, {}, false)
+		player_step(&trial, terrain, {}, true)
 		if trial.vy >= 0 && first_failing_tick == -1 {
 			first_failing_tick = tick
 		}
@@ -879,9 +987,10 @@ test_he_climbs_a_step_of_exactly_the_climb_height_and_is_stopped_by_a_taller_one
 		world, ok := make_step_world(t, PLAYER_CLIMB)
 		if !ok do return
 		defer destroy_flat_world(world)
+		terrain := Terrain{world = world}
 
 		p := Player{x = 30, y = 20, facing = 1}
-		for _ in 0 ..< 300 do player_step(&p, world, {.Right}, false)
+		for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
 
 		testing.expectf(t, p.x > 54, "a step of exactly PLAYER_CLIMB must be climbed, got x=%f", p.x)
 		testing.expect(t, p.on_ground, "he must be standing once he is over the step")
@@ -894,9 +1003,10 @@ test_he_climbs_a_step_of_exactly_the_climb_height_and_is_stopped_by_a_taller_one
 		world, ok := make_step_world(t, PLAYER_CLIMB + 1)
 		if !ok do return
 		defer destroy_flat_world(world)
+		terrain := Terrain{world = world}
 
 		p := Player{x = 30, y = 20, facing = 1}
-		for _ in 0 ..< 300 do player_step(&p, world, {.Right}, false)
+		for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
 
 		x1 := i32(math.floor(p.x + PLAYER_BODY_W * 0.5))
 		testing.expectf(t, x1 == 50, "a step one cell taller than PLAYER_CLIMB must stop him at it, got right edge %d", x1)
@@ -920,13 +1030,14 @@ test_a_climb_under_a_low_ceiling_is_refused :: proc(t: ^testing.T) {
 	for y in i32(4) ..< 20 - PLAYER_CLIMB {
 		for x in i32(50) ..< 120 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
+	terrain := Terrain{world = world}
 
 	p := Player{x = 30, y = 20, facing = 1}
-	for _ in 0 ..< 300 do player_step(&p, world, {.Right}, false)
+	for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
 
 	testing.expectf(t, i32(math.floor(p.y)) == 20, "a refused climb must leave him on the lower floor, got y=%f", p.y)
 	testing.expect(t, p.vx == 0, "the wall must stop him rather than wedge him in rock")
-	testing.expect(t, player_body_clear(world, p.x, p.y), "he must not end up inside rock")
+	testing.expect(t, player_body_clear(terrain, p.x, p.y), "he must not end up inside rock")
 }
 
 @(test)
@@ -938,6 +1049,7 @@ test_the_jetpack_lifts_him_drains_the_tank_and_he_falls_when_empty :: proc(t: ^t
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_all_air(world)
+	terrain := Terrain{world = world}
 
 	p := Player{x = 20, y = 5000, fuel = PLAYER_FUEL_MAX, facing = 1}
 	start_y := p.y
@@ -946,7 +1058,7 @@ test_the_jetpack_lifts_him_drains_the_tank_and_he_falls_when_empty :: proc(t: ^t
 	emptied := false
 
 	for _ in 0 ..< 400 {
-		player_step(&p, world, {.Jump}, false)
+		player_step(&p, terrain, {.Jump}, false)
 		if p.jetting do thrust_ticks += 1
 		if p.fuel <= 0 do emptied = true
 		min_y = min(min_y, p.y)
@@ -961,7 +1073,7 @@ test_the_jetpack_lifts_him_drains_the_tank_and_he_falls_when_empty :: proc(t: ^t
 
 	falling := false
 	for _ in 0 ..< 60 {
-		player_step(&p, world, {.Jump}, false)
+		player_step(&p, terrain, {.Jump}, false)
 		if p.vy > 50 do falling = true
 	}
 	testing.expect(t, falling, "he must fall once the tank runs dry, even while still holding the button")
@@ -973,9 +1085,10 @@ test_the_tank_fills_on_the_ground_more_slowly_in_the_air_and_not_while_thrusting
 	if !ok1 do return
 	defer destroy_flat_world(ground_world)
 	carve_open_floor(ground_world, 20)
+	ground_terrain := Terrain{world = ground_world}
 
 	standing := Player{x = 20, y = 20, fuel = 0, facing = 1}
-	player_step(&standing, ground_world, {}, false)
+	player_step(&standing, ground_terrain, {}, false)
 	testing.expect(t, standing.on_ground, "he must be standing for this part of the test")
 	testing.expectf(
 		t, abs(standing.fuel - PLAYER_FUEL_ON_GROUND / PLAYER_TICK_HZ) < 0.001,
@@ -986,9 +1099,10 @@ test_the_tank_fills_on_the_ground_more_slowly_in_the_air_and_not_while_thrusting
 	if !ok2 do return
 	defer destroy_flat_world(air_world)
 	carve_all_air(air_world)
+	air_terrain := Terrain{world = air_world}
 
 	falling := Player{x = 20, y = 1000, fuel = 0, facing = 1}
-	player_step(&falling, air_world, {}, false)
+	player_step(&falling, air_terrain, {}, false)
 	testing.expect(t, !falling.on_ground, "he must be airborne for this part of the test")
 	testing.expectf(
 		t, abs(falling.fuel - PLAYER_FUEL_IN_AIR / PLAYER_TICK_HZ) < 0.001,
@@ -997,7 +1111,7 @@ test_the_tank_fills_on_the_ground_more_slowly_in_the_air_and_not_while_thrusting
 	testing.expect(t, falling.fuel < standing.fuel, "the air fill rate must be slower than the ground rate")
 
 	thrusting := Player{x = 20, y = 1000, fuel = PLAYER_FUEL_MAX, jet_delay = 0, facing = 1}
-	player_step(&thrusting, air_world, {.Jump}, false)
+	player_step(&thrusting, air_terrain, {.Jump}, false)
 	testing.expect(t, thrusting.jetting, "he must be thrusting for this part of the test")
 	testing.expectf(t, thrusting.fuel < PLAYER_FUEL_MAX, "thrusting must drain fuel, not fill it, got %f", thrusting.fuel)
 }
@@ -1014,17 +1128,18 @@ test_a_player_buried_in_rock_reaches_open_air_within_dig_out_and_is_not_frozen :
 		for x in i32(0) ..< 60 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
 	buried_y := i32(200) + PLAYER_DIG_OUT
+	terrain := Terrain{world = world}
 
 	p := Player{x = 30, y = f32(buried_y), facing = 1}
-	testing.expect(t, !player_body_clear(world, p.x, p.y), "the setup must actually start him buried")
+	testing.expect(t, !player_body_clear(terrain, p.x, p.y), "the setup must actually start him buried")
 
-	player_step(&p, world, {}, false)
+	player_step(&p, terrain, {}, false)
 
-	testing.expect(t, player_body_clear(world, p.x, p.y), "he must reach open air within PLAYER_DIG_OUT")
+	testing.expect(t, player_body_clear(terrain, p.x, p.y), "he must reach open air within PLAYER_DIG_OUT")
 	testing.expectf(t, p.y < f32(buried_y), "de-penetration must move him toward the surface, got y=%f", p.y)
 
 	before_x := p.x
-	for _ in 0 ..< 30 do player_step(&p, world, {.Right}, false)
+	for _ in 0 ..< 30 do player_step(&p, terrain, {.Right}, false)
 	testing.expectf(t, p.x > before_x, "he must not be frozen: he must be able to walk once he is out, got x=%f from %f", p.x, before_x)
 }
 
@@ -1034,6 +1149,7 @@ test_the_same_input_list_gives_the_same_position_twice :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 200)
+	terrain := Terrain{world = world}
 
 	Recorded_Input :: struct {
 		held: Player_Input,
@@ -1047,15 +1163,179 @@ test_the_same_input_list_gives_the_same_position_twice :: proc(t: ^testing.T) {
 		{{.Left}, false}, {{}, false}, {{}, false}, {{}, false},
 	}
 
-	run :: proc(world: World, inputs: []Recorded_Input) -> (f32, f32) {
+	run :: proc(t: Terrain, inputs: []Recorded_Input) -> (f32, f32) {
 		p := Player{x = 100, y = 200, facing = 1}
-		for step in inputs do player_step(&p, world, step.held, step.jump)
+		for step in inputs do player_step(&p, t, step.held, step.jump)
 		return p.x, p.y
 	}
 
-	x1, y1 := run(world, inputs)
-	x2, y2 := run(world, inputs)
+	x1, y1 := run(terrain, inputs)
+	x2, y2 := run(terrain, inputs)
 	testing.expect(t, x1 == x2 && y1 == y2, "the same input list must give the same position twice")
+}
+
+/*
+terrain_cell_at is the whole join, so it gets its own test rather than
+riding along inside a player test: the sandbox rect sits astride zero,
+so a coordinate on the wrong side of floor_div would read the wrong
+half silently, and this exercises both the near and the far corner of
+it plus a cell well outside it at a negative coordinate.
+*/
+@(test)
+test_terrain_cell_at_reads_the_sandbox_inside_its_rect_and_the_world_outside_it :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 4000, 40)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	sand, sand_found := find_material_index(world.materials, "Sand")
+	if !testing.expect(t, sand_found, "Sand must exist in the material table") do return
+
+	sb, sb_ok := sandbox_make(8, 8, 1)
+	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&sb)
+	sb.origin_x = -1004
+	sb.origin_y = -2
+	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(sand)
+
+	terrain := Terrain{world = world, sandbox = &sb}
+
+	testing.expect(
+		t, terrain_cell_at(terrain, sb.origin_x, sb.origin_y) == Cell(sand),
+		"the near corner of the rect must read the sandbox",
+	)
+	testing.expect(
+		t, terrain_cell_at(terrain, sb.origin_x + 7, sb.origin_y + 7) == Cell(sand),
+		"the far corner of the rect must read the sandbox too",
+	)
+
+	outside_x, outside_y := sb.origin_x - 1, sb.origin_y
+	testing.expect(
+		t, terrain_cell_at(terrain, outside_x, outside_y) == world_cell_at(world, outside_x, outside_y),
+		"one cell left of the rect must read the generator, not the sandbox",
+	)
+	testing.expectf(
+		t, terrain_cell_at(terrain, -9000, 3) == world_cell_at(world, -9000, 3),
+		"far outside the rect, at a negative world coordinate, must still match the generator",
+	)
+}
+
+/*
+The test that proves the join docs/player.md used to say never
+happened. The world alone is open air all the way down: with no
+sandbox a wizard here falls forever. Add a sandbox holding sand where
+the world holds nothing but air, and the same position must read solid
+ground, because Terrain reads the sandbox first.
+*/
+@(test)
+test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 4000)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	sand, sand_found := find_material_index(world.materials, "Sand")
+	if !testing.expect(t, sand_found, "Sand must exist in the material table") do return
+
+	sb, sb_ok := sandbox_make(64, 64, 1)
+	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&sb)
+	sb.origin_x = 50
+	sb.origin_y = 100
+	// A floor of sand across the sandbox from row 40 down; air above it.
+	for y in i32(0) ..< sb.height {
+		for x in i32(0) ..< sb.width {
+			sb.cells[sandbox_index(&sb, x, y)] = y >= 40 ? Cell(sand) : MATERIAL_AIR
+		}
+	}
+
+	terrain_no_sandbox := Terrain{world = world}
+	terrain_with_sandbox := Terrain{world = world, sandbox = &sb}
+
+	px := f32(sb.origin_x + 32)
+	py := f32(sb.origin_y + 40) // the world y of the sand row
+
+	without := Player{x = px, y = py - 5, facing = 1}
+	for _ in 0 ..< 300 do player_step(&without, terrain_no_sandbox, {}, false)
+	testing.expect(t, !without.on_ground, "with no sandbox there is nothing under him: he must still be falling")
+
+	with := Player{x = px, y = py - 5, facing = 1}
+	for _ in 0 ..< 300 do player_step(&with, terrain_with_sandbox, {}, false)
+	testing.expect(t, with.on_ground, "the sandbox's sand must hold him up, though the world under it is empty air")
+	testing.expectf(t, i32(math.floor(with.y)) == sb.origin_y + 40, "he must land on the sand row, got y=%f", with.y)
+}
+
+/*
+Sandbox physics reaching the player: dig the floor out from under him
+and he must fall through it, not hang on the rock the generator would
+still hold there underneath.
+*/
+@(test)
+test_digging_the_floor_out_from_under_him_makes_him_fall :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 200)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_open_floor(world, 100) // air above row 100; rock at and below it
+
+	sb, sb_ok := sandbox_make(64, 64, 1)
+	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&sb)
+	sandbox_fill_from_world(&sb, world, 40, 70)
+
+	terrain := Terrain{world = world, sandbox = &sb}
+
+	p := Player{x = 72, y = 100, facing = 1}
+	for _ in 0 ..< 10 do player_step(&p, terrain, {}, false)
+	testing.expect(t, p.on_ground, "he must be standing on the sandbox's copy of the rock floor first")
+
+	// Dig the floor out from under him: sandbox-local (32,30) is world
+	// (72,100), exactly where he stands.
+	sandbox_dig(&sb, world.materials, 32, 30, 6, 255)
+
+	// A handful of ticks, not a long settle: the dig is a disc, not a
+	// bottomless shaft, so given long enough he falls clean through it
+	// and lands again on the rock below. This only has to catch him
+	// leaving the ground he started on.
+	for _ in 0 ..< 5 do player_step(&p, terrain, {}, false)
+	testing.expect(t, !p.on_ground, "the floor is gone from the sandbox: he must fall through it")
+	testing.expectf(t, p.vy > 0, "gravity must be pulling him down through the hole, got vy=%f", p.vy)
+}
+
+/*
+Player_Button.Dig, driven by nothing but a button and a facing: no
+cursor is needed, so a test can hold the button and check the cell in
+front of his chest.
+*/
+@(test)
+test_holding_dig_removes_sandbox_material_in_front_of_him :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_open_floor(world, 30)
+
+	sand, sand_found := find_material_index(world.materials, "Sand")
+	if !testing.expect(t, sand_found, "Sand must exist in the material table") do return
+
+	sb, sb_ok := sandbox_make(8, 8, 1)
+	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&sb)
+	sb.origin_x = 54
+	sb.origin_y = 20
+	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(sand)
+
+	terrain := Terrain{world = world, sandbox = &sb}
+
+	p := Player{x = 50, y = 30, facing = 1}
+	for _ in 0 ..< 5 do player_step(&p, terrain, {}, false) // settle onto the world's own floor
+	testing.expect(t, p.on_ground, "he must be standing before the dig starts")
+
+	dig_x := i32(p.x) + i32(p.facing) * PLAYER_DIG_REACH - sb.origin_x
+	dig_y := i32(p.y) - PLAYER_BODY_H / 2 - sb.origin_y
+	testing.expect(t, sandbox_cell(&sb, dig_x, dig_y) == Cell(sand), "the dig point must start as sand")
+
+	player_step(&p, terrain, {.Dig}, false)
+
+	testing.expect(t, sandbox_cell(&sb, dig_x, dig_y) != Cell(sand), "holding Dig must clear the sand at the dig point")
 }
 
 @(test)
@@ -1075,11 +1355,13 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
+	terrain := Terrain{world = s.world}
+
 	x, y, found := world_find_spawn(s.world)
 	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return
 
-	testing.expect(t, player_solid_at(s.world, x, y), "the feet must be on solid ground")
-	testing.expect(t, player_body_clear(s.world, f32(x), f32(y)), "the whole body box must be clear")
+	testing.expect(t, player_solid_at(terrain, x, y), "the feet must be on solid ground")
+	testing.expect(t, player_body_clear(terrain, f32(x), f32(y)), "the whole body box must be clear")
 
 	surface_row, row_found := world_find_surface_row(s.world)
 	if !testing.expect(t, row_found) do return
@@ -1089,7 +1371,7 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 
 	min_x := (0 - s.world.biomes.origin_pixel_x) * cpp
 	max_x := (s.world.biome_map.width - s.world.biomes.origin_pixel_x) * cpp - 1
-	mouth_x, mouth_found := world_find_mouth(s.world, surface_y, min_x, max_x)
+	mouth_x, mouth_found := world_find_mouth(terrain, surface_y, min_x, max_x)
 	if !testing.expect(t, mouth_found, "the shipped map must have a mouth into the caves") do return
 	testing.expectf(
 		t, abs(x - mouth_x) < 200,
@@ -1112,12 +1394,13 @@ test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
+	terrain := Terrain{world = s.world}
 	p := player_spawn(s.world)
 	testing.expect(t, p.on_ground, "a wizard spawned on solid ground must know he is standing")
 
 	start_x, start_y := p.x, p.y
 	for _ in 0 ..< PLAYER_TICK_HZ {
-		player_step(&p, s.world, {}, false)
+		player_step(&p, terrain, {}, false)
 	}
 
 	testing.expectf(
@@ -1129,7 +1412,7 @@ test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
 		"nothing pushes a wizard who holds no key, and he moved from x=%v to x=%v", start_x, p.x,
 	)
 	testing.expect(t, p.on_ground, "he must still be standing")
-	testing.expect(t, player_body_clear(s.world, p.x, p.y), "and still clear of the ground")
+	testing.expect(t, player_body_clear(terrain, p.x, p.y), "and still clear of the ground")
 }
 
 /*
