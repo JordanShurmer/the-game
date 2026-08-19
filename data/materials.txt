@@ -13,9 +13,22 @@
 # Cold fields go in parallel tables. The simulation reads them rarely.
 #
 # Cold fields:
-#   glyph      = one character for the text map
-#   decays_to  = material that replaces this one when the lifetime ends
-#   burns_to   = material that replaces this one when fire reaches it
+#   glyph       = one character for the text map
+#   decays_to   = material that replaces this one when the lifetime ends
+#   burns_to    = material that replaces this one when fire reaches it
+#   crumbles_to = material a blast turns this into when it breaks
+#
+# Hot field:
+#   explosive   = blast power; 0 = does not explode. See docs/physics.md.
+#
+# [Reactions] is a reserved section, read after every material so a
+# row can name any material in the file. A row reads:
+#   A + B -> C + D   chance
+# The cell holding A becomes C and the cell holding B becomes D. The
+# loader stores each row a second time with both sides and both
+# results swapped, so a lookup never has to try the pair both ways.
+# chance is out of 255, tested once per cell per tick. See
+# docs/physics.md for the whole mechanism.
 
 [Air]
 state       = Gas
@@ -61,6 +74,7 @@ contact     =
 immersion   =
 tags        =
 glyph       = R
+crumbles_to = Gravel
 
 [Sand]
 state       = Powder
@@ -199,3 +213,261 @@ contact     =
 immersion   =
 tags        = Metal
 glyph       = G
+
+# ------------------------------------------------------------
+# The gallery materials. See docs/physics.md, "The materials".
+# Fifteen new materials, chosen room by room from the gallery.
+# ------------------------------------------------------------
+
+[Wood]
+state       = Solid
+density     = 0.7
+fall_speed  = 0
+hardness    = 3
+flammability= 6
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF8B5A2B
+contact     =
+immersion   =
+tags        = Fuel Organic
+glyph       = w
+burns_to    = Burning_Wood
+
+[Burning_Wood]
+state       = Solid
+density     = 0.7
+fall_speed  = 0
+hardness    = 3
+flammability= 0
+conductivity= 2
+toxicity    = 1
+lifetime    = 300        # ticks; then it is ash
+color       = 0xFFCC5500
+contact     = Burns
+immersion   = Burns
+tags        = Fuel Organic
+glyph       = W
+decays_to   = Ash
+
+[Ash]
+state       = Powder
+density     = 0.6
+fall_speed  = 2
+hardness    = 1
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFAFAFA0
+contact     =
+immersion   =
+tags        = Organic
+glyph       = A
+
+[Coal]
+state       = Solid
+density     = 1.5
+fall_speed  = 0
+hardness    = 4
+flammability= 3          # slower to catch than wood
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF2B2B2B
+contact     =
+immersion   =
+tags        = Fuel
+glyph       = c
+burns_to    = Burning_Coal
+
+[Burning_Coal]
+state       = Solid
+density     = 1.5
+fall_speed  = 0
+hardness    = 4
+flammability= 0
+conductivity= 2
+toxicity    = 1
+lifetime    = 600        # ticks; a longer burn than wood
+color       = 0xFFE25822
+contact     = Burns
+immersion   = Burns
+tags        = Fuel
+glyph       = C
+decays_to   = Ash
+
+[Ice]
+state       = Solid
+density     = 0.92
+fall_speed  = 0
+hardness    = 2
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFBEEEF5
+contact     = Freezes
+immersion   = Freezes
+tags        =
+glyph       = i
+
+[Snow]
+state       = Powder
+density     = 0.4
+fall_speed  = 2
+hardness    = 1
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFFFFFFA
+contact     = Freezes
+immersion   = Freezes
+tags        =
+glyph       = n
+
+[Obsidian]
+state       = Solid
+density     = 2.6
+fall_speed  = 0
+hardness    = 9
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF1B1023
+contact     =
+immersion   =
+tags        =
+glyph       = O
+
+[Gunpowder]
+state       = Powder
+density     = 1.7
+fall_speed  = 3
+hardness    = 1
+flammability= 10
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF3E3B32
+contact     =
+immersion   =
+tags        = Fuel Oxidizer
+glyph       = g
+explosive   = 48
+
+[Tnt]
+state       = Solid
+density     = 1.6
+fall_speed  = 0
+hardness    = 2
+flammability= 5
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFB22222
+contact     =
+immersion   =
+tags        = Fuel Oxidizer
+glyph       = T
+explosive   = 110
+
+[Gravel]
+state       = Powder
+density     = 2.2
+fall_speed  = 3
+hardness    = 2
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF8A8377
+contact     =
+immersion   =
+tags        =
+glyph       = v
+
+[Flammable_Gas]
+state       = Gas
+density     = 0.15
+fall_speed  = 1          # rises
+hardness    = 0
+flammability= 0          # it goes off in one step, from the reaction table
+conductivity= 0
+toxicity    = 1
+lifetime    = -1
+color       = 0xFFE0E88A
+contact     =
+immersion   =
+tags        = Fuel
+glyph       = f
+
+[Toxic_Sludge]
+state       = Liquid
+density     = 1.4
+fall_speed  = 2
+hardness    = 0
+flammability= 0
+conductivity= 1
+toxicity    = 5
+lifetime    = -1
+color       = 0xFF556B2F
+contact     = Poisons
+immersion   = Poisons
+tags        =
+glyph       = t
+
+[Steel]
+state       = Solid
+density     = 7.8
+fall_speed  = 0
+hardness    = 12
+flammability= 0
+conductivity= 9
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFB0B7BD
+contact     =
+immersion   =
+tags        = Metal
+glyph       = S
+
+[Bedrock]
+state       = Solid
+density     = 3.0
+fall_speed  = 0
+hardness    = 255
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF1A1A1A
+contact     =
+immersion   =
+tags        =
+glyph       = B
+
+# ------------------------------------------------------------
+# Reactions. See docs/physics.md, "The reaction table".
+# ------------------------------------------------------------
+
+[Reactions]
+# a + b                 -> c + d               chance out of 255
+Water + Fire            -> Steam + Steam        255
+Water + Lava            -> Steam + Obsidian      40
+Water + Burning_Wood    -> Steam + Wood         120
+Water + Burning_Coal    -> Steam + Coal         100
+Acid  + Rock            -> Air   + Air           10
+Acid  + Dirt            -> Air   + Air           50
+Acid  + Sand            -> Air   + Air           40
+Acid  + Wood            -> Air   + Air           35
+Acid  + Steel           -> Air   + Steel        200
+Ice   + Fire            -> Water + Fire         160
+Ice   + Lava            -> Water + Lava         200
+Snow  + Fire            -> Water + Fire         220
+Snow  + Lava            -> Water + Lava         240
+Flammable_Gas + Fire    -> Fire  + Fire         255
+Lava  + Wood            -> Lava  + Burning_Wood 200
