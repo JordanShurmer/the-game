@@ -52,6 +52,7 @@ Sim_Error :: enum u8 {
 	Materials_Not_Found,
 	Biomes_Not_Found,
 	Tiles_Not_Loaded,
+	Images_Not_Loaded,
 	Biome_Map_Not_Loaded,
 	Air_Not_First,
 	Bad_Size,
@@ -92,8 +93,17 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		return .Tiles_Not_Loaded
 	}
 
+	images, images_ok := load_biome_images(biomes, materials)
+	if !images_ok {
+		destroy_tile_set(tiles)
+		destroy_biome_table(biomes)
+		destroy_material_table(materials)
+		return .Images_Not_Loaded
+	}
+
 	bmap, map_ok := load_or_create_biome_map(biomes)
 	if !map_ok {
+		destroy_image_set(images)
 		destroy_tile_set(tiles)
 		destroy_biome_table(biomes)
 		destroy_material_table(materials)
@@ -105,6 +115,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		biomes    = biomes,
 		biome_map = bmap,
 		tiles     = tiles,
+		images    = images,
 		seed      = biomes.world_seed,
 	}
 
@@ -127,6 +138,7 @@ sim_unload :: proc(s: ^Sim) {
 	sandbox_destroy(&s.sandbox)
 	editor_destroy(s)
 	destroy_tile_set(s.world.tiles)
+	destroy_image_set(s.world.images)
 	destroy_biome_map(s.world.biome_map)
 	destroy_biome_table(s.world.biomes)
 	destroy_material_table(s.world.materials)
@@ -278,6 +290,38 @@ load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) 
 			biome_tile_path(biomes, Biome_Id(i), conflict.b),
 			conflict.x, conflict.y,
 		)
+	}
+	return loaded, true
+}
+
+/*
+Read every picture an image biome names.
+
+Unlike a tile set, there is no flat fallback to fall back to: the
+picture is the whole region, so a missing or wrong-sized file is a
+hard stop, reported the same way a bad tile is.
+*/
+load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (images: [][]Cell, ok: bool) {
+	loaded, result, bad_biome := load_image_set(biomes, materials)
+	if result.err != .None {
+		path := bad_biome != BIOME_EMPTY ? biomes.image_paths[bad_biome] : "an image"
+		cpp := biomes.cells_per_pixel
+		switch result.err {
+		case .Unmatched_Color:
+			fmt.eprintfln(
+				"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
+				path, result.x, result.y, result.color, MATERIALS_PATH,
+			)
+		case .Wrong_Size:
+			fmt.eprintfln(
+				"%s: the image is %dx%d, but it must be %dx%d",
+				path, result.x, result.y, cpp, cpp,
+			)
+		case .File_Unreadable:
+			fmt.eprintfln("cannot read %s", path)
+		case .None:
+		}
+		return {}, false
 	}
 	return loaded, true
 }

@@ -46,14 +46,21 @@ Tile_Load_Result :: struct {
 }
 
 /*
-Read a tile into cells the caller owns.
+Read a square image into cells the caller owns.
 
 The tile set allocates every tile in one block, so the loader writes
 into a slice of that block instead of returning one of its own. This
 is the same rule generation follows.
+
+`size` is the side of the square the caller expects. It defaults to
+TILE_SIZE, so every existing call site that reads a tile still gets
+exactly the behaviour it always got. An image biome calls this with
+`size = cells_per_pixel` instead, because its one picture stands for a
+whole region, not a tile: same reader, same color match, same errors,
+a different square.
 */
-load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell) -> Tile_Load_Result {
-	assert(len(dst) == TILE_AREA, "a tile buffer is TILE_AREA cells")
+load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size: i32 = TILE_SIZE) -> Tile_Load_Result {
+	assert(len(dst) == int(size) * int(size), "a tile buffer must hold size*size cells")
 
 	if !os.exists(path) {
 		return {err = .File_Unreadable}
@@ -68,7 +75,7 @@ load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell) -> T
 	}
 	defer rl.UnloadImage(img)
 
-	if img.width != TILE_SIZE || img.height != TILE_SIZE {
+	if img.width != size || img.height != size {
 		return {err = .Wrong_Size, x = img.width, y = img.height}
 	}
 
@@ -76,14 +83,14 @@ load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell) -> T
 	pixels := rl.LoadImageColors(img)
 	defer rl.UnloadImageColors(pixels)
 
-	for y in i32(0) ..< TILE_SIZE {
-		for x in i32(0) ..< TILE_SIZE {
-			argb := argb_from_rl(pixels[int(y) * TILE_SIZE + int(x)])
+	for y in i32(0) ..< size {
+		for x in i32(0) ..< size {
+			argb := argb_from_rl(pixels[int(y) * int(size) + int(x)])
 			idx, found := find_material_by_color(materials, argb)
 			if !found {
 				return {err = .Unmatched_Color, color = argb, x = x, y = y}
 			}
-			dst[int(y) * TILE_SIZE + int(x)] = Cell(idx)
+			dst[int(y) * int(size) + int(x)] = Cell(idx)
 		}
 	}
 
@@ -168,6 +175,57 @@ load_tile_set :: proc(
 	}
 
 	return set, {}, TILE_NONE
+}
+
+/*
+Read every picture an image biome names.
+
+An image biome owns one whole picture, not a set of small tiles, so
+this is load_tile_set's job done once per biome instead of once per
+tile, and with no flat fallback: the picture is the region, so there
+is nothing sensible to draw until the file exists.
+
+Each picture gets its own allocation, because biomes do not all share
+one region size the way tiles share TILE_SIZE. b.variants is the
+index the loader assigned, so the picture lands at the same slot the
+generator will read it from.
+*/
+load_image_set :: proc(
+	biomes: Biome_Table,
+	materials: Material_Table,
+	allocator := context.allocator,
+) -> (
+	images: [][]Cell,
+	result: Tile_Load_Result,
+	bad_biome: Biome_Id, // which biome failed; BIOME_EMPTY when none did
+) {
+	// One slot per biome, indexed by biome id, and nil for every biome
+	// that draws no picture. A dense index over only the image biomes
+	// would save a few nil slice headers and cost a second meaning for
+	// a field that already has one, which is how a lookup gets read
+	// with the wrong table.
+	images = make([][]Cell, len(biomes.biomes), allocator)
+	size := biomes.cells_per_pixel
+
+	for b, i in biomes.biomes {
+		if b.generator != .Image do continue
+
+		cells := make([]Cell, int(size) * int(size), allocator)
+		r := load_tile_png(biomes.image_paths[i], materials, cells, size)
+		if r.err != .None {
+			delete(cells, allocator)
+			destroy_image_set(images, allocator)
+			return nil, r, Biome_Id(i)
+		}
+		images[i] = cells
+	}
+
+	return images, {}, BIOME_EMPTY
+}
+
+destroy_image_set :: proc(images: [][]Cell, allocator := context.allocator) {
+	for img in images do delete(img, allocator)
+	delete(images, allocator)
 }
 
 /*
@@ -330,6 +388,45 @@ test_tile_png_missing_file_is_an_error :: proc(t: ^testing.T) {
 
 	r := load_tile_png("data/tiles/no_such_tile.png", materials, dst)
 	testing.expect(t, r.err == .File_Unreadable)
+}
+
+/*
+An image biome's picture must be exactly cells_per_pixel square, or
+the region it stands for would not be the size the generator thinks
+it is. Without this check a short picture would read past its own end
+into the picture that follows it in the block.
+*/
+@(test)
+test_load_image_set_refuses_the_wrong_size :: proc(t: ^testing.T) {
+	materials, mat_ok := load_materials("data/materials.txt")
+	testing.expect(t, mat_ok)
+	defer destroy_material_table(materials)
+
+	rock, _ := find_material_index(materials, "Rock")
+
+	pixels := []rl.Color{{0, 0, 0, 0}, {0, 0, 0, 0}}
+	img := rl.Image {
+		data    = raw_data(pixels),
+		width   = 2,
+		height  = 1,
+		mipmaps = 1,
+		format  = .UNCOMPRESSED_R8G8B8A8,
+	}
+	path := "image_wrong_size.tmp.png"
+	defer os.remove(path)
+	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
+
+	table := Biome_Table {
+		biomes          = []Biome{{fill_0 = u16(rock), tile_base = TILE_NONE, generator = .Image, variants = 0}},
+		image_paths     = []string{path},
+		cells_per_pixel = 256,
+	}
+
+	images, result, bad := load_image_set(table, materials, context.temp_allocator)
+	testing.expect(t, result.err == .Wrong_Size, "the image must be cells_per_pixel square")
+	testing.expect(t, result.x == 2 && result.y == 1, "the report names the size it found")
+	testing.expect(t, bad == 0, "the report names the biome that failed")
+	testing.expect(t, images == nil)
 }
 
 @(test)

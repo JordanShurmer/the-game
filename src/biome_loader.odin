@@ -26,6 +26,7 @@ Biome_Load_Error :: enum u8 {
 	Tile_Mismatch,    // generator and the tiles key disagree
 	Too_Many_Tiles,
 	Region_Mismatch,  // a region is not a whole number of tiles
+	Image_Mismatch,   // generator and the image key disagree
 }
 
 @(private = "file")
@@ -54,22 +55,25 @@ load_biomes :: proc(
 
 	text := string(data)
 
-	biomes   := make([dynamic]Biome, allocator)
-	names    := make([dynamic]string, allocator)
-	prefixes := make([dynamic]string, allocator)
+	biomes      := make([dynamic]Biome, allocator)
+	names       := make([dynamic]string, allocator)
+	prefixes    := make([dynamic]string, allocator)
+	image_paths := make([dynamic]string, allocator)
 
-	// The image path, the names, and the tile prefixes all outlive this
-	// proc, so they are cloned. Release them if the load fails part way
-	// through.
+	// The map image path, the names, the tile prefixes, and the image
+	// paths all outlive this proc, so they are cloned. Release them if
+	// the load fails part way through.
 	map_image_path: string
 	ok := false
 	defer if !ok {
 		for n in names do delete(n, allocator)
 		for p in prefixes do delete(p, allocator)
+		for p in image_paths do delete(p, allocator)
 		delete(map_image_path, allocator)
 		delete(biomes)
 		delete(names)
 		delete(prefixes)
+		delete(image_paths)
 	}
 
 	table.cells_per_pixel = 512
@@ -82,7 +86,8 @@ load_biomes :: proc(
 	off_map_name: string
 
 	// Tile ids are handed out in file order and stay dense, so the tile
-	// set is one packed block with no holes in it.
+	// set is one packed block with no holes in it. Image indexes are
+	// handed out the same way, one per image biome.
 	next_tile := 0
 
 	in_map_section := false
@@ -90,6 +95,7 @@ load_biomes :: proc(
 	current:        Biome
 	current_name:   string
 	current_prefix: string
+	current_image:  string
 	current_line:   int
 	seen:           bit_set[Required_Key]
 
@@ -105,10 +111,12 @@ load_biomes :: proc(
 		biomes: ^[dynamic]Biome,
 		names: ^[dynamic]string,
 		prefixes: ^[dynamic]string,
+		image_paths: ^[dynamic]string,
 		next_tile: ^int,
 		current: Biome,
 		current_name: string,
 		current_prefix: string,
+		current_image: string,
 		seen: bit_set[Required_Key],
 		current_line: int,
 		allocator: runtime.Allocator,
@@ -126,6 +134,12 @@ load_biomes :: proc(
 		// much later, so it stops the load here.
 		if (biome.generator == .Wang) != (current_prefix != "") {
 			return .Tile_Mismatch, current_line
+		}
+		// Same shape, one level down: an image generator needs its one
+		// picture, and a picture named on a biome that will not draw it
+		// is dead authoring.
+		if (biome.generator == .Image) != (current_image != "") {
+			return .Image_Mismatch, current_line
 		}
 		for b in biomes {
 			if b.key_color == biome.key_color {
@@ -149,6 +163,7 @@ load_biomes :: proc(
 		append(biomes, biome)
 		append(names, strings.clone(current_name, allocator))
 		append(prefixes, strings.clone(current_prefix, allocator))
+		append(image_paths, strings.clone(current_image, allocator))
 		return .None, 0
 	}
 
@@ -161,7 +176,7 @@ load_biomes :: proc(
 		// New section
 		if trimmed[0] == '[' && trimmed[len(trimmed) - 1] == ']' {
 			if has_current {
-				if e, l := flush(&biomes, &names, &prefixes, &next_tile, current, current_name, current_prefix, seen, current_line, allocator); e != .None {
+				if e, l := flush(&biomes, &names, &prefixes, &image_paths, &next_tile, current, current_name, current_prefix, current_image, seen, current_line, allocator); e != .None {
 					return {}, e, l
 				}
 			}
@@ -177,6 +192,7 @@ load_biomes :: proc(
 				current        = Biome{tile_base = TILE_NONE, variants = 1}
 				current_name   = section
 				current_prefix = ""
+				current_image  = ""
 				current_line   = line_index
 				seen           = {}
 				has_current    = true
@@ -243,6 +259,7 @@ load_biomes :: proc(
 			switch value {
 			case "uniform": current.generator = .Uniform
 			case "wang":    current.generator = .Wang
+			case "image":   current.generator = .Image
 			case:           return {}, .Bad_Value, line_index
 			}
 		case "tiles":
@@ -254,11 +271,18 @@ load_biomes :: proc(
 			v, vok := strconv.parse_i64(value)
 			if !vok || v < 1 || v > WANG_MAX_VARIANTS do return {}, .Bad_Value, line_index
 			current.variants = u8(v)
+		case "image":
+			// The one picture this biome draws. Like tiles above, the
+			// value is only checked against the generator here; whether
+			// the file exists and is the right size is for the loader
+			// that reads the picture itself.
+			if value == "" do return {}, .Bad_Value, line_index
+			current_image = value
 		}
 	}
 
 	if has_current {
-		if e, l := flush(&biomes, &names, &prefixes, &next_tile, current, current_name, current_prefix, seen, current_line, allocator); e != .None {
+		if e, l := flush(&biomes, &names, &prefixes, &image_paths, &next_tile, current, current_name, current_prefix, current_image, seen, current_line, allocator); e != .None {
 			return {}, e, l
 		}
 	}
@@ -266,6 +290,7 @@ load_biomes :: proc(
 	table.biomes         = biomes[:]
 	table.names          = names[:]
 	table.tile_prefixes  = prefixes[:]
+	table.image_paths    = image_paths[:]
 	table.map_image_path = map_image_path
 
 	if off_map_name != "" {
@@ -286,10 +311,12 @@ load_biomes :: proc(
 destroy_biome_table :: proc(table: Biome_Table, allocator := context.allocator) {
 	for n in table.names do delete(n, allocator)
 	for p in table.tile_prefixes do delete(p, allocator)
+	for p in table.image_paths do delete(p, allocator)
 	delete(table.map_image_path, allocator)
 	delete(table.biomes, allocator)
 	delete(table.names, allocator)
 	delete(table.tile_prefixes, allocator)
+	delete(table.image_paths, allocator)
 }
 
 // ------------------------------------------------------------
@@ -331,6 +358,7 @@ test_load_biomes :: proc(t: ^testing.T) {
 	testing.expect(t, len(biomes.biomes) == 9, "expected 9 biomes")
 	testing.expect(t, len(biomes.names) == len(biomes.biomes))
 	testing.expect(t, len(biomes.tile_prefixes) == len(biomes.biomes))
+	testing.expect(t, len(biomes.image_paths) == len(biomes.biomes))
 	testing.expect(t, biomes.cells_per_pixel == 512)
 	testing.expect(t, biomes.cells_per_pixel % TILE_SIZE == 0, "a region is a whole number of tiles")
 	testing.expect(t, biomes.origin_pixel_x == 8)
@@ -482,6 +510,21 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 		{
 			"tiles with no wang generator",
 			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ntiles = data/tiles/a\n",
+			.Tile_Mismatch,
+		},
+		{
+			"image with no image generator",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\nimage = data/rooms/a.png\n",
+			.Image_Mismatch,
+		},
+		{
+			"image generator with no image",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = image\n",
+			.Image_Mismatch,
+		},
+		{
+			"image generator with tiles",
+			"[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\ngenerator = image\nimage = data/rooms/a.png\ntiles = data/tiles/a\n",
 			.Tile_Mismatch,
 		},
 		{
