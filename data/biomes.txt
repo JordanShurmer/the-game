@@ -97,3 +97,9 @@ fill_0    = Gold
 color     = 0xFF6B6B6B
 generator = uniform
 fill_0    = Rock
+
+[Gallery]
+color     = 0xFF9B59B6
+generator = image
+image     = data/rooms/gallery.png
+fill_0    = Bedrock

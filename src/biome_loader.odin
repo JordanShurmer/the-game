@@ -355,7 +355,7 @@ test_load_biomes :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_tables(materials, biomes)
 
-	testing.expect(t, len(biomes.biomes) == 9, "expected 9 biomes")
+	testing.expect(t, len(biomes.biomes) == 10, "expected 10 biomes")
 	testing.expect(t, len(biomes.names) == len(biomes.biomes))
 	testing.expect(t, len(biomes.tile_prefixes) == len(biomes.biomes))
 	testing.expect(t, len(biomes.image_paths) == len(biomes.biomes))
