@@ -155,9 +155,9 @@ how any edit to the map or to a tile reaches a running sandbox.
 
 ## The tile sets
 
-A biome with `generator = wang` owns a set of 64x64 tiles, and the
-world lays them out on a lattice of tile squares, drawing each painted
-cell as a `TILE_SCALE` block of world cells. Each tile carries a
+A biome with `generator = wang` owns a set of 256x256 tiles, and the
+world lays them out on a lattice of tile squares, one cell of a tile
+to one cell of world. Each tile carries a
 color on each of its four sides. The lattice colors every edge from a
 hash of its own position, and a square takes the tile whose four sides
 match the four edges around it, so two tiles side by side always agree
@@ -172,7 +172,7 @@ the same four edges do not always give the same tile.
 which is also the end of its file name:
 `data/tiles/coalmine_0110_1.png`.
 
-The cells within four of a side belong to the edge color rather than
+The cells within 16 of a side belong to the edge color rather than
 to the tile. `tile_paint` writes a stroke there into every tile of the
 set that carries that color, because that is the same seam seen from
 another tile. `tile_view` says so before it prints the grid.
