@@ -359,11 +359,43 @@ def build_room_3(cv):
     one tall tank and settle in three layers by density (checked
     against data/materials.txt: Oil 0.85, Water 1.0, Toxic_Sludge 1.4)."""
     r = Room(cv, 3)
-    r.box(4, 35, 115, 119, BEDROCK)
-    r.box(9, 40, 110, 119, AIR)  # the one tall tank all three chutes feed
-    for lx0, fill in ((10, "Oil"), (52, "Water"), (94, "Toxic_Sludge")):
-        r.tank(lx0, 4, lx0 + 15, 20, fill, hole_side="bottom", hole_lo=lx0 + 5, hole_hi=lx0 + 10)
-        r.box(lx0 + 5, 21, lx0 + 10, 39, AIR)  # the chute down to the tank, through its lid
+
+    # Three taps, a funnel, and one narrow column.
+    #
+    # A wide tank shows nothing. Each liquid lands under its own chute,
+    # spreads only as far as it has to, and settles as three puddles
+    # side by side that never meet. Bringing them into one tank is not
+    # enough either: the step swaps a heavy cell with a lighter one
+    # below it, and never with one beside it, so a wide tank settles
+    # with no cell resting on anything lighter and still reads as a
+    # diagonal smear rather than as layers. The column is 13 cells
+    # across, which is too narrow for a diagonal to fit in, so the only
+    # arrangement left is the right one.
+    # The funnel and the column go down first. A chute drawn before
+    # them is painted over by their walls, and every tap is then sealed
+    # by a room that still looks right in a picture of it at rest.
+    r.box(34, 28, 86, 68, BEDROCK)
+    r.box(38, 32, 82, 62, AIR)
+
+    # The funnel floor slopes. A flat one does not funnel: a liquid
+    # spreads sideways only where the ground falls away beside it or
+    # more liquid presses from above, so a pool sitting on a flat floor
+    # beside a hole has no reason to move towards it and simply stays
+    # at the side of the room. A slope gives it the reason.
+    for lx in range(38, 56):
+        r.box(lx, 40 + (lx - 38) * 22 // 18, lx, 67, BEDROCK)
+    for lx in range(65, 83):
+        r.box(lx, 40 + (82 - lx) * 22 // 18, lx, 67, BEDROCK)
+
+    r.box(50, 66, 70, 119, BEDROCK)
+    r.box(54, 70, 66, 119, AIR)
+    r.box(56, 62, 64, 70, AIR)      # the throat, down into the column
+
+    for lx0, fill in ((38, "Oil"), (53, "Water"), (68, "Toxic_Sludge")):
+        r.tank(lx0, 4, lx0 + 13, 25, fill, wall=2, hole_side="bottom",
+               hole_lo=lx0 + 5, hole_hi=lx0 + 8)
+        r.box(lx0 + 5, 26, lx0 + 8, 31, AIR)  # the chute into the funnel
+
     r.plinth(4, w=5, h=5)
 
 
@@ -459,11 +491,14 @@ def build_room_12(cv):
     field are kept clear of it."""
     r = Room(cv, 12)
     r.box(30, 104, 38, 119, "Tnt")
-    r.box(50, 40, 57, 119, BEDROCK)  # the pillar: floor to well above the tnt.
-    # Open air over the top of it (the room's own ceiling is 40 cells up
-    # from here), so the wizard can still fly across the room; a ray
-    # steep enough to clear it would already have spent its radius.
-    r.box(66, 80, 92, 119, "Rock")   # the field: half in the pillar's shadow, half not
+    # The pillar stands 24 cells, not the whole height of the room. A
+    # pillar taller than the tnt shadows the field completely, and a
+    # field that is wholly in shadow shows nothing: the room reads as a
+    # blast that did not go off. Rays that graze the top of this one
+    # reach the upper face of the field, so the shadow lands as a
+    # diagonal across it and the lit rock beside it is gone.
+    r.box(50, 96, 57, 119, BEDROCK)
+    r.box(66, 60, 92, 119, "Rock")
     r.plinth(4, w=5, h=4)
 
 
