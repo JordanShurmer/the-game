@@ -55,8 +55,9 @@ WANG_SIGNATURES :: WANG_COLORS * WANG_COLORS * WANG_COLORS * WANG_COLORS
 
 // Cells along each side that belong to the edge color instead of to
 // the tile. Wide enough to carry a tunnel mouth through the border,
-// narrow enough that the shared corners stay invisible.
-WANG_SEAM :: 4
+// narrow enough that the shared corners stay invisible. It is the
+// same sixteenth of a tile it always was, counted at TILE_SIZE.
+WANG_SEAM :: 16
 
 #assert(WANG_SEAM > 0 && WANG_SEAM * 2 < TILE_SIZE, "the two seams of an axis must not meet")
 

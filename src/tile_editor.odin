@@ -33,7 +33,7 @@ else. N makes them agree again.
 
 // The tile fills this square on screen. TILE_SIZE divides it exactly,
 // so a cell is a whole number of pixels and the grid never drifts.
-TILE_VIEW_CELL :: 8
+TILE_VIEW_CELL :: 2
 TILE_VIEW_X :: 360
 TILE_VIEW_Y :: 130
 TILE_VIEW_SIZE :: TILE_SIZE * TILE_VIEW_CELL
@@ -45,8 +45,9 @@ TILE_CONTEXT :: WANG_SEAM * TILE_VIEW_CELL
 // way the world view samples when the camera pulls back.
 SET_VIEW_X :: 940
 SET_VIEW_Y :: 130
-SET_SAMPLE :: 2
-SET_THUMB :: (TILE_SIZE / SET_SAMPLE) * SET_SAMPLE // 64 pixels
+SET_SAMPLE :: 4
+SET_PIXEL :: 1
+SET_THUMB :: (TILE_SIZE / SET_SAMPLE) * SET_PIXEL // 64 pixels
 SET_COLUMNS :: 4
 SET_GAP_X :: 12
 SET_GAP_Y :: 22
@@ -326,13 +327,11 @@ tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
 	app.tile_edit.saved_step = app.step
 	app.tile_edit.saved_zoom = app.zoom
 
-	// Show the world at native resolution, so every cell of it is on
-	// screen instead of one sample in eight. A painted cell covers
-	// TILE_SCALE of them, so it draws as a block of that size, which
-	// is the size the paint really is. Forcing step to 1 alone is not
-	// enough now that zoom exists: a zoom left above 1 would blow the
-	// same oversized texels back up on screen, which is exactly what
-	// forcing step to 1 is here to avoid.
+	// Show the world at native resolution, so one painted cell is one
+	// pixel on screen instead of one sample in eight. Forcing step to 1
+	// alone is not enough now that zoom exists: a zoom left above 1
+	// would blow the same oversized texels back up on screen, which is
+	// exactly what forcing step to 1 is here to avoid.
 	if app.step != 1 || app.zoom != 1 {
 		w0, h0 := app_view_cells(app)
 		centre_x := app.cam_x + (w0 * app.step) / 2
@@ -814,7 +813,7 @@ tile_editor_draw_set :: proc(app: ^App) {
 		tile := wang_tile_id(b, sig, min(e.variant, int(b.variants) - 1))
 
 		tile_editor_draw_checker(x, y, SET_THUMB, SET_THUMB)
-		tile_editor_draw_cells(app, tile, x, y, 0, 0, TILE_SIZE, TILE_SIZE, SET_SAMPLE, SET_SAMPLE)
+		tile_editor_draw_cells(app, tile, x, y, 0, 0, TILE_SIZE, TILE_SIZE, SET_PIXEL, SET_SAMPLE)
 
 		// The edge colors, as a border of four bars.
 		EDGE :: 3
@@ -855,7 +854,7 @@ tile_editor_draw_set :: proc(app: ^App) {
 		tile := wang_tile_id(b, e.sig, v)
 
 		tile_editor_draw_checker(x, VARIANT_VIEW_Y, SET_THUMB, SET_THUMB)
-		tile_editor_draw_cells(app, tile, x, VARIANT_VIEW_Y, 0, 0, TILE_SIZE, TILE_SIZE, SET_SAMPLE, SET_SAMPLE)
+		tile_editor_draw_cells(app, tile, x, VARIANT_VIEW_Y, 0, 0, TILE_SIZE, TILE_SIZE, SET_PIXEL, SET_SAMPLE)
 		rl.DrawRectangleLines(
 			x,
 			VARIANT_VIEW_Y,

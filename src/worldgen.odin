@@ -118,7 +118,7 @@ world_cell_at :: proc(world: World, wx, wy: i32) -> Cell {
 	if b.tile_base == TILE_NONE do return Cell(b.fill_0)
 
 	tile := world_tile_at(world, b, wx, wy)
-	return tile_at(world.tiles, tile, tile_cell(wx), tile_cell(wy))
+	return tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy))
 }
 
 /*
@@ -160,7 +160,7 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 			slot_x := tile_slot(wx)
 			if b.tile_base != TILE_NONE {
 				// Nor the tile square, because the tile changes there.
-				limit = min(limit, (slot_x + 1) * TILE_SPAN)
+				limit = min(limit, (slot_x + 1) * TILE_SIZE)
 			}
 
 			tx_end := ceil_div(limit - view.x, view.step)
@@ -173,9 +173,9 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 				// same for every texel in the run, so both are lifted out
 				// of the loop.
 				tile := wang_tile_at(world.seed, b, slot_x, slot_y)
-				tile_row := tile_cells(world.tiles, tile)[int(tile_cell(wy)) * TILE_SIZE:][:TILE_SIZE]
+				tile_row := tile_cells(world.tiles, tile)[int(tile_offset(wy)) * TILE_SIZE:][:TILE_SIZE]
 				for t in tx ..< tx_end {
-					row[t] = tile_row[tile_cell(view.x + t * view.step)]
+					row[t] = tile_row[tile_offset(view.x + t * view.step)]
 				}
 			}
 			tx = tx_end
@@ -407,7 +407,7 @@ test_a_region_is_a_whole_number_of_tiles :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_world(world)
 
-	testing.expect(t, world.biomes.cells_per_pixel % TILE_SPAN == 0)
+	testing.expect(t, world.biomes.cells_per_pixel % TILE_SIZE == 0)
 
 	cpp := world.biomes.cells_per_pixel
 	for px in i32(-3) ..< i32(3) {
@@ -454,7 +454,7 @@ test_a_wang_biome_draws_its_set_with_matching_edges :: proc(t: ^testing.T) {
 			tile := world_tile_at(world, b, wx, wy)
 			testing.expectf(
 				t,
-				world_cell_at(world, wx, wy) == tile_at(world.tiles, tile, tile_cell(wx), tile_cell(wy)),
+				world_cell_at(world, wx, wy) == tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy)),
 				"a Coalmine cell must come from the tile of its square at %d,%d",
 				wx,
 				wy,
@@ -537,34 +537,34 @@ test_the_world_has_no_seam_between_two_tiles :: proc(t: ^testing.T) {
 	// the border of every square and compare it with the first square
 	// that used that color.
 	seen_column: [WANG_COLORS]bool
-	column: [WANG_COLORS][TILE_SPAN]Cell
+	column: [WANG_COLORS][TILE_SIZE]Cell
 
 	// Map pixels (0,1) and (1,1) are the Coalmine, and the walk has to
 	// stay inside them: a square over the Lake beside it would answer
 	// with a column of flat Water and report a seam that is a biome
-	// border. Counted in squares per region, so it holds at any
-	// TILE_SCALE.
-	per_region := cpp / TILE_SPAN
+	// border. Counted in squares per region, so it holds whatever
+	// size a tile is.
+	per_region := cpp / TILE_SIZE
 
 	for sx in tile_slot(left_x) ..< tile_slot(left_x) + 2 * per_region {
 		for sy in tile_slot(base_y) ..< tile_slot(base_y) + per_region {
 			color := wang_vertical_edge(world.seed, sx, sy)
-			wx := sx * TILE_SPAN // the first column inside this square
+			wx := sx * TILE_SIZE // the first column inside this square
 
 			if !seen_column[color] {
 				seen_column[color] = true
-				for i in i32(0) ..< TILE_SPAN {
-					column[color][i] = world_cell_at(world, wx, sy * TILE_SPAN + i)
+				for i in i32(0) ..< TILE_SIZE {
+					column[color][i] = world_cell_at(world, wx, sy * TILE_SIZE + i)
 				}
 				continue
 			}
-			for i in i32(0) ..< TILE_SPAN {
+			for i in i32(0) ..< TILE_SIZE {
 				testing.expectf(
 					t,
-					world_cell_at(world, wx, sy * TILE_SPAN + i) == column[color][i],
+					world_cell_at(world, wx, sy * TILE_SIZE + i) == column[color][i],
 					"the cell at %d,%d does not match the edge color %d it sits on",
 					wx,
-					sy * TILE_SPAN + i,
+					sy * TILE_SIZE + i,
 					color,
 				)
 			}

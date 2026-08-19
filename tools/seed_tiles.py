@@ -28,7 +28,7 @@ the edge between them, and the WANG_SEAM cells along each side belong
 to the edge color rather than to the tile. So:
 
   - every tile that carries color c on its west side holds the same
-    four columns there, and the same for the other three sides
+    sixteen columns there, and the same for the other three sides
   - a corner cell is in two bands at once, so the whole set shares it
   - the material of a band cell may only depend on that band. A speckle
     or a wider rim drawn at random stops at the band and traces the
@@ -46,14 +46,15 @@ with no entry here still works; it just looks like nothing.
 """
 
 import argparse
+import math
 import os
 import random
 import struct
 import sys
 import zlib
 
-TILE = 64
-SEAM = 4
+TILE = 256
+SEAM = 16
 
 SOLID, OPEN = 1, 0
 
@@ -64,15 +65,15 @@ AIR = (0, 0, 0, 0)
 # ground below about a third air and as a hall with pillars above two
 # thirds. src/tile_png.odin holds a test at the same numbers.
 #
-# These are painted cells. The world draws each one TILE_SCALE cells
-# wide (src/tile.odin), so a passage of n here is n * TILE_SCALE cells
-# for a body to walk through. Scale the world, not these numbers, to
-# make room for a taller player: a wider mouth here costs the rock the
-# caves are cut from, and the scale costs nothing.
-MOUTH_LO, MOUTH_HI = 22, 41
-MOUTH_DEPTH = 8
-HUB_R = (10, 14)
-TRUNK_R = (8, 11)
+# One cell is one world cell, so these are the sizes a body meets. The
+# wizard is 13 cells tall (docs/player.md). The mouth is 81 cells wide
+# and the band lip eats up to 8 of it from each side, which leaves a
+# channel of about 64: five of him, which is what a cave holds around
+# the player it was measured from.
+MOUTH_LO, MOUTH_HI = 88, 168
+MOUTH_DEPTH = 32
+HUB_R = (40, 56)
+TRUNK_R = (24, 32)
 
 MATERIALS_PATH = "data/materials.txt"
 BIOMES_PATH = "data/biomes.txt"
@@ -237,6 +238,40 @@ def carve_disc(grid, cx, cy, r):
                 grid[y][x] = OPEN
 
 
+def carve_blob(grid, cx, cy, r, rng, rough=0.30):
+    """A room, which is not a circle.
+
+    A disc of radius 12 has an edge a cave could own. At radius 48 the
+    same edge reads as an arc of a compass, and a roughening pass that
+    moves a wall by a cell cannot break a curve that long. So the
+    radius follows the angle instead: three harmonics with random
+    phases, which gives the room bays and headlands of its own size
+    and costs one atan2 per cell of the box it sits in.
+
+    The walks need no such thing. A passage is a line of discs along a
+    wandering path, and the path is what its edge follows.
+    """
+    p1, p2, p3 = (rng.uniform(0, 2 * math.pi) for _ in range(3))
+    k2 = rng.choice((2, 3))
+    k3 = rng.choice((5, 7))
+    reach = int(r * (1 + rough)) + 2
+
+    for y in range(max(0, cy - reach), min(TILE, cy + reach + 1)):
+        for x in range(max(0, cx - reach), min(TILE, cx + reach + 1)):
+            dx, dy = x - cx, y - cy
+            d2 = dx * dx + dy * dy
+            if d2 > reach * reach:
+                continue
+            a = math.atan2(dy, dx)
+            edge = r * (
+                1
+                + rough
+                * (0.55 * math.sin(a + p1) + 0.30 * math.sin(k2 * a + p2) + 0.15 * math.sin(k3 * a + p3))
+            )
+            if d2 <= edge * edge:
+                grid[y][x] = OPEN
+
+
 def carve_disc_solid(grid, cx, cy, r):
     for y in range(max(0, cy - r), min(TILE, cy + r + 1)):
         for x in range(max(0, cx - r), min(TILE, cx + r + 1)):
@@ -254,17 +289,17 @@ def carve_walk(grid, x0, y0, x1, y1, r, rng, wobble=0.55):
     x, y = float(x0), float(y0)
     radius = float(r)
 
-    for _ in range(400):
+    for _ in range(1200):
         dx, dy = x1 - x, y1 - y
         distance = max(1e-6, (dx * dx + dy * dy) ** 0.5)
-        if distance <= 1.5:
+        if distance <= 3.0:
             break
         dx, dy = dx / distance, dy / distance
 
         swing = rng.uniform(-wobble, wobble)
         x += dx - dy * swing
         y += dy + dx * swing
-        radius = min(r + 2, max(3.0, radius + rng.uniform(-0.9, 0.9)))
+        radius = min(r + 8, max(12.0, radius + rng.uniform(-0.35, 0.35)))
         carve_disc(grid, round(x), round(y), int(radius))
 
     carve_disc(grid, x1, y1, int(radius))
@@ -298,7 +333,7 @@ def ragged(grid, rng, passes=2, open_p=0.45, close_p=0.30):
 def apron(grid, sig, rng):
     """Thicken the mass behind a wall by a wandering amount.
 
-    A band is the same four cells in every tile that carries its edge
+    A band is the same SEAM cells in every tile that carries its edge
     color, so a cave carved up to one comes out with a wall face that is
     straight and always the same distance from the border. The apron
     sits inside the tile, where every tile is free to differ, and gives
@@ -306,9 +341,9 @@ def apron(grid, sig, rng):
     """
     n, e, s, w = sig
     for side, color in (("N", n), ("E", e), ("S", s), ("W", w)):
-        thickness = rng.randint(0, 4)
+        thickness = rng.randint(0, 16)
         for along in range(TILE):
-            thickness = min(5, max(0, thickness + rng.randint(-1, 1)))
+            thickness = min(20, max(0, thickness + rng.randint(-1, 1)))
             # A mouth must stay a mouth; the apron is for the wall
             # either side of it.
             if color == 1 and MOUTH_LO - 1 <= along <= MOUTH_HI + 1:
@@ -337,24 +372,24 @@ def carve_interior(sig, rng):
 
     # The hall the passages meet at, off centre so the tile has no axis.
     mid = (MOUTH_LO + MOUTH_HI) // 2
-    hx = mid + rng.randint(-8, 8)
-    hy = mid + rng.randint(-8, 8)
-    carve_disc(grid, hx, hy, rng.randint(*HUB_R))
+    hx = mid + rng.randint(-32, 32)
+    hy = mid + rng.randint(-32, 32)
+    carve_blob(grid, hx, hy, rng.randint(*HUB_R), rng)
 
     open_sides = [side for side, color in (("N", n), ("E", e), ("S", s), ("W", w)) if color == 1]
     for side in open_sides:
         end = {"N": (mid, 0), "S": (mid, TILE - 1), "W": (0, mid), "E": (TILE - 1, mid)}[side]
 
         # A place to bend at, part of the way in and off to one side.
-        wx = round(end[0] + (hx - end[0]) * 0.45) + rng.randint(-10, 10)
-        wy = round(end[1] + (hy - end[1]) * 0.45) + rng.randint(-10, 10)
-        wx = min(TILE - SEAM - 3, max(SEAM + 3, wx))
-        wy = min(TILE - SEAM - 3, max(SEAM + 3, wy))
+        wx = round(end[0] + (hx - end[0]) * 0.45) + rng.randint(-40, 40)
+        wy = round(end[1] + (hy - end[1]) * 0.45) + rng.randint(-40, 40)
+        wx = min(TILE - SEAM - 12, max(SEAM + 12, wx))
+        wy = min(TILE - SEAM - 12, max(SEAM + 12, wy))
 
-        carve_walk(grid, end[0], end[1], wx, wy, rng.randint(6, 8), rng, wobble=0.5)
+        carve_walk(grid, end[0], end[1], wx, wy, rng.randint(*TRUNK_R), rng, wobble=0.5)
         if rng.random() < 0.6:
-            carve_disc(grid, wx, wy, rng.randint(6, 9))
-        carve_walk(grid, wx, wy, hx, hy, rng.randint(5, 8), rng, wobble=0.8)
+            carve_blob(grid, wx, wy, rng.randint(24, 36), rng)
+        carve_walk(grid, wx, wy, hx, hy, rng.randint(20, 32), rng, wobble=0.8)
 
         # The mouth stays the full width the band promises, so the
         # passage across the border does not pinch.
@@ -371,33 +406,33 @@ def carve_interior(sig, rng):
 
     # Chambers off the hall, so a tile is a place and not a junction.
     for _ in range(rng.randint(3, 4)):
-        cx = rng.randrange(SEAM + 5, TILE - SEAM - 5)
-        cy = rng.randrange(SEAM + 5, TILE - SEAM - 5)
-        carve_walk(grid, hx, hy, cx, cy, rng.randint(4, 6), rng, wobble=0.9)
-        carve_disc(grid, cx, cy, rng.randint(8, 12))
+        cx = rng.randrange(SEAM + 20, TILE - SEAM - 20)
+        cy = rng.randrange(SEAM + 20, TILE - SEAM - 20)
+        carve_walk(grid, hx, hy, cx, cy, rng.randint(16, 24), rng, wobble=0.9)
+        carve_blob(grid, cx, cy, rng.randint(32, 48), rng)
 
     # Dead ends: somewhere to explore that does not lead on.
     for _ in range(rng.randint(1, 2)):
-        ax = rng.randrange(SEAM + 4, TILE - SEAM - 4)
-        ay = rng.randrange(SEAM + 4, TILE - SEAM - 4)
-        carve_walk(grid, hx, hy, ax, ay, rng.randint(3, 4), rng, wobble=1.0)
+        ax = rng.randrange(SEAM + 16, TILE - SEAM - 16)
+        ay = rng.randrange(SEAM + 16, TILE - SEAM - 16)
+        carve_walk(grid, hx, hy, ax, ay, rng.randint(12, 16), rng, wobble=1.0)
 
     apron(grid, sig, rng)
     grid = ragged(grid, rng)
 
     # Pillars, where a chamber came out wide enough to hold one.
     for _ in range(3):
-        px = rng.randrange(SEAM + 8, TILE - SEAM - 8)
-        py = rng.randrange(SEAM + 8, TILE - SEAM - 8)
+        px = rng.randrange(SEAM + 32, TILE - SEAM - 32)
+        py = rng.randrange(SEAM + 32, TILE - SEAM - 32)
         clear = all(
-            grid[py + dy][px + dx] == OPEN for dy in range(-7, 8) for dx in range(-7, 8)
+            grid[py + dy][px + dx] == OPEN for dy in range(-28, 29, 4) for dx in range(-28, 29, 4)
         )
         if not clear:
             continue
         # two lumps, so a pillar is not a circle
-        carve_disc_solid(grid, px, py, rng.randint(3, 4))
+        carve_disc_solid(grid, px, py, rng.randint(12, 16))
         carve_disc_solid(
-            grid, px + rng.randint(-3, 3), py + rng.randint(-3, 3), rng.randint(2, 3)
+            grid, px + rng.randint(-12, 12), py + rng.randint(-12, 12), rng.randint(8, 12)
         )
     return grid
 
@@ -415,17 +450,25 @@ def band_profile(color, rng):
     if color == 0:
         return band
 
-    # A jagged mouth: the opening is the same width everywhere, and its
-    # lip is ragged, so a border does not read as a doorway.
+    # A jagged mouth: the opening is about the same width everywhere,
+    # and its lip is ragged, so a border does not read as a doorway.
+    #
+    # The lip wanders as the band goes deeper instead of being drawn
+    # again on every row. SEAM rows of independent jitter is a comb of
+    # SEAM teeth, and a comb standing in the mouth of every border is
+    # the lattice made visible, which is the one thing the bands exist
+    # to hide. The envelope is 8 cells, so the channel through the
+    # whole band stays about 64 whatever the walk does inside it.
+    lo, hi = MOUTH_LO + 4, MOUTH_HI - 4
     for depth in range(SEAM):
-        lo = MOUTH_LO + rng.randint(0, 2)
-        hi = MOUTH_HI - rng.randint(0, 2)
+        lo = min(MOUTH_LO + 8, max(MOUTH_LO, lo + rng.randint(-2, 2)))
+        hi = max(MOUTH_HI - 8, min(MOUTH_HI, hi + rng.randint(-2, 2)))
         for along in range(lo, hi + 1):
             band[depth][along] = OPEN
     return band
 
 
-def band_materials(band, base, rock, wall=2):
+def band_materials(band, base, rock, wall=8):
     """The materials of one band, from the band alone.
 
     It may not look at the interior of any tile: two tiles that share
@@ -475,7 +518,7 @@ def stamp(target, sig, profiles, corner):
 # --------------------------------------------------------------- the material
 
 
-def to_materials(grid, base, rock, ore, ore_rate, rng, wall=2):
+def to_materials(grid, base, rock, ore, ore_rate, rng, wall=8):
     """Rock where the mass meets air, the base material deeper in.
 
     The rule may only ask how near a cell is to air, because the band
@@ -500,9 +543,9 @@ def to_materials(grid, base, rock, ore, ore_rate, rng, wall=2):
             pix[y][x] = rock if near else base
 
     # Ore in veins, not confetti: a few seeds that crawl through rock.
-    for _ in range(int(ore_rate * 14)):
+    for _ in range(int(ore_rate * 56)):
         x, y = rng.randrange(SEAM, TILE - SEAM), rng.randrange(SEAM, TILE - SEAM)
-        for _ in range(rng.randint(3, 9)):
+        for _ in range(rng.randint(12, 36)):
             if band_of(x, y) is None and pix[y][x] == rock:
                 pix[y][x] = ore
             x = min(TILE - 1, max(0, x + rng.randint(-1, 1)))

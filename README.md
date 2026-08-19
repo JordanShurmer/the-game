@@ -67,12 +67,10 @@ of, watch the world change, then save.
 
 ### Wang tiles
 
-A biome with `generator = wang` owns a set of 64x64 tiles. The world
+A biome with `generator = wang` owns a set of 256x256 tiles. The world
 is cut into a lattice of tile squares, and each square draws one tile
-of the set of the biome that owns it. A tile is painted at 64 cells
-and drawn at `TILE_SCALE` world cells to each of them, so a square is
-256 world cells across today: the art is authored at a size a person
-can paint and drawn at a size a wizard can walk through. Borders between biomes stay hard
+of the set of the biome that owns it. One cell of a tile is one world
+cell, so what the author paints is what the wizard walks through. Borders between biomes stay hard
 cuts; inside one biome the lattice runs on unbroken, across region
 borders as well.
 
@@ -89,9 +87,9 @@ pictures of one set of edges, and the lattice picks between them with
 a second hash, so the same four edges do not always give the same
 tile. The Coalmine set ships with two.
 
-Matching colors is only half of a seam. The cells within four of a
+Matching colors is only half of a seam. The cells within 16 of a
 side belong to the edge color rather than to the tile: every tile that
-carries color 1 on its west side holds the same four columns there. A
+carries color 1 on its west side holds the same 16 columns there. A
 corner cell sits in two bands at once, so the whole set shares it,
 which is why the bands stay narrow. The tile editor keeps all of that
 true as you paint, and the save gate refuses a set where it is not.

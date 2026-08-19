@@ -20,28 +20,15 @@ This note says how, and says what the phase leaves out.
 ## The size of the wizard is not a choice
 
 Two tiles that meet share the cells within `WANG_SEAM` of the border.
-`tools/seed_tiles.py` carves a mouth 20 cells wide, then stamps the
-shared band over it, and each of the four band rows jitters its own
-opening by up to two cells. Only the cells clear through all four are a
+`tools/seed_tiles.py` carves a mouth 81 cells wide, then stamps the
+shared band over it, and the lip of that band wanders by up to 8 cells
+as it goes deeper. Only the cells clear through the whole band are a
 way out of the tile.
 
-Measured over every shipped tile, that channel is **16 painted cells**.
-The world draws a painted cell `TILE_SCALE` cells wide, so the wizard
-walks through **64 world cells** of it.
+Measured over every shipped tile, that channel is **65 cells**.
 
 A body taller than the channel fits every cave and no exit from one,
-and the world reads as a lattice of sealed rooms. At `TILE_SCALE` 1 the
-body had 3 cells of room in 16 and the caves were tunnels he only just
-cleared. The body itself did not change; the world grew around it, and
-the numbers below are the ones it was picked with:
-
-**The size came off a reference, not off a preference.** In a Noita
-mine the player stands about 7 percent of the screen high and the cave
-he stands in is about five of him floor to ceiling. Our wizard is 13
-cells of the 180 the screen shows at zoom 4, which is that same 7
-percent, so the body and the camera were already right and only the
-cave was small. At `TILE_SCALE` 4 the channel is 64 cells against a
-body of 13, which is that same five.
+and the world reads as a lattice of sealed rooms. So:
 
 | Thing | Cells | Why |
 | --- | --- | --- |
@@ -50,11 +37,20 @@ body of 13, which is that same five.
 | Body in frame | x 8, y 11 | so the art and the box cannot drift apart |
 | Feet | frame row 23 | the position the player struct holds |
 
+**The channel came off a reference, not off a preference.** In a Noita
+mine the player stands about 7 percent of the screen high and the cave
+he stands in is about five of him floor to ceiling. Our wizard is 13
+cells of the 180 the screen shows at zoom 4, which is that same 7
+percent, so the body and the camera were right from the start and only
+the cave was small. 65 cells against a body of 13 is that same five,
+and it is the tile art that carries it: a tile is 256 cells and one of
+them is one world cell, so the caves were drawn at the size they are
+walked at rather than magnified into it.
+
 `player_fits_the_world` is the test that holds this. It measures the
-clear channel through the band of every tile that carries an open edge,
-converts it to world cells, and fails if any is under
-`PLAYER_BODY_H + 2`. Reseed the sets with a narrower mouth, or drop
-`TILE_SCALE` back to 1, and the test says so before a player finds out.
+clear channel through the band of every tile that carries an open edge
+and fails if any is under `PLAYER_BODY_H + 2`. Reseed the sets with a
+narrower mouth and the test says so before a player finds out.
 
 ## Collision reads the generated world
 
@@ -143,7 +139,7 @@ Cells and seconds, because that is what the world is measured in.
 | `PLAYER_FUEL_ON_GROUND` | 1.4 | tanks per second standing, so 0.71 seconds |
 | `PLAYER_FUEL_IN_AIR` | 0.22 | tanks per second falling, and **not** under thrust |
 | `PLAYER_COYOTE_TICKS` | 5 | ticks after a ledge where a jump still works |
-| `PLAYER_CLIMB` | `3 * TILE_SCALE` | cells he walks up without jumping |
+| `PLAYER_CLIMB` | 3 | cells he walks up without jumping |
 | `PLAYER_DIG_OUT` | 24 | cells he searches upward when buried |
 | `SPAWN_MOUTH_DEPTH` | 10 | cells a column must be clear to count as a way in |
 | `SPAWN_CLEARANCE` | 12 | cells from the mouth edge to the spawn |
@@ -153,12 +149,11 @@ Fuel does not fill under thrust. A 2.0 second burn climbs 241 cells,
 which is more than a screen height. Standing fills the tank in 0.71
 seconds, and a long fall trickles back enough for a landing burn.
 
-`PLAYER_CLIMB` is `3 * TILE_SCALE`, not a flat 5. The seeder's
-`ragged` pass moves walls by one or two painted cells, and the world
-draws each of those `TILE_SCALE` cells wide, so this walks over the
-roughness the caves actually have and a taller ledge stays a jump. It
-is a number about the ground, so it is written in the units the ground
-is authored in.
+`PLAYER_CLIMB` is 3, not 5. The seeder's `ragged` pass moves walls by
+one or two cells, so 3 walks over the roughness the caves actually
+have, and a taller ledge stays a jump. The caves grew and this did not
+have to: the roughening works a cell at a time whatever the tile size
+is, so a bigger cave has a finer wall, not a coarser one.
 
 ## Movement resolves one cell at a time
 
