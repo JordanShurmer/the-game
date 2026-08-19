@@ -70,6 +70,7 @@ Material :: struct {
 	flammability:   u8,  // 0 = none
 	conductivity:   u8,  // heat / electricity
 	toxicity:       u8,  // damage on contact or immersion
+	explosive:      u8,  // blast power; 0 = does not explode
 }
 
 // Two materials per 64-byte cache line; keep it that way.

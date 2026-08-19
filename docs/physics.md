@@ -103,9 +103,18 @@ room shows.
 `Bedrock` is the gallery. Every room wall is bedrock, so a blast in
 one room cannot reach the next one, and the museum survives a visitor.
 
-One existing material changes: `Rock` gains `crumbles_to = Gravel`. A
-material with no `crumbles_to` does not crumble, which is the default
-and covers every other material in the table.
+One existing material changes: `Rock` gains `crumbles_to = Gravel`.
+
+A material with no `crumbles_to` crumbles into **itself**. That is not
+the same default `decays_to` and `burns_to` take, and the difference
+is deliberate. Those two are gated by another field: a `lifetime` of
+-1 means `decays_to` is never read, and a `flammability` of 0 means
+`burns_to` is never read. Nothing gates `crumbles_to`, because a blast
+asks every cell it touches what it crumbles into. Defaulting to Air
+would erase every material a blast passes near. Defaulting to the
+material itself makes "become what you crumble into" a no-op, so no
+caller needs a second field to ask whether a material crumbles at
+all.
 
 ## The reaction table
 
