@@ -212,7 +212,23 @@ sim_apply :: proc(s: ^Sim, command: Input_Command) {
 		sandbox_paint(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), MATERIAL_AIR)
 	case .Ignite:
 		sandbox_ignite(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius))
+	case .Explode:
+		sandbox_explode(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), command_power(command))
+	case .Dig:
+		sandbox_dig(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), command_power(command))
 	}
+}
+
+/*
+The power an Explode or a Dig carries.
+
+Both ride the `material` field, because it is the spare u16 and a
+power is not a material anywhere else. A power is a u8, so a caller
+that writes a larger number gets the largest power rather than a
+number folded round to a small one.
+*/
+command_power :: proc(command: Input_Command) -> u8 {
+	return command.material > 255 ? 255 : u8(command.material)
 }
 
 sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
