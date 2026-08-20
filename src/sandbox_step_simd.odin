@@ -75,16 +75,29 @@ wide_side_bit :: #force_inline proc "contextless" (sb: ^Sandbox, x, y: i32) -> W
 	return simd.shr(h, Weights(15))
 }
 
-// One vector out of a row of weights, starting at cell i. The row is
-// read as far as i+SANDBOX_LANES, which is what sandbox_load_row's
-// `hi` clamp leaves room for.
+/*
+SANDBOX_LANES cells of a row of weights, from cell i on.
+
+The row is a plain slice, and a vector is those cells side by side, so
+this is one load. Unaligned, because i is a cell of the sandbox and
+not a multiple of anything. The load reaches as far as
+i + SANDBOX_LANES, which is what sandbox_load_row's `hi` clamp leaves
+room for.
+*/
 @(private = "file")
 wide_at :: #force_inline proc "contextless" (row: []u16, i: int) -> Weights {
 	return intrinsics.unaligned_load((^Weights)(&row[i]))
 }
 
-// The cell to each side of cell i, as the side this lane tries first
-// and the side it tries second.
+/*
+The cell to each side of cell i: the side each lane tries first, and
+the side it tries second.
+
+A lane cannot read a different cell from its neighbour, so it cannot
+read "the cell on my side". It reads both, and `simd.select` keeps the
+one this lane asked for: where `to_right` is set the lane takes the
+right cell as its near side, and elsewhere the left one.
+*/
 @(private = "file")
 wide_sides :: #force_inline proc "contextless" (to_right: Weights, row: []u16, i: int) -> (near, far: Weights) {
 	left  := wide_at(row, i - 1)
@@ -110,6 +123,8 @@ a vector, and it saves the whole apply pass on a row that has settled.
 */
 sandbox_intent_row :: proc(sb: ^Sandbox, y, x0, x1: i32) -> (moving: bool) {
 	r := &sb.rows
+	// Cell_Kind is an enum u16, so a row of them is a row of u16 and
+	// compares against Weights lane for lane.
 	kind_row := transmute([]u16)r.kind
 
 	any: Steps

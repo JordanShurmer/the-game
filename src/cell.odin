@@ -64,14 +64,16 @@ cell_weight_of :: proc(m: Material, is_air: bool) -> u16 {
 	return u16(clamp(q, 1, i64(CELL_WALL) - 1))
 }
 
-// Which rule one material moves by. See Cell_Kind above.
+// Which rule one material moves by. See Cell_Kind above. Air and
+// every solid fall through to Still, which is the rule that says a
+// cell stays where it is.
 cell_kind_of :: proc(m: Material, is_air: bool) -> Cell_Kind {
-	if is_air do return .Still
-	switch m.state {
-	case .Solid:            return .Still
-	case .Powder:           return .Powder
-	case .Liquid:           return .Liquid
-	case .Gas, .Special:    return .Riser
+	if !is_air {
+		#partial switch m.state {
+		case .Powder:        return .Powder
+		case .Liquid:        return .Liquid
+		case .Gas, .Special: return .Riser
+		}
 	}
 	return .Still
 }
