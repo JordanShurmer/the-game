@@ -358,28 +358,54 @@ Reading the sandbox is **cheaper** than reading the generator: one
 array index against a biome lookup and five hashes. The join makes the
 wizard faster where he stands, not slower.
 
-**The sandbox is the region he is in.** One region is 512 cells
-square, which is inside `SANDBOX_MAX_WIDTH`. When he crosses a region
-border, the sandbox refills from the generator at the new region.
+**The sandbox is the square he is in.** It is
+`SANDBOX_PLAY_SIZE` cells square, on a lattice of its own, and a
+region has nothing to do with it. When he leaves the square, the
+sandbox refills from the generator at the next one.
+
+It used to be the region, snapped to the region corner, which tied the
+physics to `cells_per_pixel`: a map painted at a larger region could
+not be followed at all, and there was a runtime check and a silent
+fallback here to say so. How much world moves at once and how much
+world one map pixel owns are two different questions. The sandbox now
+answers only the first, so the check is an assert beside the constant
+and the biome map is free to change without asking the physics.
 
 ```odin
-sim_play_begin  :: proc(s: ^Sim)  // open the play sandbox on his region
-sim_follow_player :: proc(s: ^Sim) // refill it when he leaves that region
+sim_play_begin  :: proc(s: ^Sim)  // open the play sandbox on his square
+sim_follow_player :: proc(s: ^Sim) // refill it when he leaves that square
 ```
 
 `sim_load` does not change. The MCP server and every test that opens a
 sandbox by hand keep the sandbox they asked for. Only a caller that
 says `sim_play_begin` gets the following one.
 
-**What this costs, said plainly.** A region you walk out of and back
+**What this costs, said plainly.** A square you walk out of and back
 into is generated again, so the hole you dug in it closes. The rung
-that fixes it is a store of the regions that have been touched, keyed
-by region coordinate, written when the sandbox slides off one. The
-gallery is one region, so nothing in this note shows the seam.
+that fixes it outright is a store of the squares that have been
+touched, keyed by their corner, written when the sandbox slides off
+one. What the size buys instead is distance: the edge is 2048 cells
+away, 157 of his own heights, where at 512 it was four regions closer
+and an ordinary walk out of a cave and back could reach it.
 
-**A blast at a region border stops at the border.** The sandbox ends
-there and the generator behind it does not move. Bedrock at the edge
-of the gallery hides it.
+**What it costs at the frame.** Measured on the shipped map, with the
+sandbox settled under him where he spawns: 0.57 ms a tick against a
+16.7 ms frame, 16 chunks of 1024 still moving, 16 MB of memory. A
+crossing re-opens and refills, which is 11 ms, one frame, about every
+27 seconds of running flat out in one direction.
+
+The measurement also says where this stops, and it is not where a
+guess would put it. 4096 costs 31 ms a tick and 8192, the whole map,
+costs 140 and never settles. But a 4096 square of nothing but mine
+settles at 7 ms, and one region of Lake left alone settles to nothing
+at all. The cost is not the cells. It is that a liquid region beside a
+cave system drains into it for ever, and a quarter of the shipped map
+is liquid. Simulating the whole world is a question about what the map
+is made of before it is a question about the speed of the step.
+
+**A blast at the sandbox border stops at the border.** The sandbox
+ends there and the generator behind it does not move. Bedrock at the
+edge of the gallery hides it.
 
 ## The wizard on the queue
 
@@ -521,7 +547,8 @@ calls the procedure the window calls.
 
 | Constant | Value | What it does |
 | --- | --- | --- |
-| `SANDBOX_PLAY_SIZE` | 512 | the play sandbox is one region |
+| `SANDBOX_PLAY_SIZE` | 2048 | the play sandbox, on a lattice of its own |
+| `SANDBOX_MAX_WIDTH` | 2048 | the largest sandbox `sandbox_make` will build |
 | `PLAYER_DIG_POWER` | 8 | hardness he can remove; rock is exactly 8 |
 | `PLAYER_DIG_RADIUS` | 5 | cells |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |

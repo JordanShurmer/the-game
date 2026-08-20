@@ -195,9 +195,9 @@ calls `sim_step_player` that many times, the same procedure the game
 window's fixed step calls and a queued `move` command applies
 (docs/player.md, "one path for a hand and a model"). The first call
 turns on following (`sim_play_begin`), which snaps the play sandbox to
-his region so his feet rest on the running physics rather than on a
-picture of it; later calls keep it following him across region
-borders on their own.
+the 2048 cell square he stands in so his feet rest on the running
+physics rather than on a picture of it; later calls keep it following
+him when he leaves that square on their own.
 
 ```
 player_status

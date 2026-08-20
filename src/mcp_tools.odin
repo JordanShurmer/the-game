@@ -90,8 +90,8 @@ MCP_TOOLS_JSON :: `{"tools":[
  "inputSchema":{"type":"object","properties":{
    "x":{"type":"integer","description":"World cell at the left edge. Default: keep the current one."},
    "y":{"type":"integer","description":"World cell at the top edge. Default: keep the current one."},
-   "width":{"type":"integer","description":"Sandbox width in cells (1 to 1024). Default: keep the current one.","minimum":1,"maximum":1024},
-   "height":{"type":"integer","description":"Sandbox height in cells (1 to 1024). Default: keep the current one.","minimum":1,"maximum":1024},
+   "width":{"type":"integer","description":"Sandbox width in cells (1 to 2048). Default: keep the current one.","minimum":1,"maximum":2048},
+   "height":{"type":"integer","description":"Sandbox height in cells (1 to 2048). Default: keep the current one.","minimum":1,"maximum":2048},
    "biome":{"type":"string","description":"Instead of x and y, open on the first region the biome map gives this biome."},
    "seed":{"type":"integer","description":"Seed for the random source. The same seed repeats a run exactly. Default 1."},
    "input_delay":{"type":"integer","description":"Ticks between a command arriving and running (0 to 32). Default 2.","minimum":0,"maximum":32}},
@@ -135,7 +135,7 @@ MCP_TOOLS_JSON :: `{"tools":[
  "description":"Report where the wizard is: his position, what he is standing on, his velocity, his jetpack fuel, and whether the play sandbox is following him.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"player_move",
- "description":"Drive the wizard for a number of ticks with a set of held buttons, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to his region so he stands on the running physics rather than a picture of it; after that it follows him across region borders on its own.",
+ "description":"Drive the wizard for a number of ticks with a set of held buttons, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to the 2048 cell square he stands in so he stands on the running physics rather than a picture of it; after that it follows him when he leaves that square on its own.",
  "inputSchema":{"type":"object","properties":{
    "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"Buttons held for every tick of this call."},
    "jump":{"type":"boolean","description":"Whether jump is a fresh press on the first tick of this call, for the jump edge. A held jump that was already pressed in an earlier call should be false. Default false."},
@@ -935,7 +935,7 @@ The first call turns on following (sim_play_begin), so a model that
 has never touched sandbox_open still gets a wizard standing on running
 physics rather than a picture of it. Later calls pay almost nothing
 for calling it again: sim_follow_player only reopens the sandbox once
-he has actually left the region it already covers.
+he has actually left the square it already covers.
 */
 tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	names, _ := json_rows_field(arguments, "buttons")

@@ -37,10 +37,40 @@ SANDBOX_DEFAULT_WIDTH  :: 128
 SANDBOX_DEFAULT_HEIGHT :: 72
 SANDBOX_DEFAULT_DELAY  :: 2
 
-// See docs/physics.md, "The wizard meets the sandbox". One region, in
-// the shipped data: cells_per_pixel is 512, so a sandbox this size
-// covers exactly the region he stands in.
-SANDBOX_PLAY_SIZE :: 512
+/*
+The square of world the physics runs on under the wizard. See
+docs/physics.md, "The wizard meets the sandbox".
+
+It was one region, and it is now sixteen of them. What that buys is
+what the sandbox forgets: a square he leaves is regenerated from the
+map rather than restored from what he did to it, so at 512 a wizard
+who walked out of a cave and back could find his tunnel filled in. At
+2048 the edge is 157 of his own heights away.
+
+What it costs, measured on the shipped map where he spawns: 0.57 ms a
+tick settled, against a 16.7 ms frame, and 16 MB. Re-opening on a
+crossing costs 11 ms, one frame, and he has to run flat out for 27
+seconds in one direction to earn it.
+
+Bigger is not free, and the measurement says where it stops. 4096
+holds 8 by 8 regions and costs 31 ms a tick, which is already past a
+frame, and the whole 8192 map costs 140. The cost is not the cells: a
+block of 4096 by 4096 that holds only mine settles at 7 ms, and the
+same 4096 square with a Lake in it does not settle at all, because a
+liquid region beside a cave system drains into it for ever. So the
+number this can climb to is a question about what the map is made of,
+not about how fast the step is.
+
+It is a power of two and a whole number of chunks, which SANDBOX_CHUNK
+needs, and it no longer has anything to do with cells_per_pixel.
+*/
+SANDBOX_PLAY_SIZE :: 2048
+
+#assert(
+	SANDBOX_PLAY_SIZE <= SANDBOX_MAX_WIDTH && SANDBOX_PLAY_SIZE <= SANDBOX_MAX_HEIGHT,
+	"the play sandbox must be a size sandbox_make will build",
+)
+#assert(SANDBOX_PLAY_SIZE % SANDBOX_CHUNK == 0, "the play sandbox must be a whole number of chunks")
 
 Sim :: struct {
 	world:     World,       // the authored world: materials, biomes, map, tiles
@@ -266,7 +296,7 @@ wizard meets the sandbox"): a sandbox pointer only when s.follow_player
 says he is standing on the running physics, nil otherwise, so a caller
 that never asked to follow gets the same World-only collision the
 wizard always had. Following also re-snaps the sandbox after the
-move, in case this tick carried him over a region border.
+move, in case this tick carried him out of that square.
 */
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool) {
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
@@ -275,7 +305,7 @@ sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool) {
 }
 
 /*
-Start following: open the play sandbox on the region the wizard is
+Start following: open the play sandbox on the square the wizard is
 already standing in, and turn on the flag that keeps it there.
 
 sim_load does not call this. It opens its own sandbox at the world
@@ -290,36 +320,39 @@ sim_play_begin :: proc(s: ^Sim) {
 }
 
 /*
-Re-snap the play sandbox to the region the wizard is standing in, if
+Re-snap the play sandbox to the square the wizard is standing in, if
 it has moved.
 
-The sandbox origin is the region's own corner: floor_div, not
-truncating division, because a region can sit on the negative side of
-zero. SANDBOX_PLAY_SIZE is fixed at 512 regardless of cells_per_pixel;
-it is one region only because the shipped data's cells_per_pixel is
-also 512. A biome ever set with a larger cells_per_pixel cannot be
-followed at all, because SANDBOX_MAX_WIDTH bounds how big a sandbox
-can open: this checks that first and leaves the sandbox as it is
-rather than asserting, the graceful fallback docs/physics.md asks for.
+The square is a lattice of SANDBOX_PLAY_SIZE, not of regions. The
+sandbox used to snap to the region corner, which tied the physics to
+cells_per_pixel: a map painted at a larger region could not be
+followed at all, and that check and its silent fallback lived here.
+The size of the sandbox and the size of a region answer two different
+questions — how much world moves at once, and how much world one map
+pixel owns — and neither has to be the other. So the sandbox now owns
+its own lattice, the runtime check is a compile-time assert beside the
+constant, and cells_per_pixel is free to change without asking the
+physics first.
 
-What this costs, said plainly: a region he leaves and returns to is
+floor_div, not a truncating divide, because a square can sit on the
+negative side of zero and the wizard spawns above it.
+
+What this costs, said plainly: a square he leaves and returns to is
 regenerated from the world, not restored from what he changed in it.
-That is the documented limit of this rung (docs/physics.md), not a bug
-— the rung that fixes it is a store of touched regions, keyed by
-region coordinate, which this phase does not build. A re-snap also
-runs through sim_open_sandbox, which resets the input queue the same
-way any other call to it always has; a border crossing is rare enough,
-and the loss small enough, that this phase accepts it rather than
-adding a second way to open a sandbox that preserves one.
+The rung that fixes it outright is still a store of touched squares,
+keyed by their corner, which this phase does not build. What the size
+buys is that he has to walk 2048 cells, 157 of his own heights, to
+reach the edge of what is remembered, where it used to be 512. A
+re-snap also runs through sim_open_sandbox, which resets the input
+queue the same way any other call to it always has; a crossing is now
+rare enough, and the loss small enough, that this phase accepts it
+rather than adding a second way to open a sandbox that preserves one.
 */
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
 
-	cpp := s.world.biomes.cells_per_pixel
-	if cpp > SANDBOX_MAX_WIDTH do return // cannot fit one region in a sandbox at all
-
-	ox := floor_div(i32(s.player.x), cpp) * cpp
-	oy := floor_div(i32(s.player.y), cpp) * cpp
+	ox := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	oy := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 
 	already_there := s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE &&
 		s.sandbox.origin_x == ox && s.sandbox.origin_y == oy
@@ -692,51 +725,99 @@ test_sim_load_leaves_following_off_so_a_hand_opened_sandbox_stays_put :: proc(t:
 }
 
 @(test)
-test_sim_play_begin_opens_the_sandbox_on_the_players_region :: proc(t: ^testing.T) {
+test_sim_play_begin_opens_the_sandbox_on_the_players_square :: proc(t: ^testing.T) {
 	s := new_sim(t)
 	defer sim_unload(&s)
 
 	sim_play_begin(&s)
 
-	cpp := s.world.biomes.cells_per_pixel
-	want_x := floor_div(i32(s.player.x), cpp) * cpp
-	want_y := floor_div(i32(s.player.y), cpp) * cpp
+	want_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	want_y := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 
 	testing.expect(t, s.follow_player, "sim_play_begin must turn following on")
 	testing.expectf(
 		t, s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE,
-		"the play sandbox must be one region, got %dx%d", s.sandbox.width, s.sandbox.height,
+		"the play sandbox must be SANDBOX_PLAY_SIZE square, got %dx%d", s.sandbox.width, s.sandbox.height,
 	)
 	testing.expectf(
 		t, s.sandbox.origin_x == want_x && s.sandbox.origin_y == want_y,
-		"the sandbox must snap to the region he spawned in, got %d,%d want %d,%d",
+		"the sandbox must snap to the square he spawned in, got %d,%d want %d,%d",
 		s.sandbox.origin_x, s.sandbox.origin_y, want_x, want_y,
+	)
+	testing.expectf(
+		t,
+		i32(s.player.x) >= s.sandbox.origin_x &&
+		i32(s.player.x) < s.sandbox.origin_x + SANDBOX_PLAY_SIZE &&
+		i32(s.player.y) >= s.sandbox.origin_y &&
+		i32(s.player.y) < s.sandbox.origin_y + SANDBOX_PLAY_SIZE,
+		"and he must be inside it: he is at %v,%v and it starts at %d,%d",
+		s.player.x, s.player.y, s.sandbox.origin_x, s.sandbox.origin_y,
 	)
 }
 
 /*
-Crossing a region border re-snaps the sandbox origin to the new
-region. This carries him a whole region to the side directly, rather
-than walking him there tick by tick, because the border is what the
-test is about, not the walk that reaches it.
+Leaving the square re-snaps the sandbox origin to the new one. This
+carries him a whole square to the side directly, rather than walking
+him there tick by tick, because the crossing is what the test is
+about, not the walk that reaches it.
 */
 @(test)
-test_sim_follow_player_re_snaps_the_sandbox_at_a_region_border :: proc(t: ^testing.T) {
+test_sim_follow_player_re_snaps_the_sandbox_when_he_leaves_the_square :: proc(t: ^testing.T) {
 	s := new_sim(t)
 	defer sim_unload(&s)
 	sim_play_begin(&s)
 	before_x := s.sandbox.origin_x
 
-	cpp := s.world.biomes.cells_per_pixel
-	s.player.x += f32(cpp)
+	s.player.x += f32(SANDBOX_PLAY_SIZE)
 	sim_follow_player(&s)
 
-	want_x := floor_div(i32(s.player.x), cpp) * cpp
+	want_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	testing.expectf(
 		t, s.sandbox.origin_x == want_x,
-		"crossing a region border must re-snap the sandbox origin, got %d want %d", s.sandbox.origin_x, want_x,
+		"leaving the square must re-snap the sandbox origin, got %d want %d", s.sandbox.origin_x, want_x,
 	)
 	testing.expect(t, s.sandbox.origin_x != before_x, "the origin must actually have moved")
+}
+
+/*
+And a region border is no longer a crossing.
+
+This is the whole of what the size buys, so it is worth a test of its
+own: the sandbox is sixteen regions now, and walking out of the one he
+spawned in leaves the physics, and everything he has changed in it,
+exactly where it was. Re-opening is what forgets, and this no longer
+re-opens.
+*/
+@(test)
+test_sim_follow_player_holds_across_a_region_border :: proc(t: ^testing.T) {
+	s := new_sim(t)
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+
+	cpp := s.world.biomes.cells_per_pixel
+	room := testing.expectf(
+		t, cpp < SANDBOX_PLAY_SIZE,
+		"this test means nothing unless a region (%d) is smaller than the sandbox (%d)",
+		cpp, SANDBOX_PLAY_SIZE,
+	)
+	if !room do return
+
+	before_x := s.sandbox.origin_x
+	before_tick := s.sandbox.tick
+
+	// Far enough to be in the next region, near enough to be in the
+	// same sandbox square.
+	s.player.x = f32(before_x + cpp)
+	sim_follow_player(&s)
+
+	testing.expectf(
+		t, s.sandbox.origin_x == before_x,
+		"crossing a region border must not move the sandbox, got %d want %d", s.sandbox.origin_x, before_x,
+	)
+	testing.expect(
+		t, s.sandbox.tick == before_tick,
+		"and must not re-open it, which would reset the tick and forget what he dug",
+	)
 }
 
 /*

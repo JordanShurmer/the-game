@@ -52,12 +52,13 @@ cache holds.
 The other thing it costs is world, and this is the rung to climb next.
 cells_per_pixel is 512, so a region used to be four tiles and is now
 one, and the map in data/biome_map.png covers the same 8192 cells of
-world with a quarter as many caves in them. Two rungs buy that back. A
-larger biome map is data and no code at all: paint more pixels. A
-larger cells_per_pixel is code, because SANDBOX_PLAY_SIZE is one
-region and sim_follow_player snaps the sandbox to a region corner, so
-a region of 1024 needs a sandbox of 1024 and that is four times the
-cells to step every tick.
+world with a quarter as many caves in them. Either of two rungs buys
+that back, and both are cheap now. A larger biome map is data and no
+code at all: paint more pixels. A larger cells_per_pixel is one number
+in data/biomes.txt, because the play sandbox no longer snaps to a
+region: it owns a lattice of its own (src/sim.odin,
+SANDBOX_PLAY_SIZE), so how much world one map pixel covers and how
+much of it moves at once are no longer the same question.
 */
 TILE_SIZE :: 512
 TILE_MASK :: TILE_SIZE - 1
