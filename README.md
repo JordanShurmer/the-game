@@ -48,7 +48,10 @@ make shot
 ./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
 ```
 
-Built and tested against the Odin dev-2026-08 release. It uses the
+Built and tested against the Odin nightly of 2026-08-20, and not
+against a monthly release: the game uses `asm` templates, and those
+reached Odin after `dev-2026-08` was cut. `docs/toolchain.md`, "Why a
+nightly", says what that costs and when it ends. It also uses the
 current `core:os`, where a file operation returns an `Error` rather
 than a `bool`.
 
