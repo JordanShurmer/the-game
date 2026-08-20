@@ -26,18 +26,40 @@ One cell is one world cell. A tile is painted at the size the world
 draws it, so what the author sees is what the wizard walks through,
 and nothing between the PNG and the screen resamples anything.
 
-256, because that is what the world wants and the art follows it. The
-wizard is 13 cells and stands about 7 percent of the screen high at
-zoom 4, which is where a Noita miner stands; the cave around that
-miner is about five of him floor to ceiling, so the channel between
-two tiles has to be about 64 cells, and a tile that carries a cave
-with a hall and passages off it is four of those across.
+512, because that is what the world wants and the art follows it. The
+wizard is 13 cells. A cave he walks through rather than squeezes
+through is about four of him floor to ceiling and five of him across,
+so a mass of rock between two caves is about that again, and a tile
+has to hold several of both or the only structure in the world is the
+lattice: the mouths its borders force through are then the caves, and
+they stand in a row at every tile edge for anyone to count.
+
+It was 256 while the caves were drawn to the mean run of the reference
+capture, 30 cells across and 21 down. That is under two of him, which
+measured right and played as a tunnel he only just clears.
+tools/seed_tiles.py says what replaced those numbers.
 
 It is a power of two, so a world coordinate wraps into a tile with a
 mask instead of a division. The generator does that once per texel, so
 it counts.
+
+What it costs is memory, and only memory: a tile is 256 KB rather than
+64 KB. Nothing in the generator got slower — it got quicker, 54 us per
+320x180 screen against 61 — because a screen now lies inside fewer
+tiles and still reads them a row at a time, and a row is what the
+cache holds.
+
+The other thing it costs is world, and this is the rung to climb next.
+cells_per_pixel is 512, so a region used to be four tiles and is now
+one, and the map in data/biome_map.png covers the same 8192 cells of
+world with a quarter as many caves in them. Two rungs buy that back. A
+larger biome map is data and no code at all: paint more pixels. A
+larger cells_per_pixel is code, because SANDBOX_PLAY_SIZE is one
+region and sim_follow_player snaps the sandbox to a region corner, so
+a region of 1024 needs a sandbox of 1024 and that is four times the
+cells to step every tick.
 */
-TILE_SIZE :: 256
+TILE_SIZE :: 512
 TILE_MASK :: TILE_SIZE - 1
 TILE_AREA :: TILE_SIZE * TILE_SIZE
 
@@ -53,18 +75,18 @@ variants, so a handful of tiled biomes passes what one byte holds.
 Tile_Id :: u16
 
 TILE_NONE :: Tile_Id(0xFFFF)
-MAX_TILES :: 512 // far past what an author can draw, and 32 MB of cells
+MAX_TILES :: 256 // far past what an author can draw, and 64 MB of cells
 
 /*
 Every tile in the world, back to back.
 
 `cells` is one block: tile `id` starts at `int(id) * TILE_AREA`. One
-tile is 64 KB and a complete set is 1 MB per variant, which is past
-the second level cache; what keeps the generator quick is not the size
-of the set but which part of it a screen touches. A screen of 320 by
-180 cells lies inside two tiles across and one down, and it reads them
-a row at a time, so the working set is the rows it walks and not the
-set behind them.
+tile is 256 KB and a complete set is 4 MB per variant, which is well
+past the second level cache; what keeps the generator quick is not the
+size of the set but which part of it a screen touches. A screen of 320
+by 180 cells lies inside two tiles across and two down, and it reads
+them a row at a time, so the working set is the rows it walks and not
+the set behind them.
 
 The set holds no names or paths. Cold authoring data lives in
 Biome_Table, next to the other strings the loader owns.

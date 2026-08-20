@@ -214,7 +214,7 @@ player_move   buttons=["right","run"] ticks=120
 
 ## The tile sets
 
-A biome with `generator = wang` owns a set of 256x256 tiles, and the
+A biome with `generator = wang` owns a set of 512x512 tiles, and the
 world lays them out on a lattice of tile squares, one cell of a tile
 to one cell of world. Each tile carries a
 color on each of its four sides. The lattice colors every edge from a

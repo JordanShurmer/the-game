@@ -1,6 +1,7 @@
 package game
 
 import "core:fmt"
+import "core:testing"
 import rl "vendor:raylib"
 
 /*
@@ -33,7 +34,12 @@ else. N makes them agree again.
 
 // The tile fills this square on screen. TILE_SIZE divides it exactly,
 // so a cell is a whole number of pixels and the grid never drifts.
-TILE_VIEW_CELL :: 2
+//
+// One pixel per cell, because a tile is 512 cells and the window is
+// 720 high. Two pixels was right while a tile was 256, and the whole
+// point of a tile that large is that the author sees the cave at the
+// size the wizard meets it.
+TILE_VIEW_CELL :: 1
 TILE_VIEW_X :: 360
 TILE_VIEW_Y :: 130
 TILE_VIEW_SIZE :: TILE_SIZE * TILE_VIEW_CELL
@@ -45,7 +51,7 @@ TILE_CONTEXT :: WANG_SEAM * TILE_VIEW_CELL
 // way the world view samples when the camera pulls back.
 SET_VIEW_X :: 940
 SET_VIEW_Y :: 130
-SET_SAMPLE :: 4
+SET_SAMPLE :: 8
 SET_PIXEL :: 1
 SET_THUMB :: (TILE_SIZE / SET_SAMPLE) * SET_PIXEL // 64 pixels
 SET_COLUMNS :: 4
@@ -863,4 +869,40 @@ tile_editor_draw_set :: proc(app: ^App) {
 			v == e.variant ? rl.RAYWHITE : rl.Fade(rl.WHITE, 0.3),
 		)
 	}
+}
+
+/*
+The editor draws inside the window.
+
+The layout is constants, and TILE_SIZE is in two of them, so a change
+to the tile size can push the tile view or the set of thumbnails off
+the right edge with nothing to say so until somebody presses T. This
+holds them to the window instead.
+*/
+@(test)
+test_the_tile_editor_fits_the_window :: proc(t: ^testing.T) {
+	testing.expectf(
+		t,
+		TILE_VIEW_X + TILE_VIEW_SIZE + TILE_CONTEXT <= WINDOW_W,
+		"the tile view ends at %d, past the window's %d",
+		TILE_VIEW_X + TILE_VIEW_SIZE + TILE_CONTEXT,
+		WINDOW_W,
+	)
+	testing.expectf(
+		t,
+		TILE_VIEW_Y + TILE_VIEW_SIZE + TILE_CONTEXT <= WINDOW_H,
+		"the tile view reaches %d down, past the window's %d",
+		TILE_VIEW_Y + TILE_VIEW_SIZE + TILE_CONTEXT,
+		WINDOW_H,
+	)
+
+	set_right := SET_VIEW_X + SET_COLUMNS * (SET_THUMB + SET_GAP_X)
+	testing.expectf(
+		t, set_right <= WINDOW_W,
+		"the set of thumbnails ends at %d, past the window's %d", set_right, WINDOW_W,
+	)
+	testing.expectf(
+		t, VARIANT_VIEW_Y + SET_THUMB <= WINDOW_H,
+		"the variants reach %d down, past the window's %d", VARIANT_VIEW_Y + SET_THUMB, WINDOW_H,
+	)
 }

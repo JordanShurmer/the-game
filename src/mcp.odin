@@ -37,7 +37,7 @@ painted map falls into more than one connected piece, because a world the
 player cannot walk across is a mistake.
 
 TILE SETS say what a region is made of. A biome with "generator = wang" owns a
-set of 64x64 authored tiles, and the world lays them out on a lattice. Each
+set of 512x512 authored tiles, and the world lays them out on a lattice. Each
 tile carries a color on each of its four sides, and the world only puts two
 tiles side by side when they agree about the side they share, so the pattern
 runs on with no seam in it. Open a set with tile_open, pick a tile of it with

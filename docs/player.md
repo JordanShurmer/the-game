@@ -20,11 +20,12 @@ This note says how, and says what the phase leaves out.
 ## The size of the wizard is not a choice
 
 Two tiles that meet share the cells within `WANG_SEAM` of the border.
-`tools/seed_tiles.py` forces a mouth 41 cells wide through that band,
+`tools/seed_tiles.py` forces a mouth 82 cells wide through that band,
 and the lip of it wanders by up to 8 cells as the band goes deeper.
 Only the cells clear through the whole band are a way out of the tile.
 
-Measured over every shipped tile, that channel is **32 cells**.
+Measured over every shipped tile, that channel is **77 cells**, which
+is nearly six of him.
 
 A body taller than the channel fits every cave and no exit from one,
 and the world reads as a lattice of sealed rooms. So:
@@ -36,19 +37,35 @@ and the world reads as a lattice of sealed rooms. So:
 | Body in frame | x 8, y 11 | so the art and the box cannot drift apart |
 | Feet | frame row 23 | the position the player struct holds |
 
-**The channel came off a reference, not off a preference.** A capture
+**The shape came off a reference. The size came off him.** A capture
 of the Noita coal pits at one pixel per world cell is 51% open, and
-the mean unbroken run of open cells through it is 30 across and 21
-down. Against a player of about the size of ours, that is a cave a
-little under two of him at a time, not the one large cavern a
-promotional shot shows. The tile sets are drawn to those numbers, and
-32 cells of channel against a body of 13 is what they leave to walk
-through: room to jump in, and not a hall.
+neither the rock nor the air in it is islands in the other: it is
+broad winding ground between large lobed masses. That is the shape the
+tile sets draw, and it has not changed.
 
-`player_fits_the_world` is the test that holds this. It measures the
-clear channel through the band of every tile that carries an open edge
-and fails if any is under `PLAYER_BODY_H + 2`. Reseed the sets with a
-narrower mouth and the test says so before a player finds out.
+The same capture measures a mean unbroken run of open cells of 30
+across and 21 down, and the sets were once drawn to those two numbers
+as well. That is where the world came from that this note used to
+describe: a channel of 32 cells against a body of 13. It measures
+right and plays wrong. A wizard in it clears every passage and can
+move in none of them, which is a tunnel and not a mine, and the eye
+reads a body that large against the ground as a body too large for the
+world.
+
+So the grain of the noise was cut loose from the capture and set
+against the body instead. A cave is now about 72 cells across and 52
+down where it used to be 36 and 26, and the tiles grew from 256 cells
+to 512 to hold several of them. Nothing about the wizard moved: he is
+the same 13 cells he was, and the world around him is twice the size
+in every direction.
+
+`test_the_player_fits_the_world` is the test that holds both ends of
+this. It measures the clear channel through the band of every tile
+that carries an open edge, and fails if any is under `PLAYER_BODY_H +
+2`, which is the body sealed in, or under `PLAYER_WORLD_CHANNEL`,
+which is three of him and the point below which the world has shrunk
+back to tunnels. Reseed the sets narrower and the test says so before
+a player finds out.
 
 ## Collision reads Terrain
 
@@ -148,6 +165,7 @@ Cells and seconds, because that is what the world is measured in.
 | `PLAYER_JET_DRAIN` | 0.5 | tanks per second under thrust, so 2.0 seconds |
 | `PLAYER_FUEL_ON_GROUND` | 1.4 | tanks per second standing, so 0.71 seconds |
 | `PLAYER_FUEL_IN_AIR` | 0.22 | tanks per second falling, and **not** under thrust |
+| `PLAYER_WORLD_CHANNEL` | 39 | 3 x `PLAYER_BODY_H`: the channel the world owes him |
 | `PLAYER_COYOTE_TICKS` | 5 | ticks after a ledge where a jump still works |
 | `PLAYER_CLIMB` | 3 | cells he walks up without jumping |
 | `PLAYER_DIG_OUT` | 24 | cells he searches upward when buried |
@@ -162,9 +180,11 @@ seconds, and a long fall trickles back enough for a landing burn.
 `PLAYER_CLIMB` is 3, not 5. The seeder settles the edge of a cave with
 a 3x3 majority, which moves a wall by a cell or two, so 3 walks over
 the roughness the caves actually have and a taller ledge stays a jump.
-The tiles grew from 64 cells to 256 and this did not have to follow:
-the smoothing works a cell at a time whatever the tile size is, so a
-bigger cave has a finer wall, not a coarser one.
+The tiles grew from 64 cells to 256 and then to 512, and this did not
+have to follow either time: the smoothing works a cell at a time
+whatever the tile size is, so a bigger cave has a finer wall, not a
+coarser one. The rock face the seeder draws at a cave edge is 3 cells
+for the same reason.
 
 ## Movement resolves one cell at a time
 

@@ -419,7 +419,7 @@ test_load_image_set_refuses_the_wrong_size :: proc(t: ^testing.T) {
 	table := Biome_Table {
 		biomes          = []Biome{{fill_0 = u16(rock), tile_base = TILE_NONE, generator = .Image, variants = 0}},
 		image_paths     = []string{path},
-		cells_per_pixel = 256,
+		cells_per_pixel = TILE_SIZE,
 	}
 
 	images, result, bad := load_image_set(table, materials, context.temp_allocator)
