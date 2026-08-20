@@ -202,6 +202,7 @@ Cells and seconds, because that is what the world is measured in.
 | `PLAYER_FUEL_IN_AIR` | 0.22 | tanks per second falling, and **not** under thrust |
 | `PLAYER_WORLD_CHANNEL` | 39 | 3 x `PLAYER_BODY_H`: the channel the world owes him |
 | `PLAYER_COYOTE_TICKS` | 5 | ticks after a ledge where a jump still works |
+| `PLAYER_JUMP_BUFFER_TICKS` | 6 | ticks a press is remembered for before the ground arrives |
 | `PLAYER_CLIMB` | 3 | cells he walks up without jumping |
 | `PLAYER_DIG_OUT` | 24 | cells he searches upward when buried |
 | `PLAYER_DIG_POWER` | 8 | the hardness his digger removes |
@@ -270,6 +271,41 @@ and `on_ground` is a clear test of the row at `floor(y)`.
 world on every paint stroke, so a player can be inside rock through no
 fault of his own. Without the first rule above he freezes there for
 ever.
+
+## Both halves of the coyote rule
+
+`PLAYER_COYOTE_TICKS` forgives a press that comes a little late, after
+the ledge has gone. `PLAYER_JUMP_BUFFER_TICKS` forgives one that comes
+a little early, before the ground has arrived: a press is remembered
+for six ticks, a tenth of a second, and spent on the first of them he
+can jump on.
+
+Early is the harder of the two to time and the worse of the two to
+lose. A player watches the ground come up and presses for the landing
+he can see coming; a press that lands one tick before his feet do is a
+press the game throws away, and nothing on the screen says why. He
+lands, he does not jump, and he reads that as the controls being
+unresponsive rather than as his own timing. Coyote time alone forgives
+only one end of the same mistake.
+
+```
+    press ->|<- PLAYER_JUMP_BUFFER_TICKS ->|
+            |                              |
+    ground -----------------------------------|<- PLAYER_COYOTE_TICKS ->|
+```
+
+The countdown runs before the press is read, so a fresh press always
+gets the whole count whatever was left of an older one, and the six
+ticks include the tick the press was made on. On the ground the buffer
+is set and spent in the same tick, so a plain jump is exactly the jump
+it always was: `test_the_jump_buffer_changes_nothing_about_a_jump_from_the_ground`
+holds that end, and
+`test_a_jump_pressed_just_before_he_lands_is_not_thrown_away` holds
+the other, the same way the coyote test does, by finding the first
+press that is one tick too early.
+
+A press older than the buffer has to be forgotten. Without that, a key
+held down through a fall would bounce him off every floor he touched.
 
 ## The digger he holds
 

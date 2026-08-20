@@ -107,6 +107,23 @@ PLAYER_FUEL_IN_AIR     :: 0.22 // tanks per second falling, and not under thrust
 PLAYER_WORLD_CHANNEL :: 3 * PLAYER_BODY_H // cells
 
 PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
+
+// The other half of the coyote rule, and the one that is missing from
+// most games in this shape.
+//
+// PLAYER_COYOTE_TICKS forgives a press that comes a little late, after
+// the ledge has gone. This forgives one that comes a little early,
+// before the ground arrives: a press is remembered for this many ticks
+// and spent on the first tick he can jump. Six ticks is a tenth of a
+// second.
+//
+// Early is the harder of the two to time and the worse of the two to
+// lose. A player watches the ground come up and presses for the
+// landing he can see coming, and a press that lands one tick before
+// the feet is a press the game simply throws away: he lands, he does
+// not jump, and nothing on the screen says why. Left alone, this is
+// the thing that reads as the controls being unresponsive.
+PLAYER_JUMP_BUFFER_TICKS :: 6
 PLAYER_CLIMB        :: 3  // cells he walks up without jumping
 PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
 
@@ -252,13 +269,14 @@ Player :: struct {
 	fuel:   f32, // 0 to PLAYER_FUEL_MAX, tanks in the jetpack
 	anim:   f32, // seconds accumulated, for the sprite to pick a frame
 
-	coyote:    u8,  // ticks of ledge grace left
-	jet_delay: u8,  // ticks left before a held jump becomes thrust
-	facing:    i8,  // +1 right, -1 left
-	aim:       u8,  // where the digger points; see PLAYER_AIM_RIGHT above
-	on_ground: bool,
-	jetting:   bool,
-	digging:   bool, // the beam is on this tick, for the window to draw
+	coyote:      u8, // ticks of ledge grace left
+	jet_delay:   u8, // ticks left before a held jump becomes thrust
+	jump_buffer: u8, // ticks a press is still remembered for
+	facing:      i8, // +1 right, -1 left
+	aim:         u8, // where the digger points; see PLAYER_AIM_RIGHT above
+	on_ground:   bool,
+	jetting:     bool,
+	digging:     bool, // the beam is on this tick, for the window to draw
 }
 
 // Two players per 64-byte cache line; keep it that way.
@@ -605,8 +623,28 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	}
 
 	// --- jump ---
-	if jump_pressed && can_jump {
+	//
+	// A press is not spent on the tick it arrives. It is remembered
+	// for PLAYER_JUMP_BUFFER_TICKS and spent on the first of those
+	// ticks he can jump on, which is the mirror of the coyote rule
+	// above: one forgives a press that comes after the ground has
+	// gone, and this one forgives a press that comes before the ground
+	// has arrived.
+	//
+	// On the ground nothing about this is visible. The buffer is set
+	// and spent in the same tick, and the launch is the launch it
+	// always was.
+	// A press is remembered for PLAYER_JUMP_BUFFER_TICKS ticks, the one
+	// it was made on included, and it is spent on the first of them he
+	// can jump on. The countdown runs before the press is read, so a
+	// fresh press always gets the whole count whatever was left of an
+	// older one.
+	if p.jump_buffer > 0 do p.jump_buffer -= 1
+	if jump_pressed do p.jump_buffer = PLAYER_JUMP_BUFFER_TICKS
+
+	if p.jump_buffer > 0 && can_jump {
 		p.vy = -PLAYER_JUMP_SPEED
+		p.jump_buffer = 0
 		p.coyote = 0
 		p.jet_delay = PLAYER_JET_DELAY_TICKS
 	}
@@ -1765,6 +1803,86 @@ wizard who falls through settled sand has no ground at all, and a
 wizard who stands on sand that is pouring past him is standing on
 something the eye can see is not there.
 */
+/*
+A press that arrives just before the landing still jumps.
+
+The shape of this test is the coyote test's, run the other way round.
+That one drops him off a ledge and presses later and later. This one
+drops him toward the ground and presses earlier and earlier, and the
+press has to still be there when his feet arrive.
+*/
+@(test)
+test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 40, 200)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_open_floor(world, 150)
+	terrain := Terrain{world = world}
+
+	// Falling toward the floor, far enough up that the press below is
+	// made well clear of it.
+	falling := Player{x = 20, y = 100, facing = 1}
+	for _ in 0 ..< 200 {
+		player_step(&falling, terrain, {}, false)
+		if falling.on_ground do break
+	}
+	if !testing.expect(t, falling.on_ground, "he must reach the floor with no input at all") do return
+
+	// The tick he landed on, counted from a fresh drop.
+	land_tick := 0
+	drop := Player{x = 20, y = 100, facing = 1}
+	for !drop.on_ground && land_tick < 200 {
+		player_step(&drop, terrain, {}, false)
+		land_tick += 1
+	}
+
+	// Press earlier and earlier before the landing and find the first
+	// press that is too early to survive it. The buffer holds a press
+	// for PLAYER_JUMP_BUFFER_TICKS ticks counting the one it was made
+	// on, so that is exactly the press this must be.
+	first_failing_early := -1
+	for early in 0 ..= int(PLAYER_JUMP_BUFFER_TICKS) + 3 {
+		trial := Player{x = 20, y = 100, facing = 1}
+		press_at := land_tick - early
+		jumped := false
+		for tick in 0 ..< land_tick + 8 {
+			player_step(&trial, terrain, {}, tick == press_at)
+			if trial.vy < 0 do jumped = true
+		}
+		if !jumped && first_failing_early == -1 do first_failing_early = early
+	}
+
+	// A press older than the buffer has to be forgotten, or a key held
+	// down through a fall would bounce him off the ground for ever.
+	testing.expectf(
+		t,
+		first_failing_early == int(PLAYER_JUMP_BUFFER_TICKS),
+		"a press must survive PLAYER_JUMP_BUFFER_TICKS ticks and no more, but it was forgotten after %d",
+		first_failing_early,
+	)
+}
+
+// On the ground the buffer is set and spent in the same tick, so a
+// plain jump has to be exactly the jump it always was.
+@(test)
+test_the_jump_buffer_changes_nothing_about_a_jump_from_the_ground :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 40, 200)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_open_floor(world, 150)
+	terrain := Terrain{world = world}
+
+	p := Player{x = 20, y = 150, facing = 1}
+	player_step(&p, terrain, {.Jump}, true)
+
+	want := f32(-PLAYER_JUMP_SPEED) + f32(PLAYER_GRAVITY)/f32(PLAYER_TICK_HZ)
+	testing.expectf(
+		t, abs(p.vy - want) < 0.01,
+		"the launch must be PLAYER_JUMP_SPEED with one tick of gravity on it, %f, got %f", want, p.vy,
+	)
+	testing.expect(t, p.jump_buffer == 0, "a press spent on the tick it arrived must leave nothing behind")
+}
+
 @(test)
 test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
