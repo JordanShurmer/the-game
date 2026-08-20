@@ -57,6 +57,19 @@ reader knows the gap is a decision and not an oversight.
   reason. The rung that would lift it is a sideways swap gated on
   density, which has to be written so that a settled pool of one
   liquid does not jitter for ever.
+
+  A pool does at least pack now. A liquid leaves a hole alone while a
+  fluid sits over it, because that fluid is about to fall in. Without
+  that rule the scan reaches a row before the row above it, a cell
+  takes the hole beside it and leaves a hole where it was, and the
+  cell that was going to drop into the first hole is refused: the
+  holes then walk from side to side for ever and the pool keeps every
+  one of them. A pool that packs also goes to sleep, where one that
+  walks its holes keeps its chunk awake for the life of the world.
+
+  What it costs is that a grain thrown clear of the body during a
+  collapse stays clear. There is no cohesion, so nothing draws it
+  back, and a fire in the body cannot cross the gap to it.
 - **No temperature field.** A number per cell for heat would cost as
   much memory as the cells and buy behaviour that the reaction table
   already gives. Fire, melting, freezing and boiling are all pairs of
@@ -74,9 +87,11 @@ reader knows the gap is a decision and not an oversight.
    `crumbles_to` is read only when a blast lands, so it is a cold
    table beside `decays_to` and `burns_to`.
 4. **A run repeats.** The sandbox is a function of the seed, the
-   region, and the command list. Reactions draw from `sandbox_rand`.
-   Explosions draw from nothing at all: the rays are fixed angles.
-   `sandbox_checksum` stays the whole test for both.
+   region, and the command list. Every random number in the step is a
+   hash of the place and the tick, not a draw from a running
+   generator, so a cell gets the same number whatever order the scan
+   reaches it in. Explosions draw nothing at all: the rays are fixed
+   angles. `sandbox_checksum` stays the whole test for both.
 5. **A picture is the check.** `bin/shot` learns to run the sandbox,
    so every room of the gallery can be judged from a terminal, before
    and after the physics runs.
@@ -178,12 +193,22 @@ knowing and far past what this game needs.
 `reacts` is the gate that keeps the step cheap. Air is in no row, so
 the common cell pays one byte of lookup and nothing else.
 
-**One probe per cell per tick.** A cell that can react picks one of
-its four sides from `sandbox_rand` and tests that pair. It does not
-test all four. Four probes cost four times as much and only make a
-reaction that already happens happen sooner. A chance of 255 on one
-of four sides still resolves in a few ticks, which at 60 Hz is a
-frame or two.
+**One roll per cell per tick, against a side that has a partner on
+it.** The step walks the four sides anyway, because whether any side
+could react is what decides that the cell is worth a look next tick.
+So it rolls once, against one of the sides that has something to react
+with, and not against one of the three that are empty.
+
+It used to roll against one of the four sides whatever was on them,
+and that made a chance of 255 mean "in about four ticks" rather than
+"now". A pair that only meets for one tick then usually missed each
+other: a flame and the water above it change places on the tick they
+meet, so water quenched fire about half the time. Measured over a
+hundred seeds: 53 of 100 before, 100 of 100 after.
+
+The cost is the same, and the reading of `chance` is now the plain
+one: it is the chance that the reaction happens on a tick when the
+pair are touching.
 
 Both cells are marked in `moved`, so a cell reacts at most once per
 tick and cannot also fall in the same tick.
@@ -283,7 +308,7 @@ which is the chain a pile should have.
 **A blast never sets off a second blast in the same tick.** Every cell
 a blast writes is marked in `moved`, so the step does not visit it
 again this tick. The fire the blast leaves reaches the next grain on
-the next tick, and that grain detonates in its own `sandbox_step_cell`.
+the next tick, and that grain detonates in its own hot pass.
 Without this rule one grain of gunpowder recurses through a whole pile
 inside one call and overflows the stack. With it, a pile takes a few
 ticks to go off, which is also what a chain should look like.
@@ -543,6 +568,54 @@ The MCP server gains `player_move` and `player_status`, and
 `enqueue_input` gains `explode`, `dig` and `move`. Every one of them
 calls the procedure the window calls.
 
+## The shape of the step
+
+The step has to look at every cell of every dirty chunk, so its shape
+is most of what a tick costs. It is a row at a time, in four passes,
+and no pass carries an answer from one cell to the next.
+
+| Pass | What it does |
+| --- | --- |
+| LOAD | reads the row, and the rows above and below it, into weights and kinds |
+| HOT | the few cells with a lifetime, a reaction, or fire to spread |
+| INTENT | compares the three rows and writes the one step each cell wants |
+| APPLY | moves the cells that want to move |
+
+**Weight is the whole move rule.** A cell carries one `u16`: air
+weighs nothing, a wall weighs everything, and everything between
+carries its density in 1/256ths. "Can this cell go there" is then one
+integer comparison. Three things arrive as a wall and need no test of
+their own: a solid, the world beyond the edge of the sandbox, and a
+cell that already moved this tick.
+
+**LOAD says what the other passes can skip.** It has the material in
+hand, so it reports for free whether any cell of the row needs the hot
+pass, and a row of rock and air pays nothing for it. INTENT reports
+the same about movement, so a row that has settled pays nothing for
+APPLY.
+
+**INTENT is a vector pass.** `src/sandbox_step_simd.odin` asks the
+same questions in the same order for sixteen cells at once.
+`sandbox_intent_cell` is the same rules a cell at a time: it is the
+reference the vector pass is read against, it runs on the cells at the
+end of a row that do not fill a vector, and
+`test_the_vector_intent_agrees_with_the_plain_one` holds the two to
+the same answer over every material and every kind of neighbour.
+
+Measured against the step this replaced, on the shipped world:
+
+| What | Before | After |
+| --- | --- | --- |
+| the gallery, 512 square, 900 ticks | 0.46 ms a tick | 0.28 |
+| a play sandbox on the mine, 2048 square | 7.1 ms a tick | 3.9 |
+| one on the deeper caves and lake | 12.0 ms a tick | 5.2 |
+
+Of that, the vector pass is worth about a sixth of the tick. The rest
+came from the shape: no `Material` load in the inner loop, no branch
+chain a cell, and two of the four passes skipped on most rows. A
+settled pool also stops keeping its chunk awake, so there is less to
+scan at all.
+
 ## The numbers
 
 | Constant | Value | What it does |
@@ -553,7 +626,8 @@ calls the procedure the window calls.
 | `PLAYER_DIG_RADIUS` | 5 | cells |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |
 | `EXPLODE_RAYS_PER_CELL` | 6 | rays per cell of radius above that |
-| `REACT_PROBES` | 1 | sides a cell tests per tick |
+| `REACT_PROBES` | 1 | reaction rolls a cell makes per tick |
+| `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
 | `GALLERY_ROOM` | 128 | cells along one edge of a room |
 | `GALLERY_WALL` | 4 | cells of bedrock between two rooms |
 

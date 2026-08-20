@@ -161,17 +161,28 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 	sb.tick += 1
 }
 
-// The four passes, over the cells x0 to x1 of one row.
+/*
+The four passes, over the cells x0 to x1 of one row.
+
+Two of the four are skipped outright most of the time, and LOAD is
+what says so: it reads the row once and reports whether any cell in it
+has a lifetime or a reaction, so a row of rock and air pays nothing for
+the hot pass. INTENT reports the same about movement, so a row that
+has settled pays nothing for the apply pass either.
+*/
 sandbox_step_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
-	sandbox_load_row(sb, table, y, x0, x1)
-	if sandbox_hot_row(sb, table, y, x0, x1) {
-		// The hot pass wrote cells, so what LOAD read is out of date.
-		// This costs a second read of a row now and then; it saves a
-		// flag on every cell that would say whether it is still good.
-		sandbox_load_row(sb, table, y, x0, x1)
+	if sandbox_load_row(sb, table, y, x0, x1) {
+		if sandbox_hot_row(sb, table, y, x0, x1) {
+			// The hot pass wrote cells, so what LOAD read is out of
+			// date. This costs a second read of a row now and then; it
+			// saves a flag on every cell that would say whether the
+			// first read is still good.
+			sandbox_load_row(sb, table, y, x0, x1)
+		}
 	}
-	sandbox_intent_row(sb, y, x0, x1)
-	sandbox_apply_row(sb, table, y, x0, x1)
+	if sandbox_intent_row(sb, y, x0, x1) {
+		sandbox_apply_row(sb, table, y, x0, x1)
+	}
 }
 
 // ------------------------------------------------------------
@@ -185,21 +196,53 @@ The rows are indexed by world x plus one, so the cell before the row
 and the cell after it are real entries holding CELL_WALL rather than a
 bounds test in the inner loop. sandbox_make writes those two entries
 once and nothing ever writes them again.
+
+A cell that already moved this tick is a wall, and a wall never moves,
+so it needs no kind of its own. `wall` below is all ones for such a
+cell and nothing for every other one, which turns both of those rules
+into one bitwise operation apiece and leaves no branch in the loop.
+
+The result reports whether any cell of this row needs the hot pass.
+The loop has the material in hand anyway, so the answer is free, and
+it saves a second walk of the row for the rows that have no lifetime
+and no reaction in them, which is most of them.
 */
-sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
+sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (hot: bool) {
+	// One cell either side of the span, because a cell looks at its
+	// neighbours. That one cell is also the whole margin the vector
+	// pass reads past its last lane, so these two clamps and
+	// SANDBOX_LANES have to be read together.
 	lo := max(x0 - 1, 0)
 	hi := min(x1 + 1, sb.width - 1)
 	r  := &sb.rows
 
-	for x in lo ..= hi {
-		r.above[x + 1] = sandbox_weight_at(sb, table, x, y - 1)
-		r.here[x + 1]  = sandbox_weight_at(sb, table, x, y)
-		r.below[x + 1] = sandbox_weight_at(sb, table, x, y + 1)
+	sandbox_load_weights(sb, table, r.above, y - 1, lo, hi)
+	sandbox_load_weights(sb, table, r.below, y + 1, lo, hi)
 
-		// A cell that already moved is a wall, and a wall never moves,
-		// so it needs no kind of its own.
-		i := sandbox_index(sb, x, y)
-		r.kind[x + 1] = sb.moved[i] ? .Still : table.kind[sb.cells[i]]
+	base := sandbox_index(sb, 0, y)
+	for x in lo ..= hi {
+		i    := base + int(x)
+		c    := sb.cells[i]
+		wall := u16(0) - u16(sb.moved[i])
+
+		r.here[x + 1] = table.weight[c] | wall
+		r.kind[x + 1] = Cell_Kind(u16(table.kind[c]) &~ wall)
+		hot ||= (table.work[c] != {} || sb.lifetime[i] > 0) && !sb.moved[i]
+	}
+	return hot
+}
+
+// One row of weights. Beyond the top and the bottom of the sandbox is
+// a wall, the same as beyond its sides.
+sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y, lo, hi: i32) {
+	if y < 0 || y >= sb.height {
+		for x in lo ..= hi do out[x + 1] = CELL_WALL
+		return
+	}
+	base := sandbox_index(sb, 0, y)
+	for x in lo ..= hi {
+		i := base + int(x)
+		out[x + 1] = table.weight[sb.cells[i]] | (u16(0) - u16(sb.moved[i]))
 	}
 }
 
@@ -326,68 +369,71 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 /*
 The one step each cell of the row wants to take, as an offset.
 
-Nothing here writes a cell, so no answer depends on any other answer:
-the questions below are asked of every cell in the row, and the first
+sandbox_intent_row in sandbox_step_simd.odin does this a vector of
+cells at a time, and is what actually runs. This is the same rules a
+cell at a time: it is what that pass is read against, what a test
+holds it to, and what runs on the few cells at the end of a row that
+do not fill a vector.
+
+Nothing here writes a cell, so no answer depends on any other answer.
+The questions below are asked of every cell in the row, and the first
 one the cell is allowed to use and that holds decides where it goes.
-That list is the whole movement model of the game.
+That list is the whole movement model of the game, and the numbers on
+it are the numbers sandbox_intent_row carries on the same ten
+questions.
 
 `near` is the side the cell tries first and `far` is the other one.
 Which is which comes from a hash of the place and the tick, so a cell
 gets the same side however the scan reaches it.
 */
-sandbox_intent_row :: proc(sb: ^Sandbox, y, x0, x1: i32) {
+sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 	r := &sb.rows
-	for x in x0 ..= x1 {
-		i := int(x) + 1
+	i := int(x) + 1
 
-		side := 1 - 2 * int(sandbox_side_bit(sb, x, y))
-		near := i + side
-		far  := i - side
+	side := 1 - 2 * int(sandbox_side_bit(sb, x, y))
+	near := i + side
+	far  := i - side
 
-		w     := r.here[i]
-		above := r.above[i]
-		kind  := r.kind[i]
+	w     := r.here[i]
+	above := r.above[i]
+	kind  := r.kind[i]
 
-		falls  := kind == .Powder || kind == .Liquid
-		floats := kind == .Liquid
-		climbs := kind == .Riser
+	falls  := kind == .Powder || kind == .Liquid
+	floats := kind == .Liquid
+	climbs := kind == .Riser
 
-		dx, dy: i16
-		switch {
-		// A liquid with something heavier resting on it changes places
-		// with it. Without this rule the scan order alone decides
-		// which of the pair moves, and two liquids never layer.
-		case floats && sandbox_heavier(w, above):
-			dx, dy = 0, -1
+	switch {
+	// A liquid with something heavier resting on it changes places
+	// with it. Without this rule the scan order alone decides which of
+	// the pair moves, and two liquids never layer.
+	case floats && sandbox_heavier(w, above): // 1
+		return 0, -1
 
-		case falls && sandbox_sinks(w, r.below[i]):
-			dx, dy = 0, 1
-		case falls && sandbox_sinks(w, r.below[near]):
-			dx, dy = i16(side), 1
-		case falls && sandbox_sinks(w, r.below[far]):
-			dx, dy = i16(-side), 1
+	case falls && sandbox_sinks(w, r.below[i]): // 2
+		return 0, 1
+	case falls && sandbox_sinks(w, r.below[near]): // 3
+		return i16(side), 1
+	case falls && sandbox_sinks(w, r.below[far]): // 4
+		return i16(-side), 1
 
-		case climbs && sandbox_rises(w, r.above[i]):
-			dx, dy = 0, -1
-		case climbs && sandbox_rises(w, r.above[near]):
-			dx, dy = i16(side), -1
-		case climbs && sandbox_rises(w, r.above[far]):
-			dx, dy = i16(-side), -1
+	case climbs && sandbox_rises(w, r.above[i]): // 5
+		return 0, -1
+	case climbs && sandbox_rises(w, r.above[near]): // 6
+		return i16(side), -1
+	case climbs && sandbox_rises(w, r.above[far]): // 7
+		return i16(-side), -1
 
-		case floats && sandbox_spreads(w, r.here[near], r.below[near], above, r.above[near]):
-			dx, dy = i16(side), 0
-		case floats && sandbox_spreads(w, r.here[far], r.below[far], above, r.above[far]):
-			dx, dy = i16(-side), 0
+	case floats && sandbox_spreads(w, r.here[near], r.below[near], above, r.above[near]): // 8
+		return i16(side), 0
+	case floats && sandbox_spreads(w, r.here[far], r.below[far], above, r.above[far]): // 9
+		return i16(-side), 0
 
-		// A gas under a ceiling gathers along it rather than sitting
-		// in one column.
-		case climbs && r.here[near] == CELL_AIR:
-			dx, dy = i16(side), 0
-		}
-
-		r.dx[x] = dx
-		r.dy[x] = dy
+	// A gas under a ceiling gathers along it rather than sitting in
+	// one column.
+	case climbs && r.here[near] == CELL_AIR: // 10
+		return i16(side), 0
 	}
+	return 0, 0
 }
 
 // ------------------------------------------------------------

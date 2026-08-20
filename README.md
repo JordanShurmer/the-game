@@ -199,7 +199,10 @@ he leaves it and comes back.
 | `src/tile_editor.odin` | The tile editor, model and window |
 | `src/player.odin` | The wizard: his body, his step, and where he starts |
 | `src/sprite.odin` | The sprite sheet, and which frame of it to draw |
-| `src/sandbox.odin` | The cell grid and the falling sand step |
+| `src/sandbox.odin` | The cell grid, and the commands that write it |
+| `src/cell.odin` | What the step compares: the weight and the kind of a material |
+| `src/sandbox_step.odin` | One tick, as four passes over a row |
+| `src/sandbox_step_simd.odin` | The pass that costs the tick, in vectors |
 | `src/input_queue.odin` | The input queue |
 | `src/sim.odin` | The whole game state, with no window in it |
 | `src/mcp*.odin` | The MCP server |
