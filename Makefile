@@ -3,7 +3,9 @@
 # The Odin compiler must be on the PATH. Run every target from the
 # repository root, because the data paths are relative.
 #
-# Built and tested against the dev-2026-08 release.
+# Built and tested against the Odin nightly of 2026-08-20. The game
+# uses `asm` templates, which no monthly release holds yet; see
+# docs/toolchain.md, "Why a nightly".
 
 ODIN ?= odin
 BIN  ?= bin
