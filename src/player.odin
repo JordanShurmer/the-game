@@ -316,6 +316,11 @@ says why generation costs that). A reader used to the sandbox being
 the "slow, mutable" half of the world would assume the opposite, so
 this is worth saying plainly: the join makes the wizard faster where
 he stands, not slower.
+
+player_solid_at below does this same lookup itself rather than calling
+this, because it needs a second thing out of the same cell: whether
+that cell moved on the last tick. Asking twice would pay for the
+bounds test twice.
 */
 terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
 	if t.sandbox != nil {
@@ -328,13 +333,53 @@ terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
 	return world_cell_at(t.world, wx, wy)
 }
 
-// Whether a world cell stops the player. Rock, Gold, Dirt and Sand
-// hold him up; Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do
-// not, because only Solid and Powder resist a falling body.
+/*
+Whether a world cell stops the player. Rock, Gold, Dirt and Sand hold
+him up; Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do not,
+because only Solid and Powder resist a falling body.
+
+**A grain in mid air is not a floor.** A cell that moved on the last
+sandbox tick does not stop him, however solid the material in it is.
+Without that rule a stream of falling sand is a wall: it is Powder,
+Powder holds him up, and a wizard who flies into the sand pouring out
+of a hole he just cut stops dead against the falling column, or stands
+on it, or is carried by it. The eye reads that column as something
+moving through the air, and a body must be able to move through it
+too.
+
+The flag this reads is the sandbox's own `moved`, which is the whole
+of what makes the rule cost nothing. The step already clears it under
+the dirty rectangles and sets it on both sides of every swap, so it is
+exactly "this cell changed places on the last tick" and it is one
+array read next to the one this proc was already doing. Nothing new is
+stored and nothing new is cleared.
+
+Two things that look like corners and are not. A cell a grain moved
+*out* of holds air afterwards, which was never solid anyway. And a
+solid never moves at all, because the step treats every solid as a
+wall (src/cell.odin), so the only cells this rule ever changes the
+answer for are the loose ones it is meant for.
+*/
 player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
-	c := terrain_cell_at(t, x, y)
-	if int(c) >= len(t.world.materials.materials) do return false
-	state := t.world.materials.materials[c].state
+	if t.sandbox != nil {
+		sx := x - t.sandbox.origin_x
+		sy := y - t.sandbox.origin_y
+		if sandbox_in_bounds(t.sandbox, sx, sy) {
+			i := sandbox_index(t.sandbox, sx, sy)
+			if t.sandbox.moved[i] do return false
+			return material_stops_him(t.world.materials, t.sandbox.cells[i])
+		}
+	}
+	return material_stops_him(t.world.materials, world_cell_at(t.world, x, y))
+}
+
+// The material half of the question above, with the sandbox half left
+// out. The generator has no physics in it, so a cell read from the
+// generator is always at rest and this is the whole answer there.
+@(private = "file")
+material_stops_him :: proc(table: Material_Table, c: Cell) -> bool {
+	if int(c) >= len(table.materials) do return false
+	state := table.materials[c].state
 	return state == .Solid || state == .Powder
 }
 
@@ -1709,6 +1754,129 @@ test_an_aim_round_trips_through_its_byte_of_turn :: proc(t: ^testing.T) {
 	testing.expect(t, player_aim_facing(PLAYER_AIM_LEFT) == -1)
 	testing.expect(t, player_aim_facing(PLAYER_AIM_LEFT - 32) == -1, "the left half of the circle faces left")
 	testing.expect(t, player_aim_facing(PLAYER_AIM_UP + 32) == 1, "the right half of the circle faces right")
+}
+
+/*
+A grain that is still falling is not a floor, and the same grain once
+it lands is.
+
+Both halves in one test, because either alone is half a rule: a
+wizard who falls through settled sand has no ground at all, and a
+wizard who stands on sand that is pouring past him is standing on
+something the eye can see is not there.
+*/
+@(test)
+test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	sand, sand_found := find_material_index(world.materials, "Sand")
+	rock, rock_found := find_material_index(world.materials, "Rock")
+	if !testing.expect(t, sand_found && rock_found, "Sand and Rock must exist") do return
+
+	sb, sb_ok := sandbox_make(32, 64, 1)
+	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&sb)
+
+	// A floor for the grain to land on, and one grain well above it.
+	floor_row := i32(40)
+	for x in i32(0) ..< sb.width do sandbox_paint(&sb, world.materials, x, floor_row, 0, Cell(rock))
+	sandbox_paint(&sb, world.materials, 16, 4, 0, Cell(sand))
+
+	terrain := Terrain{world = world, sandbox = &sb}
+
+	// One tick, and the grain is in the air with the last tick's move
+	// still on it.
+	sandbox_step(&sb, world.materials)
+	grain_y := i32(-1)
+	for y in i32(0) ..< floor_row {
+		if sandbox_cell(&sb, 16, y) == Cell(sand) do grain_y = y
+	}
+	if !testing.expect(t, grain_y > 4, "the grain must have fallen at least one cell") do return
+	testing.expect(
+		t, !player_solid_at(terrain, 16, grain_y),
+		"a grain that moved on the last tick must not hold him up",
+	)
+
+	// Long enough to land and settle. The tick it lands still counts as
+	// a move; the tick after it does not.
+	for _ in 0 ..< 64 do sandbox_step(&sb, world.materials)
+	testing.expect(
+		t, sandbox_cell(&sb, 16, floor_row - 1) == Cell(sand),
+		"the grain must come to rest on the floor",
+	)
+	testing.expect(
+		t, player_solid_at(terrain, 16, floor_row - 1),
+		"the same grain, at rest, must hold him up again",
+	)
+	testing.expect(
+		t, player_solid_at(terrain, 16, floor_row),
+		"and the rock under it never moved at all",
+	)
+}
+
+/*
+He flies behind the falling pixels.
+
+One grain is the whole of the case: a horizontal move tests the full
+PLAYER_BODY_H leading column, so one solid cell anywhere in it is a
+wall. The two halves run the same tick from the same position against
+the same grain, and the only difference between them is whether that
+grain is still moving.
+*/
+@(test)
+test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	sand, sand_found := find_material_index(world.materials, "Sand")
+	if !testing.expect(t, sand_found, "Sand must exist") do return
+
+	// The grain sits in the column his leading edge reaches next, level
+	// with his chest, so nothing but that one cell can stop him.
+	start := Player{x = 40, y = 40, vx = PLAYER_RUN_SPEED, facing = 1}
+	grain_x := i32(start.x) + PLAYER_BODY_W/2
+	_, chest := player_centre(start)
+
+	// Falling: paint the grain, step the sandbox once so the move is on
+	// it, then give him one tick.
+	falling_sb, falling_ok := sandbox_make(128, 128, 1)
+	if !testing.expect(t, falling_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&falling_sb)
+	sandbox_paint(&falling_sb, world.materials, grain_x, chest, 0, Cell(sand))
+	sandbox_step(&falling_sb, world.materials)
+
+	falling := start
+	player_step(&falling, Terrain{world = world, sandbox = &falling_sb}, {.Right, .Run}, false)
+
+	// Landed: the same grain, in the same cell, with no move on it.
+	landed_sb, landed_ok := sandbox_make(128, 128, 1)
+	if !testing.expect(t, landed_ok, "the sandbox must open") do return
+	defer sandbox_destroy(&landed_sb)
+	// Where the falling grain ended up, so the two runs face the same cell.
+	for y in i32(0) ..< landed_sb.height {
+		if sandbox_cell(&falling_sb, grain_x, y) != Cell(sand) do continue
+		sandbox_paint(&landed_sb, world.materials, grain_x, y, 0, Cell(sand))
+	}
+
+	landed := start
+	player_step(&landed, Terrain{world = world, sandbox = &landed_sb}, {.Right, .Run}, false)
+
+	// One tick at a run is 1.2 cells, so this is his leading edge
+	// crossing the grain's column, not him clearing the whole grain.
+	testing.expectf(
+		t, falling.x > start.x,
+		"a grain still in the air must not stop him: he moved to %f from %f", falling.x, start.x,
+	)
+	testing.expectf(
+		t, landed.x == start.x,
+		"the same grain at rest must stop him where he stood: he moved to %f from %f", landed.x, start.x,
+	)
+	testing.expect(t, landed.vx == 0, "and a wall clears the velocity of the axis it stops")
 }
 
 @(test)
