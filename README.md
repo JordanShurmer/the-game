@@ -126,7 +126,10 @@ a hole into the caves.
 | Mouse wheel, `-`, `=` | Zoom out and in |
 | `TAB` | Open and close the world editor |
 
-Tap the jump key and he jumps. Hold it and the jetpack lights, which
+Tap the jump key and he jumps. A tap that comes a little early, while
+he is still falling, is held for a tenth of a second and spent the
+moment his feet land; a tap that comes a little late, just after he
+runs off a ledge, still works for a tenth of a second too. Hold it and the jetpack lights, which
 empties the tank in two seconds and fills it again in under one while
 he stands. The digger is a beam out of the centre of his mass along
 the cursor: it cuts a kerf he can walk down, it stops at what it
