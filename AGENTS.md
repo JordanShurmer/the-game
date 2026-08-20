@@ -9,6 +9,7 @@ relative to it.
 odin check src -vet     # types, and the things vet catches
 odin test src           # the whole suite, under ten seconds
 make                    # bin/the-game, bin/game-mcp, bin/shot
+make bench              # bin/bench, which times a tick
 ```
 
 If `odin` is not on the PATH, install it:
@@ -80,6 +81,7 @@ of the whole world.
 | `src/` | the game, package `game`, tests beside the code |
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
+| `cmd/bench/` | what a tick costs, on a real region |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites |
 | `docs/` | the design notes and the toolchain |
 | `tools/` | the toolchain install, the tile seeder, and the wizard seeder |
