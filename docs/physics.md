@@ -711,17 +711,42 @@ biomes of the shipped world:
 | INTENT | 10% | 9% | 13% | 12% |
 | APPLY | 15% | 4% | 5% | 3% |
 
-LOAD and HOT are about three quarters of the work between them, and
-both are a plain loop over a row. They also divide one question badly:
-LOAD reports whether ANY cell of the row is hot, and HOT then walks
-the whole row to find the two or three that are. A mask that says
-WHICH cells, rather than a flag that says some, is what those two
-passes have left to give.
+LOAD and HOT are about three quarters of the work between them.
+
+**LOAD is now wide.** Two of the three rows it reads come through
+`sandbox_load_weights`, and `src/sandbox_step_asm.odin` does that 32
+cells at a time with an `asm` template: a material id is one byte, so
+the material table is a `vpshufb` lookup. Measured against the build
+before it, on a 2048 square sandbox: Sandcave -10%, Oilfield -10%,
+Acidpool -10%, Lake -8%, Gallery -7%, Coalmine -5%, and every checksum
+unchanged.
+
+**HOT is not what it looks like.** The comment on that pass used to
+say almost no cell needs it. That is true of a dry row and false of a
+wet one: water, dirt, rock and sand all have a row in the reaction
+table, so on the shipped world most cells of a wet row are live, and
+what HOT spends is `sandbox_react` walking the four sides of each of
+them. It is not a scan looking for a needle.
+
+Two things were tried there and neither paid, so neither is in the
+tree. Read this before trying them again:
+
+- **A bit per cell saying which cells are hot**, written by LOAD and
+  walked by HOT. It saves nothing when most cells are hot, and it
+  costs a second pass over the row: a wash on the wet biomes and
+  about 2% worse on the dry ones.
+- **A bitset of reaction partners per material**, to replace the
+  `n*n` table `sandbox_react` indexes four times a cell. Slower on
+  every biome, by 5% to 12%. The dense `i16` table is already one
+  load, and the multiply LLVM folds into the address beats a shift
+  and a mask.
 
 `bin/bench` is what measures a tick, and `--tool=callgrind` with
 `--toggle-collect='game::sim_run'` is what splits it by pass. The four
 pass procedures inline into one, so add `#force_no_inline` at the call
 sites in `sandbox_step_row` before profiling, and take it out again.
+This machine is noisy: take the best of five runs, and interleave the
+two builds rather than running one after the other.
 
 ## The numbers
 
