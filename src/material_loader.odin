@@ -33,6 +33,12 @@ Material_Table :: struct {
 	reaction_at: []i16,      // cold: n*n; the row for a pair, or -1
 	reacts:      []bool,     // cold: n; whether this material is in any row
 
+	// Hot: the same knowledge as `materials`, in the two narrow
+	// numbers the step compares. See src/cell.odin.
+	weight:      []u16,
+	kind:        []Cell_Kind,
+	work:        []Cell_Works,
+
 	// Fire, resolved once here rather than searched for by name at
 	// each blast. A blast leaves fire in its inner third, and a chain
 	// of gunpowder is many blasts in one tick, so a linear name search
@@ -305,6 +311,18 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.reaction_at = reaction_at
 	table.reacts      = reacts
 
+	// The step reads these and never a Material. They are built last,
+	// because the work set needs the reaction table above it.
+	table.weight = make([]u16, n, allocator)
+	table.kind   = make([]Cell_Kind, n, allocator)
+	table.work   = make([]Cell_Works, n, allocator)
+	for m, i in table.materials {
+		is_air := Cell(i) == MATERIAL_AIR
+		table.weight[i] = cell_weight_of(m, is_air)
+		table.kind[i]   = cell_kind_of(m, is_air)
+		table.work[i]   = cell_work_of(m, reacts[i])
+	}
+
 	return table, true
 }
 
@@ -336,6 +354,9 @@ destroy_material_table :: proc(table: Material_Table, allocator := context.alloc
 	delete(table.reactions, allocator)
 	delete(table.reaction_at, allocator)
 	delete(table.reacts, allocator)
+	delete(table.weight, allocator)
+	delete(table.kind, allocator)
+	delete(table.work, allocator)
 }
 
 parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {

@@ -85,7 +85,6 @@ Sandbox :: struct {
 
 	tick:     u64, // the next tick to run
 	seed:     u64,
-	rng:      u64,
 
 	// Dirty rectangles, one pair per 64-cell chunk, double buffered.
 	// `dirty` is what sandbox_step reads and steps this tick.
@@ -100,13 +99,30 @@ Sandbox :: struct {
 	next_dirty: []Sandbox_Rect,
 	chunks_x:   i32,
 	chunks_y:   i32,
+
+	rows: Sandbox_Rows, // scratch for the row the step is on
 }
 
-// How a cell is allowed to enter the target cell.
-Move_Rule :: enum u8 {
-	Into_Air, // only an empty target
-	Sink,     // an empty target, or a lighter target that can flow
-	Rise,     // an empty target, or a heavier target that can flow
+/*
+Scratch for one row of the step, and the reason the passes in
+sandbox_step.odin can be flat loops.
+
+The weight rows carry one extra entry at each end, holding CELL_WALL,
+so the cell before the row and the cell after it are real numbers
+rather than a bounds test in the inner loop. Those two entries are
+written once, in sandbox_make, and nothing writes them again. Every
+other entry is indexed by world x plus one.
+
+`dx` and `dy` are indexed by world x, because APPLY reads them by cell
+and never by neighbour.
+*/
+Sandbox_Rows :: struct {
+	above: []u16,       // the weights of the row above this one
+	here:  []u16,       // the weights of this row
+	below: []u16,       // the weights of the row below this one
+	kind:  []Cell_Kind, // which rule each cell of this row moves by
+	dx:    []i16,       // the one step each cell of this row wants to take
+	dy:    []i16,
 }
 
 sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocator) -> (sb: Sandbox, ok: bool) {
@@ -120,7 +136,6 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.width = width
 	sb.height = height
 	sb.seed = seed
-	sb.rng = sandbox_seed_state(seed)
 
 	sb.chunks_x = (width + SANDBOX_CHUNK - 1) / SANDBOX_CHUNK
 	sb.chunks_y = (height + SANDBOX_CHUNK - 1) / SANDBOX_CHUNK
@@ -132,6 +147,18 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	for &r in sb.dirty do r = SANDBOX_RECT_EMPTY
 	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
 
+	// The wall at each end of the weight rows, written once. See
+	// Sandbox_Rows.
+	sb.rows.above = make([]u16, width + 2, allocator)
+	sb.rows.here  = make([]u16, width + 2, allocator)
+	sb.rows.below = make([]u16, width + 2, allocator)
+	sb.rows.kind  = make([]Cell_Kind, width + 2, allocator)
+	sb.rows.dx    = make([]i16, width, allocator)
+	sb.rows.dy    = make([]i16, width, allocator)
+	sb.rows.above[0], sb.rows.above[width + 1] = CELL_WALL, CELL_WALL
+	sb.rows.here[0], sb.rows.here[width + 1] = CELL_WALL, CELL_WALL
+	sb.rows.below[0], sb.rows.below[width + 1] = CELL_WALL, CELL_WALL
+
 	return sb, true
 }
 
@@ -141,12 +168,13 @@ sandbox_destroy :: proc(sb: ^Sandbox, allocator := context.allocator) {
 	delete(sb.moved, allocator)
 	delete(sb.dirty, allocator)
 	delete(sb.next_dirty, allocator)
+	delete(sb.rows.above, allocator)
+	delete(sb.rows.here, allocator)
+	delete(sb.rows.below, allocator)
+	delete(sb.rows.kind, allocator)
+	delete(sb.rows.dx, allocator)
+	delete(sb.rows.dy, allocator)
 	sb^ = {}
-}
-
-sandbox_seed_state :: proc(seed: u64) -> u64 {
-	// The generator below stops at zero, so zero needs a substitute.
-	return seed == 0 ? 0x9E3779B97F4A7C15 : seed
 }
 
 sandbox_in_bounds :: #force_inline proc(sb: ^Sandbox, x, y: i32) -> bool {
@@ -217,8 +245,8 @@ sandbox_mark_all :: proc(sb: ^Sandbox) {
 The one choke point for "this cell changed".
 
 Every write to the sandbox reaches this, directly or through
-sandbox_put: sandbox_paint and the swap inside sandbox_try_move call
-it themselves; sandbox_put calls it for every other writer, since
+sandbox_put: sandbox_paint and sandbox_swap call it themselves;
+sandbox_put calls it for every other writer, since
 sandbox_ignite, sandbox_dig, sandbox_explode,
 sandbox_crumble_neighbours and the reaction all write cells through
 sandbox_put. A write that skips this is a cell that can silently stop
@@ -267,18 +295,68 @@ sandbox_mark :: proc(sb: ^Sandbox, x, y: i32) {
 }
 
 /*
-The random source of the sandbox.
+The two random sources of the sandbox, and both are hashes rather than
+streams.
 
-This is a xorshift64 generator. It belongs to the sandbox, not to the
-process, so two sandboxes with the same seed stay in step.
+The step used to draw from a running generator. How many numbers a
+cell drew then depended on which branch it took, so the answer for one
+cell depended on every cell stepped before it, and no two cells could
+be worked on at once. These two are pure functions of the place and
+the tick: a cell gets the same answer whatever order the scan reaches
+it in, and a row of them is a few multiplies with no branches.
+
+Both still belong to the sandbox, through its seed and its tick, so
+two sandboxes with the same seed stay in step.
 */
-sandbox_rand :: proc(sb: ^Sandbox) -> u64 {
-	x := sb.rng
-	x ~= x << 13
-	x ~= x >> 7
-	x ~= x << 17
-	sb.rng = x
-	return x
+
+/*
+Which side a cell tries first, as 0 or 1.
+
+This is 16 bit arithmetic on purpose: a row of these has to fit the
+same lanes as the row of weights it decides between. The top bit of a
+multiply is the well mixed end of it, which is the bit this returns.
+*/
+sandbox_side_bit :: #force_inline proc "contextless" (sb: ^Sandbox, x, y: i32) -> u16 {
+	h := u16(x) * 0x2545 + u16(y) * 0x9E3B + u16(sb.tick) * 0x85EB + sandbox_seed16(sb.seed)
+	h ~= h >> 7
+	h *= 0x2C1B
+	return h >> 15
+}
+
+// The whole seed folded into the 16 bits the side hash has room for.
+sandbox_seed16 :: #force_inline proc "contextless" (seed: u64) -> u16 {
+	return u16(seed) ~ u16(seed >> 16) ~ u16(seed >> 32) ~ u16(seed >> 48)
+}
+
+/*
+What a roll is for.
+
+Two rolls in the same place on the same tick must not give the same
+number, so every caller names its own.
+*/
+Sandbox_Roll :: enum u32 {
+	React_Side, // which of the four sides a reaction probes
+	React_Roll, // whether that reaction happens
+	Fire,       // whether a flame catches one of its eight neighbours
+}
+
+/*
+A number to weigh a chance out of 255 against.
+
+The hot pass reaches a handful of cells a row, so it can afford the
+wider hash. `index` tells apart several rolls of the same kind in one
+place, which is what fire spreading to eight neighbours needs.
+*/
+sandbox_chance :: proc "contextless" (sb: ^Sandbox, x, y: i32, roll: Sandbox_Roll, index: u32 = 0) -> u32 {
+	h := u64(u32(x)) * 0x9E3779B97F4A7C15
+	h ~= u64(u32(y)) * 0xC2B2AE3D27D4EB4F
+	h ~= sb.tick * 0x165667B19E3779F9
+	h ~= sb.seed
+	h += u64(u32(roll)) * 256 + u64(index)
+	h ~= h >> 33
+	h *= 0xFF51AFD7ED558CCD
+	h ~= h >> 29
+	return u32(h)
 }
 
 /*
@@ -302,9 +380,9 @@ sandbox_checksum :: proc(sb: ^Sandbox) -> u64 {
 		hash *= FNV_PRIME
 	}
 
-	// The generator state is part of the future, so it is part of the hash.
-	tail := [6]u64 {
-		sb.rng,
+	// The tick is part of the future, because the random source is a
+	// hash of it, so it is part of the hash.
+	tail := [5]u64 {
 		sb.tick,
 		u64(sb.width),
 		u64(sb.height),
@@ -430,370 +508,6 @@ sandbox_ignite :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius:
 }
 
 /*
-Run one tick of the simulation.
-
-Only the dirty rectangles are scanned; a chunk with nothing dirty in
-it costs nothing. Within the scanned area the shape is the one the
-step always had: bottom row up, so a cell that moves is marked and
-does not move again this tick, and the scan direction along a row
-flips with the tick number, which stops material drifting to one
-side. See docs/physics.md step 3.
-*/
-sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
-	// Two sets, not one. `dirty` is what this scan reads; `next_dirty`
-	// is what sandbox_mark builds while this tick runs, and what a
-	// command already built between the last tick and this one.
-	// Swapping before any cell is touched is what stops a mark made
-	// mid-scan from dragging this tick's own work past where the scan
-	// already is (rule 1): a single falling grain must not turn into a
-	// scan that chases it down the sandbox.
-	sb.dirty, sb.next_dirty = sb.next_dirty, sb.dirty
-	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
-
-	// Clear `moved` only under this tick's dirty rectangles, and clear
-	// all of it before any cell is stepped. A cell reads `moved` on
-	// neighbours the row scan below has not reached yet -- a gas or a
-	// flame checks the row above it -- so every dirty cell must read
-	// false before the scan starts, not just the ones the scan has
-	// passed. This is the other half of the cost an idle sandbox used
-	// to pay for nothing: mem.zero_slice(sb.moved) over the whole grid,
-	// every tick, even with nothing in it (docs/physics.md, "The
-	// cost").
-	for r in sb.dirty {
-		if r.min_x > r.max_x do continue
-		width := int(r.max_x - r.min_x + 1)
-		for y in r.min_y ..= r.max_y {
-			row_start := sandbox_index(sb, r.min_x, y)
-			mem.zero_slice(sb.moved[row_start:row_start + width])
-		}
-	}
-
-	left_first := (sb.tick & 1) == 0
-
-	for y := sb.height - 1; y >= 0; y -= 1 {
-		cy := y / SANDBOX_CHUNK
-		chunk_row := sb.dirty[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
-		for r in chunk_row {
-			if y < r.min_y || y > r.max_y do continue // this chunk has nothing on this row
-
-			width := int(r.max_x - r.min_x + 1)
-			for i in 0 ..< width {
-				x := left_first ? r.min_x + i32(i) : r.max_x - i32(i)
-				sandbox_step_cell(sb, table, x, y)
-			}
-		}
-	}
-
-	sb.tick += 1
-}
-
-sandbox_step_cell :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
-	index := sandbox_index(sb, x, y)
-	if sb.moved[index] do return
-
-	material := sb.cells[index]
-	if material == MATERIAL_AIR do return
-
-	m := table.materials[material]
-
-	// The lifetime runs out and the material turns into something else.
-	if sb.lifetime[index] > 0 {
-		sb.lifetime[index] -= 1
-		if sb.lifetime[index] == 0 {
-			sandbox_put(sb, table, index, Cell(table.decays_to[material]))
-			sb.moved[index] = true
-			return
-		}
-		// A cell whose lifetime is still counting down does not move
-		// and does not touch a neighbour, so nothing else here would
-		// mark it. Without this, the countdown would only ever
-		// finish by chance, whenever some unrelated neighbour happened
-		// to wake this chunk again -- fire would freeze in mid air
-		// instead of turning to smoke on schedule (rule 4).
-		sandbox_mark(sb, x, y)
-	}
-
-	// A cell that meets its reaction partner turns into the pair the
-	// table names. Only one of the four sides is tested, and only one
-	// reaction happens, per cell per tick: testing all four would cost
-	// four times as much and only make an already-certain reaction
-	// happen a little sooner, and letting a cell both react and fall
-	// in the same tick would need a second flag to stop it doubling
-	// up. `reacts` gates this so Air, which is in no row, pays one
-	// array read and nothing more. See docs/physics.md, "The reaction
-	// table".
-	if table.reacts[material] {
-		offsets := [4][2]i32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
-		n := len(table.materials)
-
-		// A reaction is a matter of chance, and the probe below only
-		// ever tests one of the four sides. Whether ANY side could
-		// react with this cell -- not just the one the probe happens
-		// to land on -- decides whether the cell is worth a look next
-		// tick. Without this, an unlucky run of probes that keep
-		// picking the one side with nothing to react with puts the
-		// cell to sleep with a live partner sitting right beside it:
-		// a pool of acid stops eating the rock it is still touching
-		// (rule 4; the same shape of bug as a flame beside fuel).
-		for o in offsets {
-			nx := x + o[0]
-			ny := y + o[1]
-			if !sandbox_in_bounds(sb, nx, ny) do continue
-			neighbour := sb.cells[sandbox_index(sb, nx, ny)]
-			if table.reaction_at[int(material)*n+int(neighbour)] >= 0 {
-				sandbox_mark(sb, x, y)
-				break
-			}
-		}
-
-		o := offsets[sandbox_rand(sb) & 3]
-		nx := x + o[0]
-		ny := y + o[1]
-
-		if sandbox_in_bounds(sb, nx, ny) {
-			ni := sandbox_index(sb, nx, ny)
-			// A neighbour that already changed this tick is not a
-			// safe partner: reacting with it now would overwrite
-			// whatever just wrote it there.
-			if !sb.moved[ni] {
-				neighbour := sb.cells[ni]
-				row := table.reaction_at[int(material)*n+int(neighbour)]
-				if row >= 0 {
-					r := table.reactions[row]
-					if sandbox_rand(sb) % 256 < u64(r.chance) {
-						sandbox_put(sb, table, index, Cell(r.c))
-						sandbox_put(sb, table, ni, Cell(r.d))
-						sb.moved[index] = true
-						sb.moved[ni] = true
-						return
-					}
-				}
-			}
-		}
-	}
-
-	// Anything that burns on contact can set a neighbour alight.
-	fuel_nearby := false
-	if .Burns in m.contact {
-		fuel_nearby = sandbox_spread_fire(sb, table, x, y)
-		if fuel_nearby {
-			// A flame that holds still beside fuel still has work to
-			// do next tick: the fuel may catch a tick later than this
-			// one, and the flame's own lifetime is still running down.
-			// Without this mark a flame that is not moving goes to
-			// sleep the moment it stops moving, and fuel sitting right
-			// beside it never catches (rule 4).
-			sandbox_mark(sb, x, y)
-		}
-	}
-
-	// A flame holds still while fuel sits beside it. Without this rule
-	// a flame climbs away in one tick and the fire never runs along a
-	// trail of oil.
-	if m.state == .Special && fuel_nearby do return
-
-	switch m.state {
-	case .Solid:
-		// A solid stays where it is.
-	case .Powder:
-		sandbox_move_powder(sb, table, x, y, m)
-	case .Liquid:
-		sandbox_move_liquid(sb, table, x, y, m)
-	case .Gas, .Special:
-		sandbox_move_rising(sb, table, x, y, m)
-	}
-}
-
-/*
-Move a cell to a free or lighter place.
-
-Both cells are marked, so neither moves again in this tick. This keeps
-the tick simple: every cell gets at most one move.
-*/
-sandbox_try_move :: proc(sb: ^Sandbox, table: Material_Table, sx, sy, dx, dy: i32, rule: Move_Rule) -> bool {
-	if !sandbox_in_bounds(sb, dx, dy) do return false
-
-	to := sandbox_index(sb, dx, dy)
-	if sb.moved[to] do return false
-
-	from := sandbox_index(sb, sx, sy)
-	src := sb.cells[from]
-	dst := sb.cells[to]
-
-	if dst != MATERIAL_AIR {
-		dm := table.materials[dst]
-		if dm.state == .Solid do return false
-
-		sm := table.materials[src]
-		switch rule {
-		case .Into_Air:
-			return false
-		case .Sink:
-			if sm.density <= dm.density do return false
-		case .Rise:
-			if sm.density >= dm.density do return false
-		}
-	}
-
-	sb.cells[from], sb.cells[to] = sb.cells[to], sb.cells[from]
-	sb.lifetime[from], sb.lifetime[to] = sb.lifetime[to], sb.lifetime[from]
-	sb.moved[from] = true
-	sb.moved[to] = true
-	// The swap does not go through sandbox_put, so it marks both sides
-	// itself. See sandbox_mark.
-	sandbox_mark(sb, sx, sy)
-	sandbox_mark(sb, dx, dy)
-	return true
-}
-
-// A powder falls straight down, then to one side and down.
-sandbox_move_powder :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32, m: Material) {
-	cx, cy := x, y
-	for _ in 0 ..< int(m.fall_speed) {
-		if sandbox_try_move(sb, table, cx, cy, cx, cy+1, .Sink) {
-			cy += 1
-			continue
-		}
-		side := sandbox_rand(sb) & 1 == 0 ? i32(-1) : i32(1)
-		if sandbox_try_move(sb, table, cx, cy, cx+side, cy+1, .Sink) {
-			cx += side
-			cy += 1
-			continue
-		}
-		if sandbox_try_move(sb, table, cx, cy, cx-side, cy+1, .Sink) {
-			cx -= side
-			cy += 1
-			continue
-		}
-		break
-	}
-}
-
-// A liquid falls like a powder. When it cannot fall it spreads out.
-sandbox_move_liquid :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32, m: Material) {
-	cx, cy := x, y
-	steps := int(m.fall_speed)
-
-	// A lighter liquid under a heavier one floats up through it.
-	//
-	// Without this rule a liquid only ever tries to sink, and a pair
-	// that needs to change places is decided by which of the two the
-	// scan reaches first. The scan runs bottom up, so the lighter cell
-	// below is always stepped first, spreads sideways within its own
-	// pool, and marks itself moved; the heavier cell above is then
-	// refused for the whole tick, every tick. Oil, water and toxic
-	// sludge poured into one tank settled part of the way and stopped,
-	// with 27 heavy cells resting on lighter ones for ever.
-	//
-	// The rule is the one gases already have. Rise refuses a target of
-	// the same density, so a pool of one liquid does not jitter, and
-	// after the swap the pair is in the order it wanted, so it does
-	// not swap back.
-	above := sandbox_cell(sb, cx, cy-1)
-	if above != MATERIAL_AIR {
-		am := table.materials[above]
-		if am.state == .Liquid && am.density > m.density {
-			if sandbox_try_move(sb, table, cx, cy, cx, cy-1, .Rise) do return
-		}
-	}
-
-	fell := false
-	for _ in 0 ..< steps {
-		if sandbox_try_move(sb, table, cx, cy, cx, cy+1, .Sink) {
-			cy += 1
-			fell = true
-			continue
-		}
-		side := sandbox_rand(sb) & 1 == 0 ? i32(-1) : i32(1)
-		if sandbox_try_move(sb, table, cx, cy, cx+side, cy+1, .Sink) {
-			cx += side
-			cy += 1
-			fell = true
-			continue
-		}
-		if sandbox_try_move(sb, table, cx, cy, cx-side, cy+1, .Sink) {
-			cx -= side
-			cy += 1
-			fell = true
-			continue
-		}
-		break
-	}
-	if fell do return
-
-	// A liquid spreads sideways only while the move helps it settle.
-	// Without that test a flat layer swaps left and right for ever. The
-	// layer then never packs, it holds gaps that never close, and a
-	// pool behaves more like a gas than a liquid.
-	//
-	// The move repeats up to fall_speed times, which lets a pool find
-	// its level in a few ticks instead of a few hundred.
-	side := sandbox_rand(sb) & 1 == 0 ? i32(-1) : i32(1)
-	for _ in 0 ..< steps {
-		if sandbox_liquid_can_spread(sb, table, cx, cy, side) {
-			if sandbox_try_move(sb, table, cx, cy, cx+side, cy, .Into_Air) {
-				cx += side
-				continue
-			}
-		}
-		if sandbox_liquid_can_spread(sb, table, cx, cy, -side) {
-			if sandbox_try_move(sb, table, cx, cy, cx-side, cy, .Into_Air) {
-				cx -= side
-				side = -side
-				continue
-			}
-		}
-		break
-	}
-}
-
-/*
-Report whether a sideways move gains anything.
-
-A liquid flows for two reasons: the ground falls away on that side, or
-more liquid presses from above. A cell that has neither reason stays
-where it is.
-*/
-sandbox_liquid_can_spread :: proc(sb: ^Sandbox, table: Material_Table, x, y, side: i32) -> bool {
-	// The ground falls away, so the liquid runs downhill.
-	if sandbox_in_bounds(sb, x+side, y+1) {
-		if sb.cells[sandbox_index(sb, x+side, y+1)] == MATERIAL_AIR do return true
-	}
-
-	// More liquid rests on top, so this cell is under pressure.
-	above := sandbox_cell(sb, x, y-1)
-	if above == MATERIAL_AIR do return false
-	return table.materials[above].state == .Liquid
-}
-
-// A gas and a flame climb. Now and then they drift to one side.
-sandbox_move_rising :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32, m: Material) {
-	cx, cy := x, y
-	for _ in 0 ..< int(m.fall_speed) {
-		if sandbox_try_move(sb, table, cx, cy, cx, cy-1, .Rise) {
-			cy -= 1
-			continue
-		}
-		side := sandbox_rand(sb) & 1 == 0 ? i32(-1) : i32(1)
-		if sandbox_try_move(sb, table, cx, cy, cx+side, cy-1, .Rise) {
-			cx += side
-			cy -= 1
-			continue
-		}
-		if sandbox_try_move(sb, table, cx, cy, cx-side, cy-1, .Rise) {
-			cx -= side
-			cy -= 1
-			continue
-		}
-		if sandbox_try_move(sb, table, cx, cy, cx+side, cy, .Into_Air) {
-			cx += side
-			continue
-		}
-		break
-	}
-}
-
-/*
 Set the neighbours of a hot cell alight.
 
 The chance comes from the flammability of the neighbour. The new
@@ -811,7 +525,7 @@ sandbox_spread_fire :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> (
 		{1, 1}, {1, -1}, {-1, 1}, {-1, -1},
 	}
 
-	for o in offsets {
+	for o, k in offsets {
 		nx := x + o[0]
 		ny := y + o[1]
 		if !sandbox_in_bounds(sb, nx, ny) do continue
@@ -824,8 +538,10 @@ sandbox_spread_fire :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> (
 		if flammability == 0 do continue
 		fuel_nearby = true
 
-		// Flammability 8 gives a one in four chance each tick.
-		if sandbox_rand(sb) % 256 >= u64(flammability) * 8 do continue
+		// Flammability 8 gives a one in four chance each tick. Each of
+		// the eight neighbours rolls its own number, so one lucky
+		// corner does not decide the other seven.
+		if sandbox_chance(sb, x, y, .Fire, u32(k)) & 255 >= u32(flammability) * 8 do continue
 
 		sandbox_ignite_cell(sb, table, nx, ny)
 	}
@@ -837,7 +553,7 @@ Cast rays from a point. Hard material stops them.
 
 The model is Noita's: a blast is rays, not a disc, so a wall casts a
 shadow and a corridor channels the blast. The angles are fixed, not
-drawn from sandbox_rand: a replay must give the same crater, and a
+drawn from a hash: a replay must give the same crater, and a
 disc would clear straight through a wall the rays would have to stop
 at. See docs/physics.md, "Explosions".
 */
@@ -1583,7 +1299,7 @@ test_dig_removes_rock_but_not_steel_or_bedrock :: proc(t: ^testing.T) {
 @(test)
 test_same_seed_gives_the_same_checksum_with_explode_and_dig :: proc(t: ^testing.T) {
 	// This is the property the whole input queue depends on. Reactions
-	// draw from sandbox_rand and explosions do not, but a command list
+	// draw from the chance hash and explosions do not, but a command list
 	// that mixes both must still replay bit for bit, or two clients
 	// running the same session would drift apart the first time
 	// either a bomb or a spell went off.
