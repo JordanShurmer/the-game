@@ -22,16 +22,26 @@ both connected.
 
 This used to carve caves out of a solid block, on the argument that a
 cave system is space inside a mass. A capture of the Noita coal pits at
-one pixel per world cell says otherwise: 51% of it is open, the mean
-unbroken run of open cells is 30 across and 21 down, and neither phase
-is islands in the other. Carving cannot reach that. It leaves rooms
-joined by passages, which reads as a building.
+one pixel per world cell says otherwise: 51% of it is open, and neither
+phase is islands in the other. Carving cannot reach that. It leaves
+rooms joined by passages, which reads as a building.
 
 The grain is set here rather than left to a smoothing rule to settle
-on, because a rule run over even noise agrees with those run lengths
-and still comes out as speckle: a mean run says how long the open cells
-are and not how they are gathered. GRAIN_X and GRAIN_Y are the size of
-a mass, and GRAIN_X being the larger is what lays the masses down.
+on, because a rule run over even noise comes out as speckle: a mean run
+says how long the open cells are and not how they are gathered. GRAIN_X
+and GRAIN_Y are the size of a mass, and GRAIN_X being the larger is
+what lays the masses down.
+
+The noise is gradient noise, not value noise. That is the difference
+between a cave and a corridor, and it is the whole of why the world
+used to read as blocky. Value noise interpolates a number held at each
+point of a lattice, so every contour it draws leans on the lattice
+axes: cut one in half and the masses come out as rectangles with square
+corners and long level roofs, however fine the lattice is. Gradient
+noise holds a direction at each lattice point instead and reads the
+distance along it, so the contours cross the lattice at any angle and
+the walls come out rounded and diagonal. Nothing downstream changed to
+get that; only the field did.
 
 THE RULE IT MUST NOT BREAK
 
@@ -49,6 +59,20 @@ to the edge color rather than to the tile. So:
 --check reads the files back and holds them to that rule, which is the
 same gate the editor puts on a save.
 
+WHAT THE RULE COSTS, AND THE RUNG THAT WOULD PAY IT
+
+A forced channel sits at the middle of the side it crosses, and it has
+to sit at the same place in every band of that color, because that is
+what makes the band shared. The band above a tile and the band below
+the tile over it are two halves of one strip, so the two channels line
+up, and a run of tiles that all carry color 1 above and below leaves a
+shaft straight through them. Half the horizontal edges carry color 1,
+so a shaft is about two tiles long, and it is visible at
+`./bin/shot step=4` and nowhere a player stands. A mine with shafts in
+it is not wrong. The rung that would break them up is WANG_COLORS 4,
+which gives each axis more than one place to put a mouth and costs a
+set of 256 tiles instead of 16.
+
 ADDING A BIOME
 
 Give it `generator = wang` and a `tiles` prefix in data/biomes.txt, add
@@ -65,7 +89,7 @@ import struct
 import sys
 import zlib
 
-TILE = 256
+TILE = 512
 SEAM = 4
 
 SOLID, OPEN = 1, 0
@@ -78,44 +102,73 @@ AIR = (0, 0, 0, 0)
 # thirds. src/tile_png.odin holds a test at the same numbers.
 #
 # One cell is one world cell, so these are the sizes a body meets. The
-# wizard is 13 cells tall (docs/player.md). The mouth is 41 cells wide
-# and the band lip eats up to 6 of it from each side, which leaves a
-# channel near 29: over two of him, which is room to walk and jump
-# through a border without the border being a hall.
-MOUTH_LO, MOUTH_HI = 108, 148
-MOUTH_DEPTH = 32
-TRUNK_R = (12, 16)
+# wizard is 13 cells tall (docs/player.md). The mouth is 82 cells wide
+# and the band lip eats up to 8 of it from each side, which leaves a
+# channel of at least 66, five of him. The noise either side of the
+# forced channel opens more of the band than that, so the narrowest
+# measured over the shipped set is 77, and a border is a way through he
+# walks into rather than a gap he has to line himself up with.
+MOUTH_LO, MOUTH_HI = 215, 296
+MOUTH_DEPTH = 64
+TRUNK_R = (24, 32)
 
-# The cave texture, measured off the reference rather than chosen.
+# The cave texture: the shape off the reference, the size off the
+# wizard.
 #
 # A capture of the Noita coal pits at one pixel per world cell is 51%
-# open, and the mean unbroken run of open cells is 30 along x and 21
-# along y. That is not a hall with passages off it. It is broad
-# winding ground between large lobed masses, with both the open and
-# the solid connected, which is what noise gives and what carving out
-# of a solid block does not.
+# open, and neither phase is islands in the other. That is not a hall
+# with passages off it. It is broad winding ground between large lobed
+# masses, which is what noise gives and what carving out of a solid
+# block does not.
+#
+# The same capture measures a mean unbroken run of open cells of 30
+# along x and 21 along y, and this set was drawn to those two numbers
+# once. Against a body 13 cells tall that is a cave a little under two
+# of him, and played it reads as a tunnel he only just clears. So the
+# shape is still the reference's and the size is no longer: the grain
+# is set to leave a mean run near 72 across and 52 down, five of him
+# and four of him.
 #
 # The grain is the size of a mass, and it has to be set directly. A
-# smoothing rule run over even noise agrees with those two run lengths
-# and still comes out as speckle, because a mean run says how long the
-# open cells are and not how they are gathered. So the noise is drawn
-# on a coarse grid and smoothed up from there, and the grid spacing is
-# the feature size: wider than it is tall, which is where the 30
-# against 21 comes from.
-GRAIN_X = 22          # cells across one lobe of the noise
-GRAIN_Y = 15          # and down, so the masses lie down
-GRAIN_DETAIL = 0.32   # a second octave at half the spacing, this strong
+# smoothing rule run over even noise agrees with any run length you
+# like and still comes out as speckle, because a mean run says how long
+# the open cells are and not how they are gathered. So the noise is
+# drawn on a coarse lattice and read back between its points, and the
+# lattice spacing is the feature size: wider than it is tall, so the
+# masses lie down.
+#
+# A gradient lattice is not a value lattice: one point of it holds a
+# direction and its reach carries about half as far again, where a
+# value lattice holds a number and reaches one spacing. So these
+# numbers are larger than the run lengths they leave, and larger again
+# than the value noise numbers this file used to carry.
+GRAIN_X = 76          # cells across one lobe of the noise
+GRAIN_Y = 52          # and down, so the masses lie down
+GRAIN_DETAIL = 0.20   # a second octave at half the spacing, this strong
 INTERIOR_OPEN = 0.45  # of the middle of a tile
 BAND_OPEN = 0.50      # of a band a passage crosses, the channel aside
 BAND_CLOSED_OPEN = 0.50  # of a band with no promised way through, the same
                          # as the rest, or the border shows as a change of density
 SMOOTH_PASSES = 2     # of a plain 3x3 majority, to make the edges organic
-BLEND = 40            # cells a band fades into the middle of its tile
+BLEND = 80            # cells a band fades into the middle of its tile
+ORE_SEEDS = 85        # veins started per 100k cells of tile, before ore_rate
+
+# Cells of rock face between the open cave and the fill behind it.
+#
+# This one does not follow the grain, and must not. It is the face of
+# the mass, drawn a cell at a time, the same argument that keeps
+# SMOOTH_PASSES and PLAYER_CLIMB where they are: a bigger cave gets a
+# finer wall, not a thicker crust. It is also bounded by SEAM, because
+# band_materials draws the band's face from the band alone and can
+# reach no deeper than the band is; a rim wider than that would come
+# out one material in a band and another one cell past it, which is
+# the lattice made visible.
+WALL = 3
 
 # A component smaller than this is a pocket, which a cave may have. A
 # component larger is a room, and a room nothing reaches is a room
-# nobody sees.
-POCKET = 1500
+# nobody sees. It is an area, so it follows the square of the grain.
+POCKET = 6000
 
 MATERIALS_PATH = "data/materials.txt"
 BIOMES_PATH = "data/biomes.txt"
@@ -300,45 +353,67 @@ def smooth_once(grid):
     return out
 
 
-def value_noise(rng, grain_x, grain_y):
-    """Smooth noise on a grid of the given spacing.
+def gradient_noise(rng, grain_x, grain_y):
+    """Smooth noise on a lattice of the given spacing.
 
-    Random values on a coarse lattice, read back with a smoothstep
-    between them. One lobe of the result is one cell of that lattice,
-    which is the whole reason for drawing it this way: the size of a
-    rock mass is a number here rather than something a smoothing rule
-    happens to settle on.
+    A direction at every point of a coarse lattice, read back as the
+    distance along it, blended with a smoothstep. One lobe of the
+    result is about one cell of that lattice, which is the whole reason
+    for drawing it this way: the size of a rock mass is a number here
+    rather than something a smoothing rule happens to settle on.
+
+    A direction, not a number. That is the one line that decides
+    whether the caves come out blocky. Hold a number at each lattice
+    point and every cell between four of them reads a blend of four
+    numbers, which is largest at a corner and level along a row: the
+    contour that a cut then draws runs along the lattice, and a world
+    of rectangles with square corners comes out of it, at any spacing.
+    Hold a direction and a cell reads how far it lies along four
+    directions that point anywhere, so the field has no axis of its own
+    and neither do the caves.
+
+    The field is centred on 0.5 so it can be mixed with any other field
+    this file draws. The spread is nothing to do with the cut, which is
+    a quantile of the field it is measured on.
     """
     gx, gy = TILE // grain_x + 2, TILE // grain_y + 2
-    lattice = [[rng.random() for _ in range(gx)] for _ in range(gy)]
+    lattice = [
+        [(math.cos(a), math.sin(a)) for a in (rng.uniform(0, 2 * math.pi) for _ in range(gx))]
+        for _ in range(gy)
+    ]
 
     def ease(t):
         return t * t * (3 - 2 * t)
 
-    # The x weights repeat for every row, so they are worked out once.
+    # The x terms repeat for every row, so they are worked out once.
     xs = []
     for x in range(TILE):
         fx = x / grain_x
         x0 = int(fx)
-        xs.append((x0, ease(fx - x0)))
+        xs.append((x0, fx - x0, ease(fx - x0)))
 
     field = []
     for y in range(TILE):
         fy = y / grain_y
         y0 = int(fy)
-        ty = ease(fy - y0)
+        dy = fy - y0
+        wy = ease(dy)
         low, high = lattice[y0], lattice[y0 + 1]
         row = [0.0] * TILE
-        for x, (x0, tx) in enumerate(xs):
-            a = low[x0] + (low[x0 + 1] - low[x0]) * tx
-            b = high[x0] + (high[x0 + 1] - high[x0]) * tx
-            row[x] = a + (b - a) * ty
+        for x, (x0, dx, wx) in enumerate(xs):
+            a0, a1 = low[x0], low[x0 + 1]
+            b0, b1 = high[x0], high[x0 + 1]
+            top = (a0[0] * dx + a0[1] * dy)
+            top += ((a1[0] * (dx - 1) + a1[1] * dy) - top) * wx
+            bottom = (b0[0] * dx + b0[1] * (dy - 1))
+            bottom += ((b1[0] * (dx - 1) + b1[1] * (dy - 1)) - bottom) * wx
+            row[x] = 0.5 + 0.7 * (top + (bottom - top) * wy)
         field.append(row)
     return field
 
 
 def noise_field(rng, grain_x=None, grain_y=None):
-    """The two octaves, summed, as floats.
+    """The two octaves of gradient noise, summed, as floats.
 
     The first says how big a mass is and the second gives it lobes and
     inlets. It stays a float field because the bands and the middle of
@@ -346,8 +421,8 @@ def noise_field(rng, grain_x=None, grain_y=None):
     """
     grain_x = grain_x or GRAIN_X
     grain_y = grain_y or GRAIN_Y
-    coarse = value_noise(rng, grain_x, grain_y)
-    fine = value_noise(rng, max(2, grain_x // 2), max(2, grain_y // 2))
+    coarse = gradient_noise(rng, grain_x, grain_y)
+    fine = gradient_noise(rng, max(2, grain_x // 2), max(2, grain_y // 2))
     for y in range(TILE):
         cr, fr = coarse[y], fine[y]
         for x in range(TILE):
@@ -538,7 +613,9 @@ def carve_walk(grid, x0, y0, x1, y1, r, rng, wobble=0.55):
     x, y = float(x0), float(y0)
     radius = float(r)
 
-    for _ in range(1200):
+    # Steps, not distance: a walk crosses at most a tile, and one step
+    # covers about a cell, so this only has to be past TILE.
+    for _ in range(4 * TILE):
         dx, dy = x1 - x, y1 - y
         distance = max(1e-6, (dx * dx + dy * dy) ** 0.5)
         if distance <= 3.0:
@@ -548,7 +625,7 @@ def carve_walk(grid, x0, y0, x1, y1, r, rng, wobble=0.55):
         swing = rng.uniform(-wobble, wobble)
         x += dx - dy * swing
         y += dy + dx * swing
-        radius = min(r + 8, max(12.0, radius + rng.uniform(-0.35, 0.35)))
+        radius = min(r + 16, max(24.0, radius + rng.uniform(-0.35, 0.35)))
         carve_disc(grid, round(x), round(y), int(radius))
 
     carve_disc(grid, x1, y1, int(radius))
@@ -670,7 +747,7 @@ def smooth_band(band):
     return out
 
 
-def band_materials(band, base, rock, wall=3):
+def band_materials(band, base, rock, wall=WALL):
     """The materials of one band, from the band alone.
 
     It may not look at the interior of any tile: two tiles that share
@@ -726,7 +803,7 @@ def stamp(target, sig, profiles, corner):
 # --------------------------------------------------------------- the material
 
 
-def to_materials(grid, base, rock, ore, ore_rate, rng, wall=3):
+def to_materials(grid, base, rock, ore, ore_rate, rng, wall=WALL):
     """Rock where the mass meets air, the base material deeper in.
 
     The rule may only ask how near a cell is to air, because the band
@@ -751,9 +828,15 @@ def to_materials(grid, base, rock, ore, ore_rate, rng, wall=3):
             pix[y][x] = rock if near else base
 
     # Ore in veins, not confetti: a few seeds that crawl through rock.
-    for _ in range(int(ore_rate * 56)):
+    #
+    # Counted per area rather than per tile. A tile that grew and kept
+    # its count would hold the same handful of veins spread over four
+    # times the rock, and a mine with no metal in it is what comes out.
+    # The vein is as long as the rock is thick, so its length follows
+    # the grain the way every other size in this file does.
+    for _ in range(int(ore_rate * ORE_SEEDS * TILE * TILE / 100_000)):
         x, y = rng.randrange(SEAM, TILE - SEAM), rng.randrange(SEAM, TILE - SEAM)
-        for _ in range(rng.randint(12, 36)):
+        for _ in range(rng.randint(GRAIN_Y // 2, GRAIN_Y + GRAIN_X // 2)):
             if band_of(x, y) is None and pix[y][x] == rock:
                 pix[y][x] = ore
             x = min(TILE - 1, max(0, x + rng.randint(-1, 1)))

@@ -1,5 +1,6 @@
 package game
 
+import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:testing"
@@ -572,15 +573,25 @@ test_the_world_has_no_seam_between_two_tiles :: proc(t: ^testing.T) {
 	seen_column: [WANG_COLORS]bool
 	column: [WANG_COLORS][TILE_SIZE]Cell
 
-	// Map pixels (0,1) and (1,1) are the Coalmine, and the walk has to
-	// stay inside them: a square over the Lake beside it would answer
-	// with a column of flat Water and report a seam that is a biome
-	// border. Counted in squares per region, so it holds whatever
-	// size a tile is.
+	// The walk has to stay inside one biome: a square over the Lake
+	// beside the mine would answer with a column of flat Water and
+	// report a seam that is a biome border. So it paints the whole test
+	// map the mine and walks that, rather than reading the two regions
+	// make_test_world happens to paint. At cells_per_pixel 512 and a
+	// tile of 512 a region is one square, and two squares are not
+	// enough for both edge colors to be sure of turning up.
+	for px in i32(0) ..< world.biome_map.width {
+		for py in i32(0) ..< world.biome_map.height {
+			biome_map_set(world.biome_map, px, py, Biome_Id(mine))
+		}
+	}
+
+	// Counted in squares per region, so it holds whatever size a tile
+	// and a region are.
 	per_region := cpp / TILE_SIZE
 
-	for sx in tile_slot(left_x) ..< tile_slot(left_x) + 2 * per_region {
-		for sy in tile_slot(base_y) ..< tile_slot(base_y) + per_region {
+	for sx in tile_slot(left_x) ..< tile_slot(left_x) + 4 * per_region {
+		for sy in tile_slot(base_y) ..< tile_slot(base_y) + 2 * per_region {
 			color := wang_vertical_edge(world.seed, sx, sy)
 			wx := sx * TILE_SIZE // the first column inside this square
 
@@ -620,12 +631,16 @@ test_the_seed_lays_out_the_lattice :: proc(t: ^testing.T) {
 	other := world
 	other.seed = world.seed + 1
 
+	// Both painted Coalmine regions, not one square of one of them.
+	// Two seeds disagree about a given square only 15 times in 16, so a
+	// view of one square reports a seed that works as a seed that does
+	// nothing whenever the two happen to land on the same tile.
 	cpp := world.biomes.cells_per_pixel
 	view := World_View {
 		x    = (0 - world.biomes.origin_pixel_x) * cpp,
 		y    = (1 - world.biomes.origin_pixel_y) * cpp,
-		w    = 256,
-		h    = 256,
+		w    = 2 * cpp,
+		h    = cpp,
 		step = 1,
 	}
 
@@ -817,12 +832,13 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 
 /*
 A small world with one image biome (Gallery) and one uniform biome
-(Ground) beside it. cells_per_pixel is 256, the same as TILE_SIZE, so
-the fixture picture can be written with save_tile_png exactly the way
-a tile is.
+(Ground) beside it. cells_per_pixel is TILE_SIZE, written into the
+fixture from the constant rather than spelled out, so the fixture
+picture can be written with save_tile_png exactly the way a tile is
+and a change to the tile size cannot leave this behind.
 
-origin_pixel puts Gallery's region at world x -256 to -1 and Ground's
-region right beside it at world x 0 to 255. The two meet at the
+origin_pixel puts Gallery's region one region left of zero and
+Ground's region right beside it at world x 0 up. The two meet at the
 origin, which is where floor_div has to earn its keep: a truncating
 divide would fold Gallery's region the wrong way and every cell in it
 would read one region over.
@@ -859,9 +875,12 @@ make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, 
 	}
 	defer os.remove(IMAGE_TEST_PNG)
 
-	body := "[Map]\nbiome_off_map = Ground\norigin_pixel = 1 0\ncells_per_pixel = 256\n" +
+	body := fmt.tprintf(
+		"[Map]\nbiome_off_map = Ground\norigin_pixel = 1 0\ncells_per_pixel = %d\n" +
 		"[Ground]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
-		"[Gallery]\ncolor = 0xFF000002\nfill_0 = Rock\ngenerator = image\nimage = " + IMAGE_TEST_PNG + "\n"
+		"[Gallery]\ncolor = 0xFF000002\nfill_0 = Rock\ngenerator = image\nimage = %s\n",
+		TILE_SIZE, IMAGE_TEST_PNG,
+	)
 	if !testing.expect(t, os.write_entire_file(IMAGE_TEST_TXT, transmute([]byte)body) == nil, "write temp biomes.txt") {
 		delete(painted)
 		destroy_material_table(materials)
@@ -895,7 +914,7 @@ make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, 
 	}
 
 	m := make_biome_map(2, 1)
-	biome_map_set(m, 0, 0, Biome_Id(gallery)) // world x -256..-1
+	biome_map_set(m, 0, 0, Biome_Id(gallery)) // the region left of zero
 	biome_map_set(m, 1, 0, Biome_Id(ground))  // world x 0..255
 
 	world = World {
@@ -932,7 +951,7 @@ test_image_biome_generates_the_painted_picture :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_image_test_world(world, painted)
 
-	// Gallery's region is world x -256..-1, y 0..255.
+	// Gallery's region is the TILE_SIZE square left of zero, y 0 up.
 	for ly in i32(0) ..< TILE_SIZE {
 		for lx in i32(0) ..< TILE_SIZE {
 			wx := lx - TILE_SIZE
@@ -963,7 +982,8 @@ test_generate_matches_naive_across_a_border_into_an_image_biome :: proc(t: ^test
 	views := []World_View {
 		{x = -40, y = 10, w = 80, h = 64, step = 1},  // crosses x = 0 at step 1
 		{x = -37, y = 3, w = 90, h = 48, step = 3},   // unaligned start, strided
-		{x = -256, y = 0, w = 256, h = 64, step = 5}, // whole Gallery region, pulled back
+		// The whole Gallery region, pulled back.
+		{x = -TILE_SIZE, y = 0, w = TILE_SIZE, h = 64, step = 5},
 	}
 
 	for view in views {

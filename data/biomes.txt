@@ -20,15 +20,15 @@ seed            = 20260818    # lays out the tile lattice; change it for another
 biome_off_map   = Deep_Rock   # biome used outside the map image
 
 # cells_per_pixel must be a whole number of tiles, or a biome border
-# would cut a tile in half. A tile is 256 cells, so that is a multiple
-# of 256.
+# would cut a tile in half. A tile is 512 cells, so that is a multiple
+# of 512, and at 512 a region is exactly one tile.
 
 # A biome fills its regions one of two ways.
 #
 #   generator = uniform   the whole region is fill_0
 #   generator = wang      the region is a lattice of tiles from a set
 #
-# A tile is a 256x256 PNG painted in material colors, one cell to one
+# A tile is a 512x512 PNG painted in material colors, one cell to one
 # world cell. A wang biome owns a whole set of them, named after the
 # prefix below:
 #

@@ -7,7 +7,7 @@ relative to it.
 
 ```sh
 odin check src -vet     # types, and the things vet catches
-odin test src           # the whole suite, about a second
+odin test src           # the whole suite, under ten seconds
 make                    # bin/the-game, bin/game-mcp, bin/shot
 ```
 
@@ -92,11 +92,14 @@ changing `src/player.odin` or `src/sprite.odin`.
 
 Two rules there are easy to break and hard to see:
 
-- **His body is 13 cells tall because the world allows no more.** Two
-  tiles that meet share a band, and the clear channel through it is 65
-  cells, five of him. A body taller than the channel fits every cave
-  and leaves none of them. `test_the_player_fits_the_world` measures
-  the real tiles and fails when a reseed closes the channel.
+- **The world is drawn to the wizard, and he is 13 cells tall.** Two
+  tiles that meet share a band, and the clear channel through it
+  measures 77 cells, nearly six of him. A body taller than the channel
+  fits every cave and leaves none of them, and a channel only a little
+  taller than the body is a tunnel he clears and cannot move in.
+  `test_the_player_fits_the_world` measures the real tiles and fails
+  at both ends: under `PLAYER_BODY_H + 2` he is sealed in, and under
+  `PLAYER_WORLD_CHANNEL` the world has shrunk back to tunnels.
 - **The drawing and the collision box are two numbers that must agree.**
   `tools/seed_wizard.py` holds the body box, `src/sprite.odin` asserts
   it matches `src/player.odin`, and `--check` holds the sheet to it.

@@ -72,8 +72,8 @@ MCP_TOOLS_JSON :: `{"tools":[
 {"name":"tile_paint",
  "description":"Paint the selected tile, the same way the mouse does in the tile editor. Give either a rectangle and a material, or rows of material glyphs to stamp a picture. A cell in the middle belongs to this tile; a cell within 4 of a side belongs to the edge color of that side and is written into every tile of the set that carries it. Every region of that biome in the world changes at once.",
  "inputSchema":{"type":"object","properties":{
-   "x":{"type":"integer","description":"Left cell in the tile (0 to 63)."},
-   "y":{"type":"integer","description":"Top cell in the tile (0 to 63)."},
+   "x":{"type":"integer","description":"Left cell in the tile (0 to 511)."},
+   "y":{"type":"integer","description":"Top cell in the tile (0 to 511)."},
    "width":{"type":"integer","description":"Rectangle width in cells. Default 1.","minimum":1},
    "height":{"type":"integer","description":"Rectangle height in cells. Default 1.","minimum":1},
    "material":{"type":"string","description":"Material name to paint. Ignored when rows are given."},

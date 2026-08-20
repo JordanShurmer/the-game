@@ -68,7 +68,7 @@ of, watch the world change, then save.
 
 ### Wang tiles
 
-A biome with `generator = wang` owns a set of 256x256 tiles. The world
+A biome with `generator = wang` owns a set of 512x512 tiles. The world
 is cut into a lattice of tile squares, and each square draws one tile
 of the set of the biome that owns it. One cell of a tile is one world
 cell, so what the author paints is what the wizard walks through. Borders between biomes stay hard

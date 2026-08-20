@@ -92,6 +92,20 @@ PLAYER_JET_DRAIN       :: 0.5  // tanks per second under thrust, so 2.0 seconds
 PLAYER_FUEL_ON_GROUND  :: 1.4  // tanks per second standing, so 0.71 seconds
 PLAYER_FUEL_IN_AIR     :: 0.22 // tanks per second falling, and not under thrust
 
+// The channel the world owes him, as against the one he fits through.
+//
+// A body of 13 passes a channel of 15, and a world drawn to 15 is a
+// world of tunnels: he clears it and cannot move in it, which is what
+// the sets drew while they were sized off the mean run of the
+// reference capture (32 cells measured, under two of him).
+//
+// Three of him is the floor, not the aim. The shipped sets measure 77
+// cells at their narrowest, which is nearly six; this is set well
+// below that so an ordinary reseed has room to differ, and well above
+// what he fits through so a reseed that puts the tunnels back fails
+// here rather than in the hands of a player.
+PLAYER_WORLD_CHANNEL :: 3 * PLAYER_BODY_H // cells
+
 PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
 PLAYER_CLIMB        :: 3  // cells he walks up without jumping
 PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
@@ -1482,6 +1496,12 @@ north or south band's opening runs along x and so limits how wide he
 can be; an east or west band's opening runs along y and limits how
 tall. Reseed a tile set with a narrower mouth and this test says so
 before a player finds out.
+
+It holds the sets to two different floors. The per-tile one is the
+body: a channel under it seals him in. The one at the end is the
+world: a channel over the body and under several of it is a world he
+fits through and does not walk through, which is what the sets used to
+draw and what PLAYER_WORLD_CHANNEL now refuses.
 */
 @(test)
 test_the_player_fits_the_world :: proc(t: ^testing.T) {
@@ -1547,5 +1567,14 @@ test_the_player_fits_the_world :: proc(t: ^testing.T) {
 		t,
 		measured_min <= TILE_SIZE - 2 * WANG_SEAM,
 		"no tile of any shipped set carries an open edge, so nothing measured a channel",
+	)
+
+	// And the world is drawn to him, not merely around him.
+	testing.expectf(
+		t,
+		measured_min >= PLAYER_WORLD_CHANNEL,
+		"the narrowest channel in any shipped set is %d cells, under PLAYER_WORLD_CHANNEL (%d): the world has shrunk back to a tunnel",
+		measured_min,
+		PLAYER_WORLD_CHANNEL,
 	)
 }
