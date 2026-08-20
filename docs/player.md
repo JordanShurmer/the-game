@@ -1,8 +1,10 @@
 # The player
 
 A wizard stands at the top of the world beside a hole into the caves.
-He walks, runs, jumps, and holds the jump key to fly on a jetpack that
-fills again by itself. Nothing fights him and he casts nothing.
+He walks, runs, jumps, holds the jump key to fly on a jetpack that
+fills again by itself, and cuts the rock with a short range plasma
+digger he points with the cursor. Nothing fights him and he casts
+nothing.
 
 This note says how, and says what the phase leaves out.
 
@@ -107,8 +109,11 @@ static picture it always was.
 Player_Button :: enum u8 { Left, Right, Jump, Run, Dig }
 Player_Input  :: bit_set[Player_Button; u8]
 
-player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool)
+player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT)
 ```
+
+`aim` is where his digger points; "The digger he holds" below says how
+it is measured and why it is a byte.
 
 The step is a whole tick at `PLAYER_TICK_HZ` (60). The window keeps an
 accumulator and calls it a whole number of times per frame, because
@@ -132,13 +137,15 @@ otherwise.
 A `Move` command now rides the queue beside it (`docs/physics.md`,
 "The wizard on the queue"), carrying a `Player_Input` for what is held
 and a second, `pressed`, for the jump edge, in the two bytes
-`Input_Command` had left spare. `sim_apply` routes it into the same
+`Input_Command` had left spare, and the aim in `x`, a field a `Move`
+has no other use for. `sim_apply` routes it into the same
 `player_step` the window calls, so a caller willing to pay the queue's
 delay gets a replayable, deterministic path to move him — `Sim` is a
 function of seed, region and commands alone again, for that caller.
 One thing is still missing: there is no MCP tool built on top of
 `Move` yet, so "one path for a hand and a model" does not fully cover
-him until `docs/physics.md` step 7 adds one.
+him until `docs/physics.md` step 7 adds one. The `player_move` tool
+covers the direct path in the meantime, aim included.
 
 ## The numbers
 
@@ -169,6 +176,9 @@ Cells and seconds, because that is what the world is measured in.
 | `PLAYER_COYOTE_TICKS` | 5 | ticks after a ledge where a jump still works |
 | `PLAYER_CLIMB` | 3 | cells he walks up without jumping |
 | `PLAYER_DIG_OUT` | 24 | cells he searches upward when buried |
+| `PLAYER_DIG_POWER` | 8 | the hardness his digger removes |
+| `PLAYER_DIG_RANGE` | 26 | `2 * PLAYER_BODY_H`: how far the beam reaches |
+| `PLAYER_DIG_WIDTH` | 15 | `PLAYER_BODY_H + 2`: how wide the kerf is |
 | `SPAWN_MOUTH_DEPTH` | 10 | cells a column must be clear to count as a way in |
 | `SPAWN_CLEARANCE` | 12 | cells from the mouth edge to the spawn |
 | `SPAWN_SEARCH_RANGE` | 4096 | cells either side of x 0 that the scan covers |
@@ -232,6 +242,74 @@ and `on_ground` is a clear test of the row at `floor(y)`.
 world on every paint stroke, so a player can be inside rock through no
 fault of his own. Without the first rule above he freezes there for
 ever.
+
+## The digger he holds
+
+He holds a short range plasma digger. It is a beam out of the centre
+of his mass, along the cursor, and `docs/physics.md`, "The plasma
+digger", says what the beam does to the world, the flying debris
+included.
+
+```odin
+player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT)
+player_dig  :: proc(p: Player, t: Terrain) -> int
+```
+
+**The aim is an input, like the buttons are.** The window reads it off
+the cursor every frame, a `Move` command carries it through the queue,
+and the MCP `player_move` tool takes it in degrees. It defaults to
+`PLAYER_AIM_RIGHT` so a test that never digs does not have to name a
+direction; every caller that can point at something passes a real one.
+
+**One byte of turn**, so 0 is right, 64 is down, 128 is left, 192 is
+up, and 256 wraps back to 0 the way the circle does. Down and not up
+is the quarter turn after right, because y grows downward here as it
+does everywhere else in the world. A byte, and not a pair of floats,
+for two reasons: `Player` had three spare bytes at its tail and no
+room at all for a vector, and a replay of a `Move` has to give the
+same cut on two machines, where a float is a thing two machines can
+disagree about. A byte of turn is 1.4 degrees, finer than a hand on a
+mouse.
+
+**The two sizes of the beam come off the body**, the way every other
+number here does:
+
+| Number | Value | Why that |
+| --- | --- | --- |
+| `PLAYER_DIG_RANGE` | `2 * PLAYER_BODY_H` | short enough that he walks into what he cuts, long enough that one press opens a length of tunnel he can see the far end of |
+| `PLAYER_DIG_WIDTH` | `PLAYER_BODY_H + 2` | the cut he makes is the cut he has to fit through |
+
+A kerf narrower than the body is a slit he can watch himself carve and
+never enter, which is the one way a digging tool feels worse than no
+tool at all. The width is his own height and a cell either side for the
+same reason `PLAYER_BODY_W` leaves a cell of air either side of him in
+the narrowest tunnel.
+
+**Standing still, he turns to hold the aim.** A walk key outranks the
+cursor, because turning him away from the way he runs would need
+frames the sheet does not hold.
+
+**The beam starts inside him**, at `player_centre`, half the body up
+from the feet. One procedure decides that point, because three things
+have to measure from it or the tool reads as attached to nothing: the
+beam, the cursor's aim, and the picture the window draws. The first
+cells of the beam are the air his own body stands in, which costs
+nothing and is what makes the tool read as held rather than as thrown.
+
+**The debris must clear him.** `CUT_SPRAY_NEAR` is the length of beam
+nearest the tool that no thrown grain lands in, and an `#assert` in
+`src/player.odin` holds it above the reach of his body from his chest.
+Without it he is shoved upward by his own sawdust: a grain inside the
+body box is a grain the de-penetration search at the top of
+`player_step` has to lift him off.
+
+**What this replaced**, and what that cost. The old tool was a disc of
+`PLAYER_DIG_RADIUS` centred `PLAYER_DIG_REACH` cells in front of his
+facing. The cost was never reach. It was that a tool with no cursor in
+it is a tool that happens near a man rather than one he holds: he
+could dig only the two directions he could walk, the hole opened
+beside him instead of out of him, and nothing on the screen said where
+the next hole would be until it was already there.
 
 ## He spawns beside a hole, not in it
 
@@ -356,7 +434,8 @@ a new file, and both `cmd/` targets depend on it.
 | `A` `D` or `LEFT` `RIGHT` | Walk |
 | `SHIFT` | Run |
 | `SPACE` or `W` or `UP` | Jump; hold in the air to fly |
-| `E` or left mouse button | Dig, in the direction he faces |
+| Mouse | Point the digger |
+| `E` or left mouse button | Dig, where the cursor points |
 | `TAB` | The world editor, where the camera pans freely again |
 | Wheel, `-`, `=` | Zoom |
 
@@ -365,9 +444,10 @@ a new file, and both `cmd/` targets depend on it.
 No health, damage, combat, wands, spells, inventory, sound, or
 networked movement.
 
-Digging is built (`docs/physics.md`, "Digging and breaking"), but only
-where a `Sandbox` is under him: `PLAYER_DIG_POWER` and
-`PLAYER_DIG_RADIUS` live in `src/player.odin` beside the rest of his
+Digging is built ("The digger he holds" above, and
+`docs/physics.md`, "The plasma digger"), but only where a `Sandbox` is
+under him: `PLAYER_DIG_POWER`, `PLAYER_DIG_RANGE` and
+`PLAYER_DIG_WIDTH` live in `src/player.odin` beside the rest of his
 numbers, because rock is hardness 8 there on purpose, matching the
 world he digs.
 

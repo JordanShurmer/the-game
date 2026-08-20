@@ -121,13 +121,17 @@ a hole into the caves.
 | `A` `D` or left and right | Walk |
 | `SHIFT` | Run |
 | `SPACE`, `W` or `UP` | Jump; hold it in the air to fly |
-| `E` or left mouse | Dig: clear a disc of terrain soft enough for him, ahead of where he faces |
+| Mouse | Point the plasma digger |
+| `E` or left mouse | Dig: cut a beam out of his chest, where the cursor points |
 | Mouse wheel, `-`, `=` | Zoom out and in |
 | `TAB` | Open and close the world editor |
 
 Tap the jump key and he jumps. Hold it and the jetpack lights, which
 empties the tank in two seconds and fills it again in under one while
-he stands. `docs/player.md` says how he is built and what the phase
+he stands. The digger is a beam out of the centre of his mass along
+the cursor: it cuts a kerf he can walk down, it stops at what it
+cannot cut, and it throws part of what it removes back out of the hole
+as debris that then falls. `docs/player.md` says how he is built and what the phase
 leaves out.
 
 The world editor takes the camera back, so the same keys pan it again:

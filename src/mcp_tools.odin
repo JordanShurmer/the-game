@@ -107,6 +107,7 @@ MCP_TOOLS_JSON :: `{"tools":[
    "power":{"type":"integer","description":"Blast or dig power, for explode and dig. Explode: the energy a ray starts with; each cell it crosses costs hardness+1, so air costs 1 and bedrock stops any blast in one cell. Dig: the hardness that can be removed; the wizard digs at 8. Required for explode and dig.","minimum":0,"maximum":255},
    "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons are held this tick."},
    "pressed":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons went down fresh this tick, for the jump edge."},
+   "aim":{"type":"number","description":"For move: where the digger points, in degrees. 0 is right, 90 is down, 180 is left, 270 is up, because y grows downward. Default: the way he faces.","minimum":0,"maximum":360},
    "source":{"type":"integer","description":"Sender number (0 to 7). Commands from different sources run in source order on the same tick. Default 0.","minimum":0,"maximum":7},
    "tick":{"type":"integer","description":"Exact execution tick. Leave this out to use the input delay. A tick that has already run is moved to the next tick and reported as late."}},
   "required":["kind"],"additionalProperties":false}},
@@ -135,10 +136,11 @@ MCP_TOOLS_JSON :: `{"tools":[
  "description":"Report where the wizard is: his position, what he is standing on, his velocity, his jetpack fuel, and whether the play sandbox is following him.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"player_move",
- "description":"Drive the wizard for a number of ticks with a set of held buttons, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to the 2048 cell square he stands in so he stands on the running physics rather than a picture of it; after that it follows him when he leaves that square on its own.",
+ "description":"Drive the wizard for a number of ticks with a set of held buttons and one aim, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to the 2048 cell square he stands in so he stands on the running physics rather than a picture of it; after that it follows him when he leaves that square on its own.",
  "inputSchema":{"type":"object","properties":{
    "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"Buttons held for every tick of this call."},
    "jump":{"type":"boolean","description":"Whether jump is a fresh press on the first tick of this call, for the jump edge. A held jump that was already pressed in an earlier call should be false. Default false."},
+   "aim":{"type":"number","description":"Where the digger points, in degrees, held for every tick of this call. 0 is right, 90 is down, 180 is left, 270 is up, because y grows downward. The digger is a beam out of the centre of his mass, so this is the only thing that says which way it cuts. Default: the way he faces.","minimum":0,"maximum":360},
    "ticks":{"type":"integer","description":"Ticks to run (1 to 6000, which is 100 seconds). Default 1.","minimum":1,"maximum":6000}},
   "additionalProperties":false}}
 ]}`
@@ -718,6 +720,9 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		}
 		command.buttons = held
 		command.pressed = edge
+		// A Move names no place in the world, so x carries the aim;
+		// src/input_queue.odin says so where the field is declared.
+		command.x = i32(parse_player_aim(s, arguments))
 	}
 
 	at_tick := i64(-1)
@@ -751,7 +756,7 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	case .Explode, .Dig:
 		fmt.sbprintf(&b, " power %d at (%d,%d) radius %d\n", out.material, out.x, out.y, out.radius)
 	case .Move:
-		fmt.sbprintf(&b, " buttons %v pressed %v\n", out.buttons, out.pressed)
+		fmt.sbprintf(&b, " buttons %v pressed %v aim %d\n", out.buttons, out.pressed, u8(out.x))
 	case .Erase, .Ignite, .Noop:
 		fmt.sbprintf(&b, " at (%d,%d) radius %d\n", out.x, out.y, out.radius)
 	}
@@ -946,14 +951,15 @@ tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 
 	ticks := int(clamp(json_int_field(arguments, "ticks", 1), 1, 6000))
 	jump := json_bool_field(arguments, "jump", false)
+	aim := parse_player_aim(s, arguments)
 
 	sim_play_begin(s)
 	for i in 0 ..< ticks {
-		sim_step_player(s, held, i == 0 && jump)
+		sim_step_player(s, held, i == 0 && jump, aim)
 	}
 
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "ran %d ticks holding %v\n", ticks, held)
+	fmt.sbprintf(&b, "ran %d ticks holding %v, aim %d\n", ticks, held, aim)
 	fmt.sbprintf(&b, "wizard now at (%.1f,%.1f), on_ground %v\n", s.player.x, s.player.y, s.player.on_ground)
 	fmt.sbprintf(&b, "the play sandbox is at world (%d,%d)\n", s.sandbox.origin_x, s.sandbox.origin_y)
 	return strings.to_string(b), false
@@ -974,6 +980,26 @@ parse_command_kind :: proc(name: string) -> (Command_Kind, bool) {
 	case "move":    return .Move, true
 	}
 	return .Noop, false
+}
+
+/*
+Where the digger points, as degrees in the JSON and a byte of turn in
+the command, for enqueue_input's "move" kind and for player_move.
+
+Degrees, and not the byte itself, because the byte is a detail of how
+Player and Input_Command are packed (src/player.odin, "Aim") and a
+caller should not have to know it. 0 is right and 90 is down, because
+y grows downward everywhere else in this server too.
+
+A caller that names no aim gets the way the wizard already faces,
+which is where the tool pointed before there was a cursor to point it.
+*/
+parse_player_aim :: proc(s: ^Sim, arguments: json.Object) -> u8 {
+	if !json_has_field(arguments, "aim") {
+		return s.player.facing < 0 ? PLAYER_AIM_LEFT : PLAYER_AIM_RIGHT
+	}
+	degrees := json_number_field(arguments, "aim", 0)
+	return u8(i32(math.round(degrees / 360 * 256)) & 255)
 }
 
 /*
@@ -1768,4 +1794,32 @@ test_player_move_moves_the_wizard_and_player_status_reports_it :: proc(t: ^testi
 
 	after := tool_player_status(&s)
 	testing.expect(t, strings.contains(after, "is following him"), "status must say the sandbox is following him now")
+}
+
+/*
+The aim reaches the wizard through the model's path too, and it is
+degrees here and a byte of turn there. Without this a model can hold
+the dig button and only ever cut the two ways it can walk, which is
+the tool the cursor replaced.
+*/
+@(test)
+test_player_move_points_the_digger_in_degrees :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	text, failed := tool_player_move(&s, arguments_of(t, `{"buttons":["dig"],"ticks":1,"aim":90}`))
+	testing.expect(t, !failed, text)
+	testing.expectf(t, s.player.aim == PLAYER_AIM_DOWN, "90 degrees must read as straight down, got %d", s.player.aim)
+
+	// y grows downward, so 270 is up and not down.
+	_, up_failed := tool_player_move(&s, arguments_of(t, `{"buttons":["dig"],"ticks":1,"aim":270}`))
+	testing.expect(t, !up_failed, "an aim of 270 must be accepted")
+	testing.expectf(t, s.player.aim == PLAYER_AIM_UP, "270 degrees must read as straight up, got %d", s.player.aim)
+
+	// No aim at all keeps him pointing the way he faces, which is what
+	// the tool did before there was a cursor to point it.
+	s.player.facing = -1
+	_, none_failed := tool_player_move(&s, arguments_of(t, `{"buttons":[],"ticks":1}`))
+	testing.expect(t, !none_failed, "a move with no aim must be accepted")
+	testing.expectf(t, s.player.aim == PLAYER_AIM_LEFT, "with no aim he must point the way he faces, got %d", s.player.aim)
 }

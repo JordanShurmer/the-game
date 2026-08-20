@@ -338,6 +338,84 @@ Rock at exactly the wizard's power is the point of the number. He can
 dig the world he lives in and nothing else, so obsidian, steel and
 bedrock are real walls to him and only a blast opens them.
 
+## The plasma digger
+
+```odin
+// Cut a straight kerf from a point, and throw the cuttings back down
+// it. Returns the count of cells removed.
+sandbox_cut :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, dx, dy: f32, range, half_width: i32, power: u8) -> (removed: int)
+```
+
+`dx` and `dy` are a unit direction. `half_width` is the radius of the
+swept disc, so the kerf is `2*half_width + 1` cells across at every
+angle.
+
+`sandbox_dig` above is a ball, and a ball clears whatever it is
+dropped on. A beam marches out from one point in one direction and
+which is the difference between a tool that acts near a man and a tool
+he holds and points. The wizard now holds one; `docs/player.md`, "The
+digger he holds", says what he points it with and how far it reaches.
+
+**The beam is a ball swept along a line**, and not a line of cells
+across the axis. A line of cells across a *diagonal* axis is a line
+with holes in it: rounding a direction of 0.707 to whole cells puts
+the span's cells corner to corner, and a kerf of cells that touch only
+at their corners is a checkerboard the wizard cannot walk down and the
+eye does not read as a cut at all. A disc has that problem at no
+angle, and the cost of the overlap between one step's disc and the
+next is a bounds test and a comparison on cells that are already air.
+
+Three rules, and each one is a feel the ball dropped on a spot did not
+have.
+
+**The beam stops at what it cannot cut.** A cell harder than `power`
+on the axis ends it there, so bedrock casts a shadow the way it does
+for a blast. The axis is marched over the world as it stands, before
+any cell is cut, or the march would clear the very wall that was to
+stop it. Nothing past that end is cut either: the head of the last
+disc would otherwise reach `half_width` through a thin wall and take
+what stands behind it.
+
+**What it removes it throws.** A cut cell becomes its crumbled form,
+out of the same `crumbles_to` table a blast reads, and flies back down
+the beam to land somewhere between `CUT_SPRAY_NEAR` and the cell it
+came from. Back down the beam is the one direction the cut has
+certainly opened, because every cell between the grain and the tool
+was removed on the way out to it. This is the sawdust off a drill: it
+comes back out of the hole and ordinary physics does the rest.
+
+Two things a grain must be, or it is vapour instead:
+
+- **Something that can fall.** A solid grain hangs in mid air where
+  the throw left it. `Cell_Kind.Still` is exactly the set of cells
+  that never move, and a crumbled form in that set is not thrown.
+  Rock crumbles into gravel and gravel falls, so the wall of every
+  cave sprays; coal has no crumbled form and so it does not.
+- **Landing in air.** A grain that scatters out of the kerf into solid
+  rock has nowhere to go. That is the falloff the scatter needs, and
+  it costs one comparison.
+
+**Most of it is vapour.** A grain is one cell and rock crumbles into
+one cell of gravel, so a cut that threw all of it would fill its own
+tunnel exactly as fast as it opened it, and the digger would move the
+rock without ever removing any. `CUT_SPRAY_CHANCE` is 40 out of 255,
+about one cut cell in six.
+
+| Constant | Value | What it does |
+| --- | --- | --- |
+| `CUT_SPRAY_CHANCE` | 40 | out of 255: how much of a cut flies rather than vanishes |
+| `CUT_SPRAY_NEAR` | 10 | cells nearest the tool that no grain lands in |
+| `CUT_SPRAY_ACROSS` | 2 | cells either side of the beam a grain can scatter to |
+
+`CUT_SPRAY_NEAR` is the room the man holding the beam stands in. A
+grain thrown into his own body box is a grain the de-penetration
+search at the top of `player_step` then has to lift him off, and
+`src/player.odin` holds the two numbers together with an `#assert`.
+
+Both numbers a throw needs come out of `sandbox_chance`, so the same
+seed and the same tick throw the same grain to the same cell and a
+replay still matches.
+
 Two new command kinds ride the existing queue:
 
 ```odin
@@ -346,7 +424,10 @@ Command_Kind :: enum u8 { Noop, Spawn, Erase, Ignite, Explode, Dig, Move }
 
 `radius` is the existing field. `material` carries `power` for
 `Explode` and `Dig`, because it is the spare `u16` and a power is not
-a material anywhere else.
+a material anywhere else. `Move` carries the aim in `x`, which is a
+field it has no other use for: a `Move` names no place in the world,
+and the aim has to reach `player_step` through the queue unchanged or
+a replayed dig cuts a different tunnel than the one that was played.
 
 ## The wizard meets the sandbox
 
