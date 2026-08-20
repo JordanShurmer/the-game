@@ -697,6 +697,32 @@ chain a cell, and two of the four passes skipped on most rows. A
 settled pool also stops keeping its chunk awake, so there is less to
 scan at all.
 
+### Where the tick goes now
+
+The vector pass moved INTENT off the top of the list, so the next
+person to make the step quicker should not start there. Instructions
+executed inside `sim_run`, on a 2048 square sandbox opened on four
+biomes of the shipped world:
+
+| Pass | Lake | Acidpool | Sandcave | Coalmine |
+| --- | --- | --- | --- | --- |
+| LOAD | 38% | 34% | 49% | 46% |
+| HOT | 36% | 50% | 31% | 39% |
+| INTENT | 10% | 9% | 13% | 12% |
+| APPLY | 15% | 4% | 5% | 3% |
+
+LOAD and HOT are about three quarters of the work between them, and
+both are a plain loop over a row. They also divide one question badly:
+LOAD reports whether ANY cell of the row is hot, and HOT then walks
+the whole row to find the two or three that are. A mask that says
+WHICH cells, rather than a flag that says some, is what those two
+passes have left to give.
+
+`bin/bench` is what measures a tick, and `--tool=callgrind` with
+`--toggle-collect='game::sim_run'` is what splits it by pass. The four
+pass procedures inline into one, so add `#force_no_inline` at the call
+sites in `sandbox_step_row` before profiling, and take it out again.
+
 ## The numbers
 
 | Constant | Value | What it does |

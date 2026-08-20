@@ -10,7 +10,7 @@ BIN  ?= bin
 
 SOURCES := $(wildcard src/*.odin)
 
-.PHONY: all game mcp shot test check run clean
+.PHONY: all game mcp shot bench test check run clean
 
 all: game mcp shot
 
@@ -36,6 +36,15 @@ shot: $(BIN)/shot
 $(BIN)/shot: $(SOURCES) $(wildcard cmd/shot/*.odin)
 	@mkdir -p $(BIN)
 	$(ODIN) build cmd/shot -out:$@ -o:speed
+
+# What a tick costs, on a real region of the shipped world. Run it from
+# the repository root:
+#   ./bin/bench biome=Lake
+bench: $(BIN)/bench
+
+$(BIN)/bench: $(SOURCES) $(wildcard cmd/bench/*.odin)
+	@mkdir -p $(BIN)
+	$(ODIN) build cmd/bench -out:$@ -o:speed
 
 # The whole suite lives beside the code it covers.
 test:

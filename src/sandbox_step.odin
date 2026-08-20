@@ -32,10 +32,13 @@ answer from one cell to the next:
 
 	APPLY   walks the cells that want to move and moves them.
 
-INTENT is where the tick is spent, because it is the pass that has to
-look at every cell, and it is the pass this shape exists for.
+INTENT is the pass this shape exists for, because it is the one that
+looks at every cell and carries no answer from one cell to the next.
 sandbox_step_simd.odin is the same pass in vectors, and a test holds
-the two to the same answer.
+the two to the same answer. It is no longer where the tick is spent:
+in vectors it costs about a tenth, and LOAD and HOT cost about three
+quarters between them. See docs/physics.md, "Where the tick goes now",
+before making the step quicker.
 
 WEIGHT IS THE WHOLE MOVE RULE
 

@@ -178,6 +178,7 @@ set is on screen beside it.
 src/       the game, package game, with the tests beside the code
 cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
+cmd/bench/ what a tick of the sandbox costs
 data/      the materials, the biomes, the biome map, the tiles, the sprites
 docs/      the design notes and the toolchain
 tools/     the toolchain install, the tile seeder, and the wizard seeder
