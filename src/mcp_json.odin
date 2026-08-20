@@ -32,6 +32,21 @@ json_int_field :: proc(object: json.Object, key: string, fallback: i64) -> i64 {
 	return fallback
 }
 
+// A number that need not be whole. An angle is the first argument in
+// this server that is not a count of cells, and rounding it to an
+// integer before it is used would quantise a cursor twice.
+json_number_field :: proc(object: json.Object, key: string, fallback: f64) -> f64 {
+	value, found := object[key]
+	if !found do return fallback
+	#partial switch item in value {
+	case json.Float:
+		return item
+	case json.Integer:
+		return f64(item)
+	}
+	return fallback
+}
+
 json_string_field :: proc(object: json.Object, key: string, fallback: string) -> string {
 	value, found := object[key]
 	if !found do return fallback

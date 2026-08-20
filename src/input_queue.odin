@@ -43,7 +43,7 @@ Command_Kind :: enum u8 {
 	Ignite,  // set light material in a disc alight
 	Explode, // cast rays from a point; `material` carries the power
 	Dig,     // remove soft material in a disc; `material` carries the power
-	Move,    // one tick of the wizard's input; see buttons and pressed below
+	Move,    // one tick of the wizard's input; see buttons, pressed and x below
 }
 
 /*
@@ -57,11 +57,16 @@ Player_Input.player_step calls `held`; pressed is the edge, for the
 jump check, not a plain bool, because Input_Command has no room for a
 field that only Move would ever set alongside a byte that already
 covers it.
+
+Move carries the aim in `x`, a byte of turn in a field it has no other
+use for: a Move names no place in the world, and the aim has to reach
+player_step through the queue unchanged or a replayed dig cuts a
+different tunnel than the one that was played.
 */
 Input_Command :: struct {
 	tick:     u64, // execution tick, set by the queue
 	seq:      u32, // per source counter, set by the queue
-	x:        i32,
+	x:        i32,     // Move: the aim, a byte of turn; see above
 	y:        i32,
 	radius:   u16,
 	material: u16,     // index into the material table

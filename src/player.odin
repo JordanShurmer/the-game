@@ -119,13 +119,78 @@ SPAWN_SEARCH_RANGE :: 4096 // cells either side of x 0 that the scan covers
 // in and nothing harder; obsidian, steel and bedrock stay real walls
 // to him. This is not PLAYER_DIG_OUT above, which is de-penetration
 // searching for open air, not a tool cutting into solid ground.
-PLAYER_DIG_POWER  :: 8 // hardness he can remove
-PLAYER_DIG_RADIUS :: 5 // cells
+PLAYER_DIG_POWER :: 8 // hardness he can remove
 
-// Cells from his center to the dig point, in the direction he faces:
-// a few cells past his chest, clear of his own body, so he does not
-// dig the ground he is standing in.
-PLAYER_DIG_REACH :: 6
+// The tool is a beam out of the centre of his mass, not a ball in
+// front of him, so both of its sizes come off the body the way every
+// other number here does (docs/player.md, "The size of the wizard is
+// not a choice").
+//
+// The reach is two of him. Short enough that he has to walk into what
+// he cuts, long enough that one press opens a length of tunnel he can
+// see from the far end of.
+//
+// The width is his own height and a cell either side, because the cut
+// he makes is the cut he then has to fit through. A kerf narrower than
+// the body is a slit he can watch himself carve and never enter, which
+// is the one way a digging tool feels worse than no tool at all.
+PLAYER_DIG_RANGE :: 2 * PLAYER_BODY_H // 26 cells
+PLAYER_DIG_WIDTH :: PLAYER_BODY_H + 2 // 15 cells, a kerf he fits through
+
+// The room the spray leaves clear must hold the man who holds the tool.
+// A grain thrown into his own body box is a grain the de-penetration
+// search at the top of player_step then has to lift him off, and being
+// shoved upward by your own sawdust is not a feel anybody asked for.
+//
+// The beam starts at his chest, so the furthest the body reaches along
+// the beam is from the chest to the top of his head, whichever way he
+// points it. The scatter is across the beam and adds nothing to that.
+#assert(CUT_SPRAY_NEAR > PLAYER_BODY_H - PLAYER_BODY_H / 2)
+
+// ------------------------------------------------------------
+// Aim
+// ------------------------------------------------------------
+
+/*
+Where the digger points: one byte of turn, so 0 is right, 64 is down,
+128 is left, 192 is up, and 256 wraps back to 0 the way the circle
+does. y grows downward here as it does everywhere else in the world,
+which is why down and not up is the quarter turn after right.
+
+A byte, and not a pair of floats, for two reasons. Player has three
+spare bytes at its tail and no room at all for a vector, and a Move
+command carries the aim through the input queue, where a replay has to
+give the same cut on two machines and a float is a thing two machines
+can disagree about. A byte of turn is 1.4 degrees, which is finer than
+a hand on a mouse.
+*/
+PLAYER_AIM_RIGHT :: u8(0)
+PLAYER_AIM_DOWN  :: u8(64)
+PLAYER_AIM_LEFT  :: u8(128)
+PLAYER_AIM_UP    :: u8(192)
+
+// The aim that points along a delta measured in world cells. A delta
+// of nothing at all has no direction in it, and reads as right, which
+// is the way a fresh wizard faces.
+player_aim_of :: proc(dx, dy: f32) -> u8 {
+	if dx == 0 && dy == 0 do return PLAYER_AIM_RIGHT
+	turns := math.atan2(dy, dx) / (2 * math.PI)
+	return u8(i32(math.round(turns * 256)) & 255)
+}
+
+// The unit vector an aim points along.
+player_aim_vector :: proc(aim: u8) -> (dx, dy: f32) {
+	angle := f32(aim) * (2 * math.PI / 256)
+	return math.cos(angle), math.sin(angle)
+}
+
+// Which way the body turns to hold an aim: right for the half of the
+// circle that points right, left for the other half. Straight up and
+// straight down land on the right, because a body has to face one way
+// or the other and neither answer is truer than the other there.
+player_aim_facing :: proc(aim: u8) -> i8 {
+	return aim <= PLAYER_AIM_DOWN || aim >= PLAYER_AIM_UP ? 1 : -1
+}
 
 // ------------------------------------------------------------
 // Motion, for the sprite sheet
@@ -190,12 +255,26 @@ Player :: struct {
 	coyote:    u8,  // ticks of ledge grace left
 	jet_delay: u8,  // ticks left before a held jump becomes thrust
 	facing:    i8,  // +1 right, -1 left
+	aim:       u8,  // where the digger points; see PLAYER_AIM_RIGHT above
 	on_ground: bool,
 	jetting:   bool,
+	digging:   bool, // the beam is on this tick, for the window to draw
 }
 
 // Two players per 64-byte cache line; keep it that way.
 #assert(size_of(Player) == 32)
+
+/*
+The centre of his mass, in world cells: half the body up from the feet.
+
+One proc, because three things have to measure from the same point or
+the tool reads as attached to nothing. The beam comes out of here, the
+cursor's aim is measured from here, and the window draws the beam from
+here.
+*/
+player_centre :: proc(p: Player) -> (x, y: i32) {
+	return i32(math.floor(p.x)), i32(math.floor(p.y)) - PLAYER_BODY_H / 2
+}
 
 // ------------------------------------------------------------
 // Collision
@@ -429,8 +508,14 @@ and .Jump in held is the level (true for as long as the key is down).
 A press launches him; holding the same key in the air, past
 PLAYER_JET_DELAY_TICKS, lights the jetpack instead. Without that
 split a held key would always fly, and there would be no jump at all.
+
+aim is where the digger points, and it is an input like the buttons
+are: the window reads it off the cursor every frame and the Move
+command carries it through the queue. It defaults to PLAYER_AIM_RIGHT
+so a test that never digs does not have to name a direction; every
+caller that can point at something passes a real one.
 */
-player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool) {
+player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
 	dt : f32 = 1.0 / PLAYER_TICK_HZ
 
 	// De-penetration. The world editor regenerates the world on every
@@ -466,6 +551,12 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	} else {
 		drag : f32 = on_ground ? PLAYER_GROUND_FRICTION : PLAYER_AIR_DRAG
 		p.vx = move_toward(p.vx, 0, drag * dt)
+		// Standing still, he turns to hold the aim. A wizard whose
+		// back is to his own beam reads as a bug, and a walk key is
+		// the only thing that outranks the cursor here: turning him
+		// away from the way he runs would need frames the sheet does
+		// not hold (docs/player.md, "The sprite").
+		p.facing = player_aim_facing(aim)
 	}
 
 	// --- jump ---
@@ -568,20 +659,29 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	p.on_ground = player_on_ground(t, p.x, p.y)
 	p.anim += dt
 
-	// Digging happens after the move resolves, so the dig point uses
-	// where he actually ended the tick, not where he started it. It
-	// runs every tick the button is held, the same level a walk key
-	// reads at: docs/physics.md gives digging no separate edge.
-	if .Dig in held do player_dig(p^, t)
+	// Digging happens after the move resolves, so the beam starts from
+	// where he actually ended the tick, not where he began it. It runs
+	// every tick the button is held, the same level a walk key reads
+	// at: docs/physics.md gives digging no separate edge.
+	p.aim = aim
+	p.digging = .Dig in held
+	if p.digging do player_dig(p^, t)
 }
 
 /*
-Dig the terrain in front of him: a disc of PLAYER_DIG_RADIUS centred
-PLAYER_DIG_REACH cells ahead of his center, in the direction he faces,
-at chest height. No cursor is needed and a test can drive it with
-nothing but a button and a facing.
+Cut with the plasma digger: a beam out of the centre of his mass along
+p.aim, PLAYER_DIG_RANGE cells long and PLAYER_DIG_WIDTH across.
+sandbox_cut is the whole of what it does to the world, the flying
+debris included.
 
-Nothing happens with no sandbox under him. sandbox_dig mutates a
+The tool this replaced was a disc PLAYER_DIG_REACH cells in front of
+his facing. What that cost was never reach. It was that a tool with no
+cursor in it is a tool that happens near a man rather than one he
+holds: he could dig only the two directions he could walk, the hole
+opened beside him instead of out of him, and nothing on the screen
+said where the next hole would be until it was already there.
+
+Nothing happens with no sandbox under him. sandbox_cut mutates a
 running Sandbox; the generator has no dig at all, so a Terrain built
 with sandbox = nil (the spawn scan, a caller that never asked to
 follow) leaves the world untouched rather than failing.
@@ -589,11 +689,19 @@ follow) leaves the world untouched rather than failing.
 player_dig :: proc(p: Player, t: Terrain) -> int {
 	if t.sandbox == nil do return 0
 
-	wx := i32(p.x) + i32(p.facing) * PLAYER_DIG_REACH
-	wy := i32(p.y) - PLAYER_BODY_H / 2
-	sx := wx - t.sandbox.origin_x
-	sy := wy - t.sandbox.origin_y
-	return sandbox_dig(t.sandbox, t.world.materials, sx, sy, PLAYER_DIG_RADIUS, PLAYER_DIG_POWER)
+	dx, dy := player_aim_vector(p.aim)
+	wx, wy := player_centre(p)
+	return sandbox_cut(
+		t.sandbox,
+		t.world.materials,
+		wx - t.sandbox.origin_x,
+		wy - t.sandbox.origin_y,
+		dx,
+		dy,
+		PLAYER_DIG_RANGE,
+		PLAYER_DIG_WIDTH / 2,
+		PLAYER_DIG_POWER,
+	)
 }
 
 // ------------------------------------------------------------
@@ -1315,41 +1423,292 @@ test_digging_the_floor_out_from_under_him_makes_him_fall :: proc(t: ^testing.T) 
 	testing.expectf(t, p.vy > 0, "gravity must be pulling him down through the hole, got vy=%f", p.vy)
 }
 
+// A sandbox filled with one material, placed so that it covers the
+// wizard and everything his beam can reach. The beam is a march out
+// from his chest, so a sandbox that does not hold his chest is a
+// sandbox the beam never starts in.
+//
+// Rock is the medium every test of the shape of the cut uses, because
+// rock crumbles into gravel: a cell that was cut reads as cut whether
+// the beam left air there or a grain flew back into it. In sand, which
+// crumbles into itself, a cut cell and a cell a grain landed in are
+// the same material and the shape cannot be measured at all.
+@(private = "file")
+dig_test_sandbox :: proc(t: ^testing.T, world: World, p: Player, name: string) -> (sb: Sandbox, ok: bool) {
+	material, found := find_material_index(world.materials, name)
+	if !testing.expectf(t, found, "%s must exist in the material table", name) do return {}, false
+
+	sb, ok = sandbox_make(128, 128, 1)
+	if !testing.expect(t, ok, "the sandbox must open") do return {}, false
+
+	cx, cy := player_centre(p)
+	sb.origin_x = cx - 64
+	sb.origin_y = cy - 64
+	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(material)
+	return sb, true
+}
+
+// What the beam cut, in cells of the sandbox: the count of cells no
+// longer holding `material` inside a box around his chest.
+@(private = "file")
+dig_test_count_cut :: proc(sb: ^Sandbox, p: Player, material: Cell) -> (cut: int) {
+	for i in 0 ..< len(sb.cells) {
+		if sb.cells[i] != material do cut += 1
+	}
+	return cut
+}
+
 /*
-Player_Button.Dig, driven by nothing but a button and a facing: no
-cursor is needed, so a test can hold the button and check the cell in
-front of his chest.
+The beam follows the cursor, not the way he walks.
+
+This is the whole of what the aim bought, so it is the first thing
+tested: he faces right, the aim points up, and the cut has to be
+above him and nowhere near the cell the old disc would have cleared.
 */
 @(test)
-test_holding_dig_removes_sandbox_material_in_front_of_him :: proc(t: ^testing.T) {
+test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	p := Player{x = 100, y = 30, facing = 1, aim = PLAYER_AIM_UP}
+	sb, sb_ok := dig_test_sandbox(t, world, p, "Rock")
+	if !sb_ok do return
+	defer sandbox_destroy(&sb)
+
+	rock := sandbox_cell(&sb, 0, 0)
+	terrain := Terrain{world = world, sandbox = &sb}
+	removed := player_dig(p, terrain)
+	testing.expect(t, removed > 0, "the beam must remove something")
+
+	cx, cy := player_centre(p)
+	sx := cx - sb.origin_x
+	sy := cy - sb.origin_y
+
+	// Straight up from the chest, the whole reach of the beam.
+	for step in i32(1) ..= PLAYER_DIG_RANGE {
+		testing.expectf(
+			t, sandbox_cell(&sb, sx, sy - step) != rock,
+			"the beam aimed up must clear the cell %d above his chest", step,
+		)
+	}
+	// Where the old disc dug, level with his chest and ahead of his
+	// facing, nothing may have moved but the width of the kerf.
+	ahead := sx + PLAYER_DIG_WIDTH
+	testing.expect(
+		t, sandbox_cell(&sb, ahead, sy) == rock,
+		"an aim of up must leave the ground in front of his facing alone",
+	)
+}
+
+/*
+The kerf is the cut he then has to fit through, so it is measured
+across and held to PLAYER_DIG_WIDTH. A slit narrower than the body is
+a tunnel he can carve and never enter.
+*/
+@(test)
+test_the_kerf_is_wide_enough_for_his_body :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	p := Player{x = 100, y = 30, facing = 1, aim = PLAYER_AIM_RIGHT}
+	sb, sb_ok := dig_test_sandbox(t, world, p, "Rock")
+	if !sb_ok do return
+	defer sandbox_destroy(&sb)
+
+	rock := sandbox_cell(&sb, 0, 0)
+	terrain := Terrain{world = world, sandbox = &sb}
+	player_dig(p, terrain)
+
+	cx, cy := player_centre(p)
+	sx := cx - sb.origin_x + PLAYER_DIG_RANGE / 2 // half way out, clear of both ends
+	sy := cy - sb.origin_y
+
+	clear_cells := 0
+	for y in sy - PLAYER_DIG_WIDTH ..= sy + PLAYER_DIG_WIDTH {
+		if sandbox_cell(&sb, sx, y) != rock do clear_cells += 1
+	}
+	testing.expectf(
+		t, clear_cells == PLAYER_DIG_WIDTH,
+		"the kerf must be PLAYER_DIG_WIDTH (%d) cells across, got %d", PLAYER_DIG_WIDTH, clear_cells,
+	)
+	testing.expectf(
+		t, PLAYER_DIG_WIDTH > PLAYER_BODY_H,
+		"the kerf must be wider than the body is tall, or he cannot enter his own tunnel",
+	)
+}
+
+/*
+Bedrock is a wall to him, and the beam has to stop at it rather than
+reach through it. This is the shadow a blast casts, said for a beam.
+*/
+@(test)
+test_the_digger_stops_at_what_it_cannot_cut :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	p := Player{x = 100, y = 30, facing = 1, aim = PLAYER_AIM_RIGHT}
+	sb, sb_ok := dig_test_sandbox(t, world, p, "Rock")
+	if !sb_ok do return
+	defer sandbox_destroy(&sb)
+
+	rock := sandbox_cell(&sb, 0, 0)
+	bedrock, bedrock_found := find_material_index(world.materials, "Bedrock")
+	if !testing.expect(t, bedrock_found, "Bedrock must exist in the material table") do return
+
+	cx, cy := player_centre(p)
+	sx := cx - sb.origin_x
+	sy := cy - sb.origin_y
+
+	// A bedrock pane across the beam, half way out.
+	wall := sx + PLAYER_DIG_RANGE / 2
+	for y in i32(0) ..< sb.height do sb.cells[sandbox_index(&sb, wall, y)] = Cell(bedrock)
+
+	terrain := Terrain{world = world, sandbox = &sb}
+	player_dig(p, terrain)
+
+	testing.expect(
+		t, sandbox_cell(&sb, wall, sy) == Cell(bedrock),
+		"bedrock is harder than PLAYER_DIG_POWER: the beam must not remove it",
+	)
+	testing.expect(
+		t, sandbox_cell(&sb, wall + 1, sy) == rock,
+		"the beam must stop at the bedrock, not reach past it",
+	)
+	testing.expect(
+		t, sandbox_cell(&sb, wall - 1, sy) != rock,
+		"everything short of the bedrock must still be cut",
+	)
+}
+
+/*
+The cuttings fly. A beam through rock leaves gravel behind its own
+frontier, because rock crumbles into gravel and the throw goes back
+down the hole the beam just opened.
+
+The count is loose on purpose: which cells fly is a hash of the place
+and the tick (docs/physics.md, "The step is deterministic"), and a
+test that named the exact cells would be a test of the hash.
+*/
+@(test)
+test_the_digger_throws_its_cuttings_back_down_the_hole :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+	carve_all_air(world)
+
+	p := Player{x = 100, y = 30, facing = 1, aim = PLAYER_AIM_RIGHT}
+	sb, sb_ok := dig_test_sandbox(t, world, p, "Rock")
+	if !sb_ok do return
+	defer sandbox_destroy(&sb)
+
+	gravel, gravel_found := find_material_index(world.materials, "Gravel")
+	if !testing.expect(t, gravel_found, "Gravel must exist in the material table") do return
+
+	terrain := Terrain{world = world, sandbox = &sb}
+	removed := player_dig(p, terrain)
+	testing.expect(t, removed > 0, "the beam must cut the rock: rock is exactly PLAYER_DIG_POWER")
+
+	counts := make([]int, len(world.materials.materials))
+	defer delete(counts)
+	sandbox_census(&sb, counts)
+
+	testing.expect(t, counts[gravel] > 0, "some of the cut rock must fly as gravel")
+	testing.expectf(
+		t, counts[gravel] < removed / 2,
+		"most of the cut must be vapour, or the tunnel fills as fast as it opens: %d grains of %d cells cut",
+		counts[gravel], removed,
+	)
+}
+
+// A cut cell that cannot fall is vapour, not a grain hanging in the
+// air. Sand is a powder with no crumbled form of its own, so it flies
+// as itself; that is the case this holds, because the other one (a
+// solid with no crumbled form) leaves nothing to look for.
+@(test)
+test_a_thrown_grain_is_something_that_can_fall :: proc(t: ^testing.T) {
+	world, ok := make_flat_world(t, 200, 60)
+	if !ok do return
+	defer destroy_flat_world(world)
+
+	table := world.materials
+	for m, i in table.materials {
+		debris := table.crumbles_to[i]
+		if table.kind[debris] == .Still do continue
+		testing.expectf(
+			t, table.materials[debris].state != .Solid,
+			"%s crumbles into %s, which a cut would throw: a thrown grain must not be solid",
+			table.names[i], table.names[debris],
+		)
+		_ = m
+	}
+}
+
+/*
+Holding the button cuts, every tick, through the same player_step the
+window calls. This is the button end of the tool, where the four tests
+above are the beam end of it.
+*/
+@(test)
+test_holding_dig_cuts_the_sandbox_where_the_aim_points :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 30)
 
-	sand, sand_found := find_material_index(world.materials, "Sand")
-	if !testing.expect(t, sand_found, "Sand must exist in the material table") do return
-
-	sb, sb_ok := sandbox_make(8, 8, 1)
-	if !testing.expect(t, sb_ok, "the sandbox must open") do return
+	p := Player{x = 100, y = 30, facing = 1}
+	sb, sb_ok := dig_test_sandbox(t, world, p, "Rock")
+	if !sb_ok do return
 	defer sandbox_destroy(&sb)
-	sb.origin_x = 54
-	sb.origin_y = 20
-	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(sand)
 
+	rock := sandbox_cell(&sb, 0, 0)
 	terrain := Terrain{world = world, sandbox = &sb}
 
-	p := Player{x = 50, y = 30, facing = 1}
-	for _ in 0 ..< 5 do player_step(&p, terrain, {}, false) // settle onto the world's own floor
-	testing.expect(t, p.on_ground, "he must be standing before the dig starts")
+	cx, cy := player_centre(p)
+	sx := cx - sb.origin_x
+	sy := cy - sb.origin_y
+	testing.expect(t, sandbox_cell(&sb, sx - PLAYER_DIG_RANGE, sy) == rock, "the cell he aims at must start as rock")
 
-	dig_x := i32(p.x) + i32(p.facing) * PLAYER_DIG_REACH - sb.origin_x
-	dig_y := i32(p.y) - PLAYER_BODY_H / 2 - sb.origin_y
-	testing.expect(t, sandbox_cell(&sb, dig_x, dig_y) == Cell(sand), "the dig point must start as sand")
+	player_step(&p, terrain, {.Dig}, false, PLAYER_AIM_LEFT)
 
-	player_step(&p, terrain, {.Dig}, false)
+	testing.expect(t, p.digging, "the window needs to know the beam is on, to draw it")
+	testing.expectf(t, p.aim == PLAYER_AIM_LEFT, "player_step must keep the aim it was given, got %d", p.aim)
+	testing.expect(t, p.facing == -1, "standing still, he must turn to hold the aim")
+	testing.expect(
+		t, sandbox_cell(&sb, sx - PLAYER_DIG_RANGE / 2, sy) != rock,
+		"holding Dig must cut along the aim it was given",
+	)
+}
 
-	testing.expect(t, sandbox_cell(&sb, dig_x, dig_y) != Cell(sand), "holding Dig must clear the sand at the dig point")
+// The two ends of the aim have to agree, or the beam points one way
+// and the picture of it points another.
+@(test)
+test_an_aim_round_trips_through_its_byte_of_turn :: proc(t: ^testing.T) {
+	cases := []struct{dx, dy: f32, aim: u8, name: string} {
+		{1, 0, PLAYER_AIM_RIGHT, "right"},
+		{0, 1, PLAYER_AIM_DOWN, "down"},   // y grows downward
+		{-1, 0, PLAYER_AIM_LEFT, "left"},
+		{0, -1, PLAYER_AIM_UP, "up"},
+	}
+	for c in cases {
+		testing.expectf(t, player_aim_of(c.dx, c.dy) == c.aim, "%s must read as aim %d", c.name, c.aim)
+		dx, dy := player_aim_vector(c.aim)
+		testing.expectf(
+			t, abs(dx-c.dx) < 0.001 && abs(dy-c.dy) < 0.001,
+			"aim %d must point back along %s, got %f, %f", c.aim, c.name, dx, dy,
+		)
+	}
+
+	testing.expect(t, player_aim_of(0, 0) == PLAYER_AIM_RIGHT, "no direction at all must read as right")
+	testing.expect(t, player_aim_facing(PLAYER_AIM_RIGHT) == 1)
+	testing.expect(t, player_aim_facing(PLAYER_AIM_LEFT) == -1)
+	testing.expect(t, player_aim_facing(PLAYER_AIM_LEFT - 32) == -1, "the left half of the circle faces left")
+	testing.expect(t, player_aim_facing(PLAYER_AIM_UP + 32) == 1, "the right half of the circle faces right")
 }
 
 @(test)

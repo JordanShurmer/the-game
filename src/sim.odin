@@ -260,7 +260,7 @@ sim_apply :: proc(s: ^Sim, command: Input_Command) {
 	case .Move:
 		// The same single implementation the window's direct path
 		// calls: docs/physics.md's "one path for a hand and a model."
-		sim_step_player(s, command.buttons, .Jump in command.pressed)
+		sim_step_player(s, command.buttons, .Jump in command.pressed, u8(command.x))
 	}
 }
 
@@ -296,10 +296,14 @@ says he is standing on the running physics, nil otherwise, so a caller
 that never asked to follow gets the same World-only collision the
 wizard always had. Following also re-snaps the sandbox after the
 move, in case this tick carried him out of that square.
+
+aim is where his digger points, one byte of turn (src/player.odin,
+PLAYER_AIM_RIGHT). It defaults the same way player_step's does, so a
+caller with nothing to point at does not have to name a direction.
 */
-sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool) {
+sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
-	player_step(&s.player, terrain, held, jump_pressed)
+	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
 }
 

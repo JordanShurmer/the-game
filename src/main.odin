@@ -84,6 +84,11 @@ App :: struct {
 
 BACKGROUND :: rl.Color{18, 20, 26, 255}
 
+// The plasma beam: a wide dim sheath and a thin bright core, which is
+// what reads as hot at any zoom. See app_draw_beam.
+BEAM_GLOW :: rl.Color{110, 210, 255, 255}
+BEAM_CORE :: rl.Color{236, 250, 255, 255}
+
 main :: proc() {
 	app: App
 	if !app_load_data(&app) {
@@ -402,10 +407,25 @@ app_apply_zoom :: proc(app: ^App, dir: i32) {
 }
 
 /*
+Where the cursor is, in world cells.
+
+This is the inverse of the one transform the whole view is drawn
+through. rl.DrawTexturePro blows app_view_cells texels up to the whole
+window, so a screen pixel is zoom/step of a world cell and the scale
+here is the same number app_draw_player and app_draw_beam scale by.
+*/
+@(private = "file")
+app_cursor_cell :: proc(app: ^App) -> (x, y: i32) {
+	m := rl.GetMousePosition()
+	scale := f32(app.zoom) / f32(app.step)
+	return app.cam_x + i32(m.x / scale), app.cam_y + i32(m.y / scale)
+}
+
+/*
 Play: A/D or LEFT/RIGHT walk, SHIFT runs, SPACE/W/UP jumps and, held in
-the air, flies, E or the left mouse button digs. Wheel and -/= still
-zoom; docs/player.md lists zoom as a control of its own, not one the
-editor owns alone.
+the air, flies, E or the left mouse button digs, and the cursor points
+the digger. Wheel and -/= still zoom; docs/player.md lists zoom as a
+control of its own, not one the editor owns alone.
 */
 @(private = "file")
 app_handle_play :: proc(app: ^App) {
@@ -422,7 +442,15 @@ app_handle_play :: proc(app: ^App) {
 	// and there would be no jump at all.
 	jump_pressed := rl.IsKeyPressed(.SPACE) || rl.IsKeyPressed(.W) || rl.IsKeyPressed(.UP)
 
-	app_step_player(app, rl.GetFrameTime(), held, jump_pressed)
+	// The beam comes out of the centre of his mass, so the aim is
+	// measured from there and not from his feet: measured from the
+	// feet, a cursor level with his chest would point the tool at the
+	// floor. player_centre is the one place that point is decided.
+	cursor_x, cursor_y := app_cursor_cell(app)
+	centre_x, centre_y := player_centre(app.player)
+	aim := player_aim_of(f32(cursor_x - centre_x), f32(cursor_y - centre_y))
+
+	app_step_player(app, rl.GetFrameTime(), held, jump_pressed, aim)
 	app_follow_player(app)
 
 	if zoom_dir := app_read_zoom_dir(); zoom_dir != 0 {
@@ -443,14 +471,14 @@ Past the cap the remainder is dropped instead: a hitch is the honest
 cost of a stall, not a debt the sim carries forward.
 */
 @(private = "file")
-app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bool) {
+app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bool, aim: u8) {
 	tick_dt : f64 = 1.0 / f64(PLAYER_TICK_HZ)
 	app.tick_accum += f64(dt)
 
 	steps := 0
 	jp := jump_pressed
 	for app.tick_accum >= tick_dt && steps < PLAYER_MAX_CATCHUP_STEPS {
-		sim_step_player(&app.sim, held, jp)
+		sim_step_player(&app.sim, held, jp, aim)
 		// Physics and the wizard advance together, one sandbox tick per
 		// player tick: docs/physics.md, "The window shows the physics".
 		// sim_run does this for the queue's own ticks; the window's
@@ -537,6 +565,50 @@ app_draw_player :: proc(app: ^App) {
 	}
 
 	rl.DrawTexturePro(app.sprite_texture, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
+	app_draw_beam(app)
+}
+
+/*
+The plasma beam, while he holds the button down.
+
+The cut itself is already on the screen: player_dig cleared those
+cells and app_draw_sandbox draws what the sandbox holds. What is
+missing without this is the tool. A hole that opens with nothing
+joining it to the man reads as the world breaking, not as him working,
+and the beam is what says which of the two it is.
+
+Two lines, not one. The sheath is the width of the kerf and nearly
+transparent, so it shows what the beam is about to take; the core is
+one cell wide and almost white, which is what reads as hot. Both are
+drawn through the same scale the terrain and the wizard are, so the
+beam lands on the cells it actually cut.
+*/
+@(private = "file")
+app_draw_beam :: proc(app: ^App) {
+	// The beam is a picture of a button being held, and no button is
+	// held while an editor is open: player_step is the only thing that
+	// writes p.digging, and the editors are the two places that do not
+	// call it. Without this the last beam of play hangs across the
+	// editor until the next tick of play clears it.
+	if app.editor.open || app.tile_edit.open do return
+
+	p := app.player
+	if !p.digging do return
+
+	scale := f32(app.zoom) / f32(app.step)
+	cx, cy := player_centre(p)
+	dx, dy := player_aim_vector(p.aim)
+
+	from := rl.Vector2{f32(cx - app.cam_x) * scale, f32(cy - app.cam_y) * scale}
+	to := rl.Vector2 {
+		from.x + dx * f32(PLAYER_DIG_RANGE) * scale,
+		from.y + dy * f32(PLAYER_DIG_RANGE) * scale,
+	}
+
+	rl.DrawLineEx(from, to, f32(PLAYER_DIG_WIDTH) * scale, rl.Fade(BEAM_GLOW, 0.18))
+	// At least one screen pixel: zoomed all the way out, a core a
+	// fraction of a pixel wide would not be drawn at all.
+	rl.DrawLineEx(from, to, max(scale, 1), BEAM_CORE)
 }
 
 draw_hud :: proc(app: ^App) {
@@ -599,7 +671,7 @@ draw_hud :: proc(app: ^App) {
 		rl.RAYWHITE,
 	)
 
-	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
 }
 
 // ------------------------------------------------------------

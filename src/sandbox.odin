@@ -45,6 +45,23 @@ SANDBOX_CHUNK :: 64
 EXPLODE_MIN_RAYS      :: 24
 EXPLODE_RAYS_PER_CELL :: 6
 
+// See docs/physics.md, "The plasma digger". A cut throws a part of what
+// it removes back down its own hole and turns the rest to vapour.
+//
+// The part has to be small. A grain is one cell and rock crumbles into
+// one cell of gravel, so a cut that threw all of it would fill its own
+// tunnel exactly as fast as it opened it, and the digger would move
+// the rock without ever removing any.
+CUT_SPRAY_CHANCE :: 40 // out of 255, so about one cut cell in six
+
+// The length of the beam nearest the tool that no grain may land in.
+// Whatever holds the beam is standing there, and a grain thrown into
+// it is a grain that body then has to be pushed off. Nothing nearer
+// the tool than this throws at all, and nothing lands nearer either.
+CUT_SPRAY_NEAR :: 10 // cells
+
+CUT_SPRAY_ACROSS :: 2 // cells either side of the beam that a grain can land
+
 // Index 0 of the material table is Air. A sandbox clears to zeroed
 // memory, so Air must be the value that zero means. sim_init checks it.
 MATERIAL_AIR :: Cell(0)
@@ -338,6 +355,7 @@ Sandbox_Roll :: enum u32 {
 	React_Side, // which of the four sides a reaction probes
 	React_Roll, // whether that reaction happens
 	Fire,       // whether a flame catches one of its eight neighbours
+	Cut_Spray,  // whether a cut cell flies as debris, and where it lands
 }
 
 /*
@@ -663,6 +681,144 @@ sandbox_dig :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i3
 		}
 	}
 	return removed
+}
+
+/*
+Cut a straight kerf from a point, and throw the cuttings back down it.
+
+This is the tool the wizard holds, and it is a beam where sandbox_dig
+above is a ball. A ball clears whatever it is dropped on. A beam
+marches out from one point in one direction, which is the difference
+between a tool that acts near a man and a tool he holds and points.
+
+**The beam is a ball swept along a line**, and not a line of cells
+across the axis, because a line of cells across a diagonal axis is a
+line with holes in it. Rounding a direction of 0.707 to whole cells
+puts the span's cells corner to corner, and a kerf of cells that touch
+only at their corners is a checkerboard the wizard cannot walk down
+and the eye does not read as a cut at all. A disc has that problem at
+no angle, and the cost of the overlap between one step's disc and the
+next is a bounds test and a comparison on cells that are already air.
+
+Three rules, and each one is a feel that the disc did not have:
+
+  - **The beam stops at what it cannot cut.** A cell harder than
+    `power` on the axis ends it there, so bedrock casts a shadow the
+    way it does for a blast, and a wall stays a wall instead of
+    something the tool reaches straight through. Nothing past that end
+    is cut either: the head of the last disc would otherwise reach
+    half_width through a thin wall and take what stands behind it.
+
+  - **What it removes it throws.** A cut cell becomes its crumbled
+    form, out of the same crumbles_to table a blast reads, and flies
+    back down the beam to land somewhere between CUT_SPRAY_NEAR and
+    the cell it came from. Back down the beam is the one direction the
+    cut has certainly opened, because every cell between the grain and
+    the tool was removed on the way out to it. This is the sawdust off
+    a drill: it comes back out of the hole, it lands in the open, and
+    ordinary physics does the rest.
+
+  - **Most of it is vapour.** Only CUT_SPRAY_CHANCE of the cut flies,
+    for the reason written beside that constant.
+
+`dx` and `dy` are a unit direction. `half_width` is the radius of the
+swept disc, so the kerf is `2*half_width + 1` cells across at every
+angle. The result is the number of cells removed.
+*/
+sandbox_cut :: proc(
+	sb: ^Sandbox,
+	table: Material_Table,
+	cx, cy: i32,
+	dx, dy: f32,
+	range, half_width: i32,
+	power: u8,
+) -> (removed: int) {
+	// A unit direction turned a quarter turn is (-dy, dx), and that is
+	// the whole of the scatter across the beam.
+	px, py := -dy, dx
+	r2 := half_width * half_width
+
+	// How far the beam gets. The axis is marched first, over the world
+	// as it stands, because a march interleaved with the cutting would
+	// clear the very wall that was supposed to stop it.
+	reach := i32(0)
+	for step in i32(1) ..= range {
+		ax := cx + i32(math.round(dx * f32(step)))
+		ay := cy + i32(math.round(dy * f32(step)))
+		if !sandbox_in_bounds(sb, ax, ay) do break
+		if table.materials[sb.cells[sandbox_index(sb, ax, ay)]].hardness > power do break
+		reach = step
+	}
+
+	for step in i32(1) ..= reach {
+		ax := cx + i32(math.round(dx * f32(step)))
+		ay := cy + i32(math.round(dy * f32(step)))
+
+		for y := max(ay-half_width, 0); y <= min(ay+half_width, sb.height-1); y += 1 {
+			for x := max(ax-half_width, 0); x <= min(ax+half_width, sb.width-1); x += 1 {
+				ox := x - ax
+				oy := y - ay
+				if ox*ox + oy*oy > r2 do continue
+
+				// Nothing past the end of the beam. The head of the
+				// last disc would otherwise reach half_width through
+				// the wall that stopped it and take what stands behind.
+				if f32(x-cx)*dx + f32(y-cy)*dy > f32(reach) do continue
+
+				i := sandbox_index(sb, x, y)
+				material := sb.cells[i]
+				if material == MATERIAL_AIR do continue
+				if table.materials[material].hardness > power do continue
+
+				sandbox_put(sb, table, i, MATERIAL_AIR)
+				removed += 1
+
+				// Where the grain lands: anywhere in the open length
+				// of beam between the tool's own room and the disc it
+				// was cut from. Both numbers come out of the sandbox's
+				// hash, so the same seed and tick throw the same grain
+				// to the same cell and a replay matches.
+				if step <= CUT_SPRAY_NEAR do continue
+				if sandbox_chance(sb, x, y, .Cut_Spray) & 255 >= CUT_SPRAY_CHANCE do continue
+
+				back := CUT_SPRAY_NEAR + i32(sandbox_chance(sb, x, y, .Cut_Spray, 1) % u32(step - CUT_SPRAY_NEAR))
+				across := i32(sandbox_chance(sb, x, y, .Cut_Spray, 2) % (2*CUT_SPRAY_ACROSS + 1)) - CUT_SPRAY_ACROSS
+				sandbox_throw(
+					sb,
+					table,
+					material,
+					cx + i32(math.round(dx*f32(back) + px*f32(across))),
+					cy + i32(math.round(dy*f32(back) + py*f32(across))),
+				)
+			}
+		}
+	}
+	return removed
+}
+
+/*
+Land one cut grain, if it is a thing that can land at all.
+
+sandbox_cut decides where a grain flies. This decides what it is when
+it gets there and whether it stays: a grain has to be able to fall, or
+it hangs in mid air where the throw left it. Rock crumbles into gravel
+and gravel falls; a solid with no crumbled form of its own is vapour
+instead, and Cell_Kind.Still is exactly the set of cells that never
+move.
+
+A grain thrown into anything but air has nowhere to go and is vapour
+too, which is the falloff the scatter needs: the ones that stray out
+of the kerf into solid rock are simply lost.
+*/
+@(private = "file")
+sandbox_throw :: proc(sb: ^Sandbox, table: Material_Table, material: Cell, tx, ty: i32) {
+	debris := Cell(table.crumbles_to[material])
+	if table.kind[debris] == .Still do return
+	if !sandbox_in_bounds(sb, tx, ty) do return
+
+	i := sandbox_index(sb, tx, ty)
+	if sb.cells[i] != MATERIAL_AIR do return
+	sandbox_put(sb, table, i, debris)
 }
 
 // Count the cells of each material. The result is indexed like the table.
@@ -1294,6 +1450,71 @@ test_dig_removes_rock_but_not_steel_or_bedrock :: proc(t: ^testing.T) {
 	removed_bedrock := sandbox_dig(&sb, table, 8, 2, 0, 8)
 	testing.expect(t, removed_bedrock == 0, "bedrock must resist the wizard's dig power")
 	testing.expect(t, int(sandbox_cell(&sb, 8, 2)) == bedrock, "bedrock must still be there")
+}
+
+/*
+The cut throws its cuttings, and it throws them the same way twice.
+
+Determinism is the property the whole input queue rests on, and the
+spray is the first thing in the sandbox that both draws from the hash
+and writes cells where no cell was. A cut that scattered differently
+on a replay would drift two clients apart on the first press of the
+dig button.
+*/
+@(test)
+test_a_cut_throws_its_cuttings_and_replays_them_exactly :: proc(t: ^testing.T) {
+	table, load_ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	testing.expect(t, load_ok, "materials must load")
+
+	rock, _ := find_material_index(table, "Rock")
+
+	// Rock crumbles into gravel, so gravel in the sandbox afterwards is
+	// cut rock that flew rather than cut rock that turned to vapour.
+	run :: proc(table: Material_Table, rock: int) -> (checksum: u64, gravel_count: int, removed: int) {
+		sb, _ := sandbox_make(96, 96, 7)
+		defer sandbox_destroy(&sb)
+		for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(rock)
+
+		removed = sandbox_cut(&sb, table, 48, 48, 1, 0, 40, 3, 8)
+
+		counts := make([]int, len(table.materials))
+		defer delete(counts)
+		sandbox_census(&sb, counts)
+		gravel_index, _ := find_material_index(table, "Gravel")
+		return sandbox_checksum(&sb), counts[gravel_index], removed
+	}
+
+	first, gravel_first, removed := run(table, rock)
+	second, gravel_second, removed_again := run(table, rock)
+
+	testing.expect(t, removed > 0, "a beam through rock must cut something")
+	testing.expect(t, gravel_first > 0, "rock crumbles into gravel: some of the cut must fly")
+	testing.expectf(
+		t, gravel_first < removed/2,
+		"most of a cut must be vapour, got %d grains of %d cells cut", gravel_first, removed,
+	)
+	testing.expect(t, first == second, "the same seed must cut and scatter the same way twice")
+	testing.expect(t, gravel_first == gravel_second && removed == removed_again, "and throw the same number of grains")
+}
+
+// A beam is stopped by what it cannot cut, the way a blast's rays are.
+@(test)
+test_a_cut_stops_at_material_harder_than_its_power :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 32, 8, 1)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	rock, _ := find_material_index(table, "Rock")
+	bedrock, _ := find_material_index(table, "Bedrock")
+	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(rock)
+	for y in i32(0) ..< sb.height do sb.cells[sandbox_index(&sb, 10, y)] = Cell(bedrock)
+
+	sandbox_cut(&sb, table, 0, 4, 1, 0, 30, 0, 8)
+
+	testing.expect(t, sandbox_cell(&sb, 9, 4) == MATERIAL_AIR, "everything short of the bedrock must be cut")
+	testing.expect(t, int(sandbox_cell(&sb, 10, 4)) == bedrock, "the bedrock itself must stand")
+	testing.expect(t, int(sandbox_cell(&sb, 11, 4)) == rock, "and the beam must not reach past it")
 }
 
 @(test)
