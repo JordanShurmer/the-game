@@ -216,7 +216,6 @@ client sees an edit reach the physics: paint, refill, run.
 sim_refill_sandbox :: proc(s: ^Sim) {
 	sandbox_fill_from_world(&s.sandbox, s.world, s.sandbox.origin_x, s.sandbox.origin_y)
 	s.sandbox.tick = 0
-	s.sandbox.rng = sandbox_seed_state(s.sandbox.seed)
 	input_queue_init(&s.queue, s.queue.delay)
 }
 

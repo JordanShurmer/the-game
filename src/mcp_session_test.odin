@@ -275,7 +275,12 @@ test_session_fire_burns_the_oil_away :: proc(t: ^testing.T) {
 	before, _ := call(t, &session, 4, `{"name":"world_status","arguments":{}}`)
 	testing.expect(t, strings.contains(before, "Oil"), "the oil must be in the world")
 
-	call(t, &session, 5, `{"name":"enqueue_input","arguments":{"kind":"ignite","x":20,"y":15,"radius":6}}`)
+	// The ignite covers the whole pool, and the ground the collapse
+	// threw a grain of oil across as well. A liquid packs into one
+	// body now instead of holding the holes it fell with, so a grain
+	// left clear of that body stays clear, and fire cannot cross the
+	// gap to it.
+	call(t, &session, 5, `{"name":"enqueue_input","arguments":{"kind":"ignite","x":20,"y":15,"radius":12}}`)
 	call(t, &session, 6, `{"name":"tick","arguments":{"count":400}}`)
 
 	after, _ := call(t, &session, 7, `{"name":"world_status","arguments":{}}`)
