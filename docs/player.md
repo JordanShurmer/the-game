@@ -87,6 +87,34 @@ Solid is `state == .Solid || state == .Powder`. Rock, Gold, Dirt and
 Sand hold him up. Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do
 not.
 
+**A grain in mid air is not a floor.** A cell that moved on the last
+sandbox tick does not stop him, however solid the material in it is.
+Without that rule a stream of falling sand is a wall: it is Powder,
+Powder holds him up, and a wizard who flies into the sand pouring out
+of a hole he just cut stops dead against the falling column, or stands
+on it, or rides it down. The eye reads that column as something moving
+through the air, and a body has to be able to move through it too.
+
+The flag it reads is the sandbox's own `moved`, which is the whole of
+what makes the rule cost nothing. The step already clears it under the
+dirty rectangles and sets it on both sides of every swap, so it is
+exactly "this cell changed places on the last tick", and reading it is
+one array index beside the one the answer already needed. Nothing new
+is stored and nothing new is cleared.
+
+Two things that look like corners and are not. A cell a grain moved
+*out* of holds air afterwards, which was never solid. And a solid
+never moves at all, because the step treats every solid as a wall, so
+the only cells the rule ever changes the answer for are the loose ones
+it is for.
+
+What it costs, said plainly: he sinks into ground that is collapsing,
+where before he rode the top of it. Dig into a bank of dirt and the
+dirt that pours in can bury him, and the de-penetration search at the
+top of `player_step` is what walks him back out. That path was already
+there, for a world editor that regenerates rock around a standing
+wizard; this gives it a second, ordinary caller.
+
 The generator's own answer, `world_cell_at`, is not cheap: it costs a
 biome lookup and five splitmix64 hashes, and `worldgen.odin` says so
 where it explains why generation works in runs. A sandbox read is one
