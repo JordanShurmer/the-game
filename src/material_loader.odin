@@ -39,6 +39,14 @@ Material_Table :: struct {
 	kind:        []Cell_Kind,
 	work:        []Cell_Works,
 
+	// The weights once more, as the vpshufb tables the wide LOAD pass
+	// reads. Built by sandbox_build_luts; see
+	// src/sandbox_step_asm.odin, which is also where the two flags
+	// below say what they gate.
+	weight_lut: [4 * SANDBOX_WIDE_LANES]u8,
+	lut_ok:     bool, // the table is short enough for the lookup
+	wide_ok:    bool, // ... and this machine can run the templates
+
 	// Fire, resolved once here rather than searched for by name at
 	// each blast. A blast leaves fire in its inner third, and a chain
 	// of gunpowder is many blasts in one tick, so a linear name search
@@ -322,6 +330,9 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		table.kind[i]   = cell_kind_of(m, is_air)
 		table.work[i]   = cell_work_of(m, reacts[i])
 	}
+	// And the weights once more, as the tables the wide LOAD pass
+	// reads. See src/sandbox_step_asm.odin.
+	sandbox_build_luts(&table)
 
 	return table, true
 }

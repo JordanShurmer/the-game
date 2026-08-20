@@ -19,12 +19,14 @@ answer from one cell to the next:
 
 	LOAD    turns the row of material ids, and the rows above and
 	        below it, into weights and kinds. This is the only place
-	        the step reads the material table.
+	        the step reads the material table, and two of its three
+	        rows go through an asm template that reads that table 32
+	        cells at a time (src/sandbox_step_asm.odin).
 
 	HOT     is everything that is not a move: a lifetime running out,
 	        a reaction with a neighbour, fire spreading along fuel.
-	        Almost no cell needs any of it, and two comparisons find
-	        the ones that do.
+	        Two comparisons find the cells that need it, which is few
+	        of a dry row and most of a wet one.
 
 	INTENT  compares the three rows and writes, for each cell, the one
 	        step it wants to take. It reads only, so it is a fixed
@@ -38,7 +40,8 @@ sandbox_step_simd.odin is the same pass in vectors, and a test holds
 the two to the same answer. It is no longer where the tick is spent:
 in vectors it costs about a tenth, and LOAD and HOT cost about three
 quarters between them. See docs/physics.md, "Where the tick goes now",
-before making the step quicker.
+before making the step quicker: it holds the split by pass, and the
+two changes to HOT that were measured and thrown away.
 
 WEIGHT IS THE WHOLE MOVE RULE
 
@@ -208,7 +211,7 @@ into one bitwise operation apiece and leaves no branch in the loop.
 The result reports whether any cell of this row needs the hot pass.
 The loop has the material in hand anyway, so the answer is free, and
 it saves a second walk of the row for the rows that have no lifetime
-and no reaction in them, which is most of them.
+and no reaction in them.
 */
 sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (hot: bool) {
 	// One cell either side of the span, because a cell looks at its
@@ -235,18 +238,40 @@ sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) ->
 	return hot
 }
 
-// One row of weights. Beyond the top and the bottom of the sandbox is
-// a wall, the same as beyond its sides.
+/*
+One row of weights. Beyond the top and the bottom of the sandbox is a
+wall, the same as beyond its sides.
+
+Two of the three rows LOAD reads come through here, so this is where
+most of the pass is spent. sandbox_weights_span does the middle of the
+row 32 cells at a time; the cells before the first whole group and
+after the last one are the loop below, which is also the rule the wide
+one is read against.
+*/
 sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y, lo, hi: i32) {
 	if y < 0 || y >= sb.height {
 		for x in lo ..= hi do out[x + 1] = CELL_WALL
 		return
 	}
 	base := sandbox_index(sb, 0, y)
-	for x in lo ..= hi {
-		i := base + int(x)
-		out[x + 1] = table.weight[sb.cells[i]] | (u16(0) - u16(sb.moved[i]))
+
+	x := lo
+	if table.wide_ok {
+		for stop := sandbox_wide_start(lo, hi); x < stop; x += 1 {
+			out[x + 1] = sandbox_weight_of(sb, table, base + int(x))
+		}
+		x = sandbox_weights_span(sb, table, out, base, x, hi)
 	}
+	for ; x <= hi; x += 1 {
+		out[x + 1] = sandbox_weight_of(sb, table, base + int(x))
+	}
+}
+
+// The weight of one cell of a row, with the rule that a cell which
+// already moved this tick is a wall. This is the rule weights_32 in
+// src/sandbox_step_asm.odin answers 32 cells at a time.
+sandbox_weight_of :: #force_inline proc(sb: ^Sandbox, table: Material_Table, i: int) -> u16 {
+	return table.weight[sb.cells[i]] | (u16(0) - u16(sb.moved[i]))
 }
 
 // ------------------------------------------------------------
@@ -257,8 +282,11 @@ sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y,
 Everything that is not a move: a lifetime running out, a reaction with
 a neighbour, and fire spreading along fuel.
 
-Almost no cell needs any of this. A lifetime above zero and a work set
-that is not empty are the two comparisons that find the ones that do.
+A lifetime above zero and a work set that is not empty are the two
+comparisons that find the cells with something to do. On the shipped
+world that is most of the cells of a wet row and few of a dry one,
+because water, dirt, rock and sand all have a row in the reaction
+table.
 
 The result reports whether any cell changed, because a cell that
 changed makes what LOAD read out of date.
