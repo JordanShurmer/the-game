@@ -24,8 +24,13 @@ session and lets a test compare one checksum instead of a picture.
 The y axis points down, the same way it does in the world.
 */
 
-SANDBOX_MAX_WIDTH  :: 1024
-SANDBOX_MAX_HEIGHT :: 1024
+// The largest sandbox sandbox_make will build, which is what stops a
+// bad argument from asking for a hundred gigabytes. A cell costs four
+// bytes across the three parallel arrays, so this is 16 MB a side at
+// most. SANDBOX_PLAY_SIZE is the size the game actually runs and is
+// held to this by an assert of its own.
+SANDBOX_MAX_WIDTH  :: 2048
+SANDBOX_MAX_HEIGHT :: 2048
 
 // See docs/physics.md step 3, "The cost". A full scan of an idle
 // sandbox pays for the whole grid even when nothing in it can move.
