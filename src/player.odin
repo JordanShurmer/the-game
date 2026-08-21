@@ -399,6 +399,7 @@ world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
 	is_mouth :: proc(t: Terrain, x, surface_y: i32) -> bool {
 		for dy in i32(0) ..< SPAWN_MOUTH_DEPTH {
+			if world_pond_carves(t.world, x, surface_y + dy) do return false
 			if player_solid_at(t, x, surface_y + dy) do return false
 		}
 		return true
@@ -418,6 +419,7 @@ world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, 
 	for dist := i32(SPAWN_CLEARANCE); dist < SPAWN_SEARCH_RANGE; dist += 1 {
 		for side in ([2]i32{1, -1}) {
 			cx := mouth_x + side * dist
+			if world_pond_carves(t.world, cx, surface_y) do continue
 			if !player_solid_at(t, cx, surface_y) do continue
 			if !player_body_clear(t, f32(cx), f32(surface_y)) do continue
 			return cx, true

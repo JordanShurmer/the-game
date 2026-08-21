@@ -49,6 +49,14 @@ make shot
 ./bin/shot walk=-600 out=shots/dark.png    # lit by the orb, and by what he left
 ```
 
+The water shader runs on the GPU, so only the window can show it. The
+game takes a shot of itself for that:
+
+```sh
+make game
+./bin/the-game shot=shots/water.png frames=140 walk=-40   # needs a display
+```
+
 Built and tested against the Odin nightly of 2026-08-20, and not
 against a monthly release: the game uses `asm` templates, and those
 reached Odin after `dev-2026-08` was cut. `docs/toolchain.md`, "Why a
@@ -141,11 +149,18 @@ cannot cut, and it throws part of what it removes back out of the hole
 as debris that then falls. `docs/player.md` says how he is built and what the phase
 leaves out.
 
-The world he walks into is dark. The orb on his staff is the only light
-in it, and every 21 cells a small crystal of light falls out of that orb
-and hangs where it fell, so the way he came stays lit behind him and
-everything he has not been is gloom. `docs/lighting.md` says how that is
-built and what it costs.
+The world he walks into is dark. The orb on his staff is nearly the only
+light in it, and every 21 cells a small crystal of light falls out of
+that orb and hangs where it fell, so the way he came stays lit behind
+him and everything he has not been is gloom. `docs/lighting.md` says how
+that is built and what it costs.
+
+A short walk to his left there is a pond. Its water is drawn by a
+shader — a rippling surface, depths that go dark and cold, and a net of
+caustics sliding over the bottom — and a swarm of fireflies hangs over
+its mouth and is the only light on it until he walks up with the orb.
+`docs/water.md` says how the pond is dug, where the shader came from,
+and how to take a picture of a window to judge it.
 
 The world editor takes the camera back, so the same keys pan it again:
 
@@ -189,7 +204,7 @@ src/       the game, package game, with the tests beside the code
 cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
 cmd/bench/ what a tick of the sandbox costs
-data/      the materials, the biomes, the biome map, the tiles, the sprites
+data/      the materials, the biomes, the biome map, the tiles, the sprites, the shaders
 docs/      the design notes and the toolchain
 tools/     the toolchain install, the tile seeder, and the wizard seeder
 ```
@@ -227,6 +242,9 @@ he leaves it and comes back.
 | `src/main.odin` | The game window |
 | `src/shot.odin` | The world as a PNG, with no window |
 | `src/light.odin` | The orb, the crystals, and the gloom around them |
+| `src/firefly.odin` | The swarm that hangs over a pond and lights it |
+| `src/pond.odin` | The pond dug into the world beside the spawn |
+| `src/water.odin` | The depth map of the water, and the shader over it |
 
 ## Play and author through MCP
 

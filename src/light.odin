@@ -290,10 +290,10 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 	return rl.Color{u8(min(r, 255)), u8(min(g, 255)), u8(min(b, 255)), 255}
 }
 
-light_step :: proc(l: ^Light, t: Terrain, p: Player) {
+light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil) {
 	if l.stat == nil do return
 	light_drop(l, t, p)
-	light_throw(l, t, p)
+	light_throw(l, t, p, flies)
 }
 
 light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
@@ -316,8 +316,9 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	light_flood(l, l.stat, t, x, y, LIGHT_CRYSTAL_POWER, LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
 }
 
-light_throw :: proc(l: ^Light, t: Terrain, p: Player) {
+light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil) {
 	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
+	light_forget_flies(l, flies)
 
 	x, y := light_orb_source(t, p)
 	l.live_x = light_slot(x - l.origin_x)
@@ -325,6 +326,39 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player) {
 	l.live_on = true
 
 	light_flood(l, l.live, t, x, y, LIGHT_ORB_POWER, LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	light_throw_flies(l, t, flies)
+}
+
+@(private = "file")
+light_forget_flies :: proc(l: ^Light, flies: ^Firefly_Swarm) {
+	if flies == nil do return
+
+	for i in 0 ..< int(flies.count) {
+		f := &flies.flies[i]
+		if !f.lit do continue
+		light_clear_box(l.live, f.lx, f.ly, FIREFLY_REACH)
+		f.lit = false
+	}
+}
+
+@(private = "file")
+light_throw_flies :: proc(l: ^Light, t: Terrain, flies: ^Firefly_Swarm) {
+	if flies == nil do return
+
+	for i in 0 ..< int(flies.count) {
+		f := &flies.flies[i]
+		x := i32(math.floor(f.x))
+		y := i32(math.floor(f.y))
+
+		lx := light_slot(x - l.origin_x)
+		ly := light_slot(y - l.origin_y)
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+
+		light_flood(l, l.live, t, x, y, firefly_power(f^, flies.clock), FIREFLY_REACH, FIREFLY_FALL)
+		f.lx = lx
+		f.ly = ly
+		f.lit = true
+	}
 }
 
 light_fall_reach :: proc(power: u8, fall: Light_Fall) -> i32 {

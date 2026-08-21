@@ -30,6 +30,7 @@ Sim :: struct {
 	sandbox:   Sandbox,
 	queue:     Input_Queue,
 	light:     Light,
+	flies:     Firefly_Swarm,
 
 	follow_player: bool,
 
@@ -105,6 +106,12 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 
 	s.light = light_make(biomes.world_seed)
 	s.player = player_spawn(s.world)
+
+	if pond, dug := pond_place(s.world, i32(s.player.x), i32(s.player.y)); dug {
+		world_add_pond(&s.world, pond)
+	}
+	s.flies = firefly_gather(s.world)
+
 	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
 	s.loaded = true
 
@@ -191,7 +198,8 @@ sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
-	light_step(&s.light, terrain, s.player)
+	firefly_step(&s.flies)
+	light_step(&s.light, terrain, s.player, &s.flies)
 }
 
 sim_play_begin :: proc(s: ^Sim) {

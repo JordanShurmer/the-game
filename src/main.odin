@@ -2,6 +2,8 @@ package game
 
 import "core:fmt"
 import "core:os"
+import "core:strconv"
+import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
 
@@ -28,6 +30,9 @@ App :: struct {
 	pixels:    []rl.Color,
 	texture:   rl.Texture2D,
 
+	water:     Water,
+	water_run: []u8,
+
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
 
@@ -36,12 +41,23 @@ App :: struct {
 	dirty: bool,
 }
 
+WINDOW_SHOT_FRAMES :: 90
+
+Window_Shot :: struct {
+	path:   string,
+	frames: int,
+	walk:   int,
+	on:     bool,
+}
+
 BACKGROUND :: rl.Color{18, 20, 26, 255}
 
 BEAM_GLOW :: rl.Color{110, 210, 255, 255}
 BEAM_CORE :: rl.Color{236, 250, 255, 255}
 
 main :: proc() {
+	shot := read_window_shot(os.args[1:])
+
 	app: App
 	if !app_load_data(&app) {
 		os.exit(1)
@@ -56,8 +72,11 @@ main :: proc() {
 	app_init_view(&app)
 	defer app_destroy_view(&app)
 
+	if shot.on do app_walk(&app, shot.walk)
+
+	frames := 0
 	for !rl.WindowShouldClose() {
-		app_handle_input(&app)
+		if !shot.on do app_handle_input(&app)
 
 		playing := !app.editor.open && !app.tile_edit.open
 		if app.dirty || (playing && app.follow_player) {
@@ -77,15 +96,58 @@ main :: proc() {
 			0,
 			rl.WHITE,
 		)
+		app_draw_water(&app, w, h)
 		app_draw_crystals(&app)
+		app_draw_fireflies(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
 		editor_draw(&app)
 		tile_editor_draw(&app)
 		rl.EndDrawing()
 
+		frames += 1
+		if shot.on && frames >= shot.frames {
+			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
+			free_all(context.temp_allocator)
+			break
+		}
+
 		free_all(context.temp_allocator)
 	}
+}
+
+read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
+	shot.frames = WINDOW_SHOT_FRAMES
+
+	for arg in args {
+		split := strings.index_byte(arg, '=')
+		if split < 0 do continue
+		key := arg[:split]
+		value := arg[split + 1:]
+
+		switch key {
+		case "shot":
+			shot.path = value
+			shot.on = true
+		case "frames":
+			if n, ok := strconv.parse_int(value); ok do shot.frames = max(n, 1)
+		case "walk":
+			if n, ok := strconv.parse_int(value); ok do shot.walk = n
+		}
+	}
+	return shot
+}
+
+@(private = "file")
+app_walk :: proc(app: ^App, ticks: int) {
+	held: Player_Input = ticks < 0 ? {.Left} : {.Right}
+
+	for _ in 0 ..< abs(ticks) {
+		sim_step_player(&app.sim, held, false)
+		sandbox_step(&app.sandbox, app.world.materials)
+	}
+	app_follow_player(app)
+	app.dirty = true
 }
 
 app_load_data :: proc(app: ^App) -> bool {
@@ -113,6 +175,7 @@ app_unload_data :: proc(app: ^App) {
 app_init_view :: proc(app: ^App) {
 	app.cells = make([]Cell, WINDOW_W * WINDOW_H)
 	app.pixels = make([]rl.Color, WINDOW_W * WINDOW_H)
+	app.water_run = make([]u8, WINDOW_W)
 
 	blank := rl.Image {
 		data    = raw_data(app.pixels),
@@ -124,6 +187,11 @@ app_init_view :: proc(app: ^App) {
 	app.texture = rl.LoadTextureFromImage(blank)
 
 	rl.SetTextureFilter(app.texture, .POINT)
+
+	app.water = water_load(app.world.materials, WINDOW_W, WINDOW_H)
+	if !app.water.on {
+		fmt.eprintfln("%s did not load: the water is drawn flat", WATER_SHADER_PATH)
+	}
 
 	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
 	if result.err != .None {
@@ -147,9 +215,11 @@ app_init_view :: proc(app: ^App) {
 app_destroy_view :: proc(app: ^App) {
 	rl.UnloadTexture(app.sprite_texture)
 	destroy_sprite_sheet(app.sprite)
+	water_unload(&app.water)
 	rl.UnloadTexture(app.texture)
 	delete(app.cells)
 	delete(app.pixels)
+	delete(app.water_run)
 }
 
 app_view_cells :: proc(app: ^App) -> (w, h: i32) {
@@ -177,6 +247,7 @@ app_regenerate :: proc(app: ^App) {
 		}
 	}
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
+	if app_lighting(app) do water_mark(&app.water, app.cells, w, h, app.water_run)
 }
 
 app_lighting :: proc(app: ^App) -> bool {
@@ -195,6 +266,28 @@ app_shade :: proc(app: ^App, view: World_View) {
 			out[tx] = light_shade(app.color_lut[row[tx]], light_lux(&app.light, wx, wy))
 		}
 	}
+}
+
+@(private = "file")
+app_draw_water :: proc(app: ^App, w, h: i32) {
+	if !app_lighting(app) do return
+
+	water_begin(
+		&app.water,
+		{WINDOW_W, WINDOW_H},
+		{f32(app.cam_x), f32(app.cam_y)},
+		f32(app.step),
+		f32(rl.GetTime()),
+	)
+	rl.DrawTexturePro(
+		app.texture,
+		rl.Rectangle{0, 0, f32(w), f32(h)},
+		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
+		rl.Vector2{0, 0},
+		0,
+		rl.WHITE,
+	)
+	water_end(&app.water)
 }
 
 @(private = "file")
@@ -382,7 +475,7 @@ app_follow_player :: proc(app: ^App) {
 }
 
 @(private = "file")
-app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32) {
+app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32, wide_color, core_color: rl.Color) {
 	scale := f32(app.zoom) / f32(app.step)
 	x := (wx - f32(app.cam_x)) * scale
 	y := (wy - f32(app.cam_y)) * scale
@@ -392,9 +485,9 @@ app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32)
 
 	at := rl.Vector2{x, y}
 	wide := f32(halo) * scale * glow
-	rl.DrawCircleV(at, wide, rl.Fade(LIGHT_GLOW, 0.16 * peak * glow))
-	rl.DrawCircleV(at, wide * 0.55, rl.Fade(LIGHT_GLOW, 0.32 * peak * glow))
-	rl.DrawCircleV(at, max(f32(blaze + 1) * scale * glow, 1.5), rl.Fade(LIGHT_CORE, glow))
+	rl.DrawCircleV(at, wide, rl.Fade(wide_color, 0.16 * peak * glow))
+	rl.DrawCircleV(at, wide * 0.55, rl.Fade(wide_color, 0.32 * peak * glow))
+	rl.DrawCircleV(at, max(f32(blaze + 1) * scale * glow, 1.5), rl.Fade(core_color, glow))
 }
 
 @(private = "file")
@@ -408,6 +501,23 @@ app_draw_crystals :: proc(app: ^App) {
 			app, c.x, c.y,
 			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
 			light_crystal_glow(c, clock),
+			LIGHT_GLOW, LIGHT_CORE,
+		)
+	}
+}
+
+@(private = "file")
+app_draw_fireflies :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	clock := rl.GetTime()
+	for i in 0 ..< int(app.flies.count) {
+		f := app.flies.flies[i]
+		app_draw_glow(
+			app, f.x, f.y,
+			FIREFLY_HALO, FIREFLY_BLAZE, FIREFLY_PEAK,
+			firefly_glow(f, clock),
+			FIREFLY_GLOW, FIREFLY_CORE,
 		)
 	}
 }
@@ -417,7 +527,7 @@ app_draw_orb :: proc(app: ^App) {
 	if !app_lighting(app) do return
 
 	x, y := light_orb_at(app.player)
-	app_draw_glow(app, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK, 1)
+	app_draw_glow(app, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK, 1, LIGHT_GLOW, LIGHT_CORE)
 }
 
 @(private = "file")
@@ -520,6 +630,32 @@ draw_hud :: proc(app: ^App) {
 	)
 
 	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+}
+
+@(test)
+test_the_window_takes_a_shot_of_itself_only_when_it_is_asked_to :: proc(t: ^testing.T) {
+	idle := read_window_shot([]string{})
+	testing.expect(t, !idle.on, "with no arguments the window must open and stay open")
+
+	asked := read_window_shot([]string{"shot=shots/water.png", "frames=140", "walk=-40"})
+	testing.expect(t, asked.on, "shot= must turn the window shot on")
+	testing.expectf(t, asked.path == "shots/water.png", "the path must be read whole, got %q", asked.path)
+	testing.expectf(t, asked.frames == 140, "frames must be read, got %d", asked.frames)
+	testing.expectf(t, asked.walk == -40, "a negative walk must walk him left, got %d", asked.walk)
+
+	plain := read_window_shot([]string{"shot=shots/window.png"})
+	testing.expectf(
+		t, plain.frames == WINDOW_SHOT_FRAMES,
+		"a shot with no frame count must draw WINDOW_SHOT_FRAMES first, got %d", plain.frames,
+	)
+	testing.expect(t, plain.walk == 0, "and must leave him where he spawned")
+
+	junk := read_window_shot([]string{"shot=a.png", "frames=soon", "walk=", "nonsense"})
+	testing.expectf(
+		t, junk.frames == WINDOW_SHOT_FRAMES && junk.walk == 0,
+		"a value that is not a number must leave the default standing, got frames=%d walk=%d",
+		junk.frames, junk.walk,
+	)
 }
 
 @(test)
