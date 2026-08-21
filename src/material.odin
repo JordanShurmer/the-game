@@ -6,6 +6,7 @@ Material_State :: enum u8 {
 	Liquid,
 	Gas,
 	Special,
+	Phantom, // no physical interaction: the cell grid never holds one
 }
 
 Contact_Effect :: enum u8 {
@@ -51,7 +52,16 @@ Material :: struct {
 	flammability:   u8,
 	conductivity:   u8,
 	toxicity:       u8,
-	explosive:      u8,
+	force:          u8, // expulsive: the power and the reach of the blast it makes
+	luminosity:     u8, // the light it gives
 }
 
 #assert(size_of(Material) == 32)
+
+// A material with no physical interaction. Matter cannot touch one and one
+// cannot touch matter, so the cell grid never holds one: the world carries it
+// as a light and a colour at a point. See docs/lighting.md, "Every light is a
+// material".
+material_is_phantom :: proc(m: Material) -> bool {
+	return m.state == .Phantom
+}

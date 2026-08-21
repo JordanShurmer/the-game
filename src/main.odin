@@ -105,6 +105,7 @@ main :: proc() {
 		app_draw_crystals(&app)
 		app_draw_fireflies(&app)
 		app_draw_pots(&app)
+		app_draw_bangs(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
 		editor_draw(&app)
@@ -558,18 +559,33 @@ app_draw_pots :: proc(app: ^App) {
 		p := app.pots.pots[i]
 		if !p.live do continue
 
-		if p.flash > 0 {
-			glow := f32(pot_flash_power(p)) / 255
-			app_draw_glow(app, p.x, p.y, POT_HALO, POT_BLAZE, POT_PEAK, glow, POT_GLOW, POT_CORE)
-			continue
-		}
-
 		x := (p.x - f32(app.cam_x)) * scale
 		y := (p.y - f32(app.cam_y)) * scale
 		r := f32(POT_R) * scale
 
 		rl.DrawCircleV(rl.Vector2{x, y}, r, POT_BODY)
-		app_draw_glow(app, p.x, p.y-f32(POT_R), POT_FUSE_HALO, POT_FUSE_BLAZE, POT_FUSE_PEAK, 1, POT_GLOW, POT_CORE)
+		app_draw_glow(
+			app, p.x, p.y-f32(POT_R),
+			POT_FUSE_HALO, POT_FUSE_BLAZE, POT_FUSE_PEAK, 1,
+			pot_fuse_glow(app.world.materials), LIGHT_CORE,
+		)
+	}
+}
+
+// Every explosion the world remembers, whatever set it off.
+@(private = "file")
+app_draw_bangs :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	table := app.world.materials
+	sb := &app.sandbox
+	for b in sb.bangs.bangs {
+		if b.life <= 0 do continue
+		glow := f32(bang_power(table, b)) / 255
+		app_draw_glow(
+			app, f32(sb.origin_x + b.x), f32(sb.origin_y + b.y),
+			BANG_HALO, BANG_BLAZE, BANG_PEAK, glow, BANG_GLOW, BANG_CORE,
+		)
 	}
 }
 

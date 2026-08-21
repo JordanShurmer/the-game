@@ -121,6 +121,9 @@ tile_editor_paint_cell :: proc(s: ^Sim, x, y: i32, c: Cell) -> bool {
 	if !e.open do return false
 	if x < 0 || y < 0 || x >= TILE_SIZE || y >= TILE_SIZE do return false
 	if int(c) >= len(s.world.materials.materials) do return false
+	// A material with no physical interaction is not matter, so the terrain
+	// cannot be made of one either. See docs/lighting.md.
+	if material_is_phantom(s.world.materials.materials[c]) do return false
 
 	tile := tile_editor_tile(s)
 	if tile_at(s.world.tiles, tile, x, y) == c do return false
@@ -274,9 +277,12 @@ tile_editor_palette_under_mouse :: proc(app: ^App) -> (c: Cell, hit: bool) {
 	y := i32(mouse.y)
 	if x < EDITOR_PANEL_X || x > EDITOR_PANEL_X + EDITOR_PANEL_W do return 0, false
 
-	for _, i in app.world.materials.materials {
+	for m, i in app.world.materials.materials {
 		row_y := i32(TILE_PALETTE_TOP) + i32(i) * TILE_PALETTE_ROW
 		if y >= row_y && y < row_y + TILE_PALETTE_ROW {
+			// A phantom is a light and not matter, so it is drawn in the
+			// palette and cannot be picked out of it.
+			if material_is_phantom(m) do return 0, false
 			return Cell(i), true
 		}
 	}
@@ -491,7 +497,10 @@ tile_editor_draw_palette :: proc(app: ^App) {
 
 		label := i < 9 ? fmt.ctprintf("%d %s", i + 1, app.world.materials.names[i]) \
 		: fmt.ctprintf("  %s", app.world.materials.names[i])
-		rl.DrawText(label, EDITOR_PANEL_X + 26, y, 18, selected ? rl.RAYWHITE : rl.LIGHTGRAY)
+
+		tint := selected ? rl.RAYWHITE : rl.LIGHTGRAY
+		if material_is_phantom(m) do tint = rl.Fade(rl.LIGHTGRAY, 0.4)
+		rl.DrawText(label, EDITOR_PANEL_X + 26, y, 18, tint)
 	}
 }
 

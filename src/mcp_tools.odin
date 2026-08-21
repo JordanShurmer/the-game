@@ -82,7 +82,7 @@ MCP_TOOLS_JSON :: `{"tools":[
    "x":{"type":"integer","description":"Centre column in the sandbox, or unused for move. 0 is the left edge."},
    "y":{"type":"integer","description":"Centre row in the sandbox, or unused for move. 0 is the top edge and y grows downward."},
    "radius":{"type":"integer","description":"Disc radius in cells, for spawn, erase, ignite, explode and dig. 0 writes one cell. Default 0.","minimum":0,"maximum":512},
-   "material":{"type":"string","description":"Material name for spawn, as listed by list_materials."},
+   "material":{"type":"string","description":"Material name for spawn, as listed by list_materials. A Phantom state is a light and not matter, so no cell holds one and spawn refuses it."},
    "power":{"type":"integer","description":"Blast or dig power, for explode and dig. Explode: the energy a ray starts with; each cell it crosses costs hardness+1, so air costs 1 and bedrock stops any blast in one cell. Dig: the hardness that can be removed; the wizard digs at 8. Required for explode and dig.","minimum":0,"maximum":255},
    "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig","throw"]},"description":"For move: which buttons are held this tick."},
    "pressed":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig","throw"]},"description":"For move: which buttons went down fresh this tick, for the jump edge."},
@@ -237,11 +237,11 @@ tool_list_materials :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	table := s.world.materials
 
-	strings.write_string(&b, "idx glyph name    state    density fall hard flam cond tox life decays_to burns_to\n")
+	strings.write_string(&b, "idx glyph name    state    density fall hard flam cond tox force lum life decays_to burns_to\n")
 	for material, i in table.materials {
 		fmt.sbprintf(
 			&b,
-			"% 3d %c     %-7s %-8s % 7.2f % 4d % 4d % 4d % 4d % 3d % 4d %-9s %s\n",
+			"% 3d %c     %-7s %-8s % 7.2f % 4d % 4d % 4d % 4d % 3d % 5d % 3d % 4d %-9s %s\n",
 			i,
 			rune(table.glyphs[i]),
 			table.names[i],
@@ -252,6 +252,8 @@ tool_list_materials :: proc(s: ^Sim) -> string {
 			material.flammability,
 			material.conductivity,
 			material.toxicity,
+			material.force,
+			material.luminosity,
 			material.lifetime,
 			table.names[table.decays_to[i]],
 			table.names[table.burns_to[i]],
@@ -259,6 +261,8 @@ tool_list_materials :: proc(s: ^Sim) -> string {
 	}
 	strings.write_string(&b, "\nA denser material sinks through a lighter one that can flow.\n")
 	strings.write_string(&b, "life is the ticks a cell lives before it turns into decays_to. -1 means it lasts.\n")
+	strings.write_string(&b, "force is expulsive: the power and the reach of the blast it makes when it goes off.\n")
+	strings.write_string(&b, "lum is the light it gives. A Phantom state has no physical interaction, so no cell holds one.\n")
 	return strings.to_string(b)
 }
 
@@ -642,6 +646,12 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		index, found := find_material_index(s.world.materials, material_name)
 		if !found {
 			return fmt.tprintf("unknown material %q. Call list_materials to see the names.", material_name), true
+		}
+		if material_is_phantom(s.world.materials.materials[index]) {
+			return fmt.tprintf(
+				"%s has no physical interaction, so no cell can hold it. It is a light the world carries, not matter.",
+				material_name,
+			), true
 		}
 		command.material = u16(index)
 	}

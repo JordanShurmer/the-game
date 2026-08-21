@@ -80,9 +80,10 @@ reader knows the gap is a decision and not an oversight.
 1. **A new material and a new reaction need no code.**
    `docs/mcp.md` already makes that promise. Everything below holds it.
    Reactions are rows in `data/materials.txt`, not a switch in Odin.
-2. **`Material` is 32 bytes and the `#assert` says so.** It has two
-   bytes of tail padding today. One of them becomes `explosive`. The
-   struct does not grow.
+2. **`Material` is 32 bytes and the `#assert` says so.** It had two
+   bytes of tail padding. One became `force`, the expulsive force, and
+   the other became `luminosity`, the light a material gives. The
+   struct is full now, and it does not grow.
 3. **Hot fields in the struct, cold fields in parallel tables.**
    `crumbles_to` is read only when a blast lands, so it is a cold
    table beside `decays_to` and `burns_to`.
@@ -281,11 +282,12 @@ shadow and a corridor channels the blast.
    costs 256, which stops any blast in one cell. The energy is an
    `i32`, because a `u8` cannot hold the cost of bedrock.
 4. A cell the ray pays for becomes `Air`, or, inside the inner third
-   of the radius, `Fire` on a roll under `EXPLODE_FIRE_ODDS` out of
+   of the radius, `Blast` on a roll under `EXPLODE_BLAST_ODDS` out of
    255 and `Air` otherwise. The inner third is what lights the fuel in
-   the room; the roll is what keeps the fire a scatter of flame there
+   the room; the roll is what keeps the blast a scatter of flame there
    rather than a solid disc with a compass-drawn edge, which also
-   means far fewer fire cells are ever born to leave smoke behind.
+   means far fewer cells are ever born to leave fire and then smoke
+   behind.
 5. Each cell that is cleared crumbles its four neighbours: a
    neighbour whose `crumbles_to` is set becomes that material. Rock
    becomes gravel and rains down.
@@ -293,10 +295,29 @@ shadow and a corridor channels the blast.
 So `power` reads as "how many cells of empty air this blast crosses".
 A `power` of 64 crosses 64 cells of air or 7 cells of rock.
 
-**A material with `explosive` above zero detonates instead of
-burning.** When `sandbox_ignite` or `sandbox_spread_fire` reaches such
-a cell, the cell becomes Air and a blast starts there with
-`power = explosive` and `radius = explosive`.
+**A material with `force` above zero detonates instead of burning.**
+`force` is expulsive force: the power and the reach of the blast a
+material makes when it goes off. When `sandbox_ignite` or
+`sandbox_spread_fire` reaches such a cell, a blast starts there with
+`power = force` and `radius = force`.
+
+**The explosion is a material as well.** `Blast` is a row in
+`data/materials.txt` like any other: `Special` state, an expulsive
+`force` of 36, a `luminosity` of 255, and a lifetime of 22 ticks, after
+which it is fire. Every blast writes it into the cell it goes off in —
+paying for that cell the way a ray pays for the cells it crosses, so a
+blast set off inside bedrock leaves it standing — and step 4 above
+writes it through the heart of the crater in place of the fire that
+used to go there — so what a grain of gunpowder turns
+into is the bang itself, and the bang burns the fuel around it, rises
+like a flame, and is gone in a third of a second. The blast also
+remembers the place in the sandbox's ring of bangs, which is what
+lights the cave; `docs/lighting.md`, "The bangs", says how.
+
+A pot of black powder takes its potency from that same row. `Blast`
+carries the force of three grains of gunpowder, and
+`test_the_pot_carries_the_grains_its_blast_is_made_of` holds the two
+numbers in step.
 
 The reach is the power, and not a fraction of it. A ray spends at
 least 1 energy on every cell it crosses, so a blast of power p can
@@ -310,8 +331,8 @@ which is the chain a pile should have.
 
 **A blast never sets off a second blast in the same tick.** Every cell
 a blast writes is marked in `moved`, so the step does not visit it
-again this tick. The fire the blast leaves reaches the next grain on
-the next tick, and that grain detonates in its own hot pass.
+again this tick. The blast the first grain leaves reaches the next
+grain on the next tick, and that grain detonates in its own hot pass.
 Without this rule one grain of gunpowder recurses through a whole pile
 inside one call and overflows the stack. With it, a pile takes a few
 ticks to go off, which is also what a chain should look like.
@@ -417,7 +438,10 @@ where the blast still has lift enough to break a face but not to clear
 it, Rock turns to the lighter, warmer grey of gravel in place, a scoop
 bitten out of the strip rather than a hole through it. **Char** is the
 black flecks laced through both, on the rock side more than the wood:
-soot sitting on whatever the ray could not afford to move at all.
+soot sitting on whatever the ray could not afford to move at all. The
+white heart of that crater is the blast material itself, two ticks
+old; take the same picture at `ticks=30` and it has decayed to the
+orange of the fire it leaves in the wood.
 (One further step for a careful look: a soot fleck that lands beside a
 cell the same blast clears crumbles again on the spot, into the pale
 ash soot itself decays to — the ordinary "a cleared cell crumbles its
@@ -879,7 +903,8 @@ two builds rather than running one after the other.
 | `PLAYER_DIG_RADIUS` | 5 | cells |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |
 | `EXPLODE_RAYS_PER_CELL` | 6 | rays per cell of radius above that |
-| `EXPLODE_FIRE_ODDS` | 150 | out of 255: how much of the inner blast catches |
+| `EXPLODE_BLAST_ODDS` | 150 | out of 255: how much of the inner blast catches |
+| `BANG_MAX` | 16 | explosions the world remembers at once, for the light |
 | `BLAST_LIFT` | 16 | sixteenths of energy per unit of density, in the lift formula |
 | `BLAST_SCATTER` | 24 | lift at which matter flies clear |
 | `BLAST_CRUMBLE` | 8 | lift at which matter breaks up and falls |
@@ -895,7 +920,7 @@ two builds rather than running one after the other.
 
 Each step compiles, passes `odin test src`, and can be looked at.
 
-1. **The data.** The fifteen materials, `Material.explosive`, the
+1. **The data.** The fifteen materials, `Material.force`, the
    `crumbles_to` table, the `[Reactions]` section and its loader. No
    change to the step. Tests: the table loads, a pair reads the same
    both ways round, every named material resolves, `Material` is

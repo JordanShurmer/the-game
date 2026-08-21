@@ -102,7 +102,8 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
 		shot_draw_fireflies(shot, pixels, width, height)
-		shot_draw_pots(shot, pixels, width, height)
+		shot_draw_pots(world, shot, pixels, width, height)
+		shot_draw_bangs(world, shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
 	}
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
@@ -219,27 +220,34 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 }
 
 @(private = "file")
-shot_draw_pots :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+shot_draw_pots :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
 	if shot.pots == nil do return
 
 	for i in 0 ..< int(shot.pots.count) {
 		p := shot.pots.pots[i]
 		if !p.live do continue
 
-		if p.flash > 0 {
-			glow := f32(pot_flash_power(p)) / 255
-			shot_draw_glow(
-				shot, pixels, width, height, p.x, p.y,
-				POT_HALO, POT_BLAZE, POT_PEAK*glow,
-				POT_GLOW, POT_CORE,
-			)
-			continue
-		}
-
 		shot_draw_glow(
 			shot, pixels, width, height, p.x, p.y-f32(POT_R),
 			POT_FUSE_HALO, POT_FUSE_BLAZE, POT_FUSE_PEAK,
-			POT_GLOW, POT_CORE,
+			pot_fuse_glow(world.materials), LIGHT_CORE,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_bangs :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.sandbox == nil do return
+
+	sb := shot.sandbox
+	for b in sb.bangs.bangs {
+		if b.life <= 0 do continue
+		glow := f32(bang_power(world.materials, b)) / 255
+		shot_draw_glow(
+			shot, pixels, width, height,
+			f32(sb.origin_x + b.x), f32(sb.origin_y + b.y),
+			BANG_HALO, BANG_BLAZE, BANG_PEAK*glow,
+			BANG_GLOW, BANG_CORE,
 		)
 	}
 }

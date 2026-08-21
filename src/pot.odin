@@ -13,35 +13,31 @@ POT_MAX_FALL :: PLAYER_MAX_FALL
 POT_REST     :: 40     // ticks between throws
 POT_FUSE     :: 90     // ticks the fuse burns before it goes off in the air
 
-POT_FLASH       :: 22   // ticks the bang stays in the light
-POT_FLASH_POWER :: 255
-POT_FLASH_REACH :: 34
-POT_FLASH_FALL  :: Light_Fall{open = 220, open_diag = 204, dense = 112, dense_diag = 78}
-
-#assert(POT_FLASH_POWER >= LIGHT_ORB_POWER, "a bang must be the brightest thing in the world while it lasts")
-
-POT_FUSE_POWER :: 120  // the fuse's own light, while the pot is still flying
+// The fuse burns while the pot flies, and a fuse is fire, so the light it
+// throws is the light of the Fire material. See docs/lighting.md, "Every
+// light is a material".
 POT_FUSE_REACH :: 12
 POT_FUSE_FALL  :: Light_Fall{open = 176, open_diag = 150, dense = 96, dense_diag = 64}
 
-#assert(POT_FUSE_POWER < LIGHT_ORB_POWER, "the fuse must not outshine the orb he carries")
-
 POT_R :: 2  // cells, the pot as it is drawn
 
-POT_HALO  :: 28
-POT_BLAZE :: 6
-POT_PEAK  :: 0.95
-POT_GLOW  :: rl.Color{255, 140, 40, 255}
-POT_CORE  :: rl.Color{255, 250, 230, 255}
-POT_BODY  :: rl.Color{48, 40, 32, 255}
+POT_BODY :: rl.Color{48, 40, 32, 255}
 
 POT_FUSE_HALO  :: 3     // the spark drawn at the fuse, a small ember and not a bang
 POT_FUSE_BLAZE :: 1
 POT_FUSE_PEAK  :: 0.85
 
+// The ember at the fuse is drawn in the colour of the fire burning there,
+// over the white core every light in the world has at its heart.
+pot_fuse_glow :: proc(table: Material_Table) -> rl.Color {
+	return rl_from_argb(table.materials[int(table.fire)].color)
+}
+
+// The bang a pot makes is the expulsive force of the Blast material itself,
+// which is what the POT_GRAINS grains of black powder it holds throw.
+// test_the_pot_carries_the_grains_its_blast_is_made_of holds the two in step.
 pot_power :: proc(table: Material_Table) -> u8 {
-	e := i32(table.materials[int(table.powder)].explosive) * POT_GRAINS
-	return u8(min(e, 255))
+	return table.materials[int(table.blast)].force
 }
 
 Pot :: struct {
@@ -49,11 +45,10 @@ Pot :: struct {
 	vx, vy: f32,
 	lx, ly: i32,
 	fuse:   i16,
-	flash:  u8,
 	lit:    bool,
 	live:   bool,
 }
-#assert(size_of(Pot) == 32)
+#assert(size_of(Pot) == 28)
 
 Pot_Bag :: struct {
 	pots:  [POT_MAX]Pot,
@@ -103,12 +98,6 @@ pot_step :: proc(bag: ^Pot_Bag, t: Terrain, table: Material_Table) {
 		pot := &bag.pots[i]
 		if !pot.live do continue
 
-		if pot.flash > 0 {
-			pot.flash -= 1
-			if pot.flash == 0 do pot.live = false
-			continue
-		}
-
 		pot.vy = min(pot.vy+POT_GRAVITY*dt, POT_MAX_FALL)
 		pot.fuse -= 1
 
@@ -140,28 +129,20 @@ pot_move :: proc(pot: ^Pot, t: Terrain) -> bool {
 	return false
 }
 
+// A pot that breaks is spent. What is left of it is the bang the sandbox
+// holds: the blast material through the heart of the crater, and the light it
+// throws for as long as that material lives.
 @(private = "file")
 pot_break :: proc(pot: ^Pot, t: Terrain, table: Material_Table) {
-	if t.sandbox == nil {
-		pot.live = false
-		return
-	}
+	pot.live = false
+	if t.sandbox == nil do return
 
 	sx := i32(math.floor(pot.x)) - t.sandbox.origin_x
 	sy := i32(math.floor(pot.y)) - t.sandbox.origin_y
-	if !sandbox_in_bounds(t.sandbox, sx, sy) {
-		pot.live = false
-		return
-	}
+	if !sandbox_in_bounds(t.sandbox, sx, sy) do return
 
 	power := pot_power(table)
 	sandbox_explode(t.sandbox, table, sx, sy, i32(power), power)
-	pot.flash = POT_FLASH
-}
-
-pot_flash_power :: proc(p: Pot) -> u8 {
-	frac := f32(p.flash) / f32(POT_FLASH)
-	return u8(f32(POT_FLASH_POWER) * frac * frac)
 }
 
 @(private = "file")
@@ -219,7 +200,7 @@ test_a_thrown_pot_flies_and_breaks_on_a_wall_and_leaves_a_crater :: proc(t: ^tes
 	broke := false
 	for _ in 0 ..< POT_FUSE {
 		pot_step(&bag, terrain, pt.table)
-		if bag.pots[0].flash > 0 {
+		if !bag.pots[0].live {
 			broke = true
 			break
 		}
@@ -310,11 +291,32 @@ test_a_pot_that_touches_nothing_goes_off_when_its_fuse_ends :: proc(t: ^testing.
 	bag.pots[0] = Pot{x = 64, y = 64, fuse = 1, live = true}
 
 	pot_step(&bag, terrain, pt.table)
-	testing.expectf(t, bag.pots[0].flash > 0, "a pot whose fuse ends must break even in open air, got flash=%d", bag.pots[0].flash)
-	testing.expect(t, bag.pots[0].live, "it must still be alive while it flashes")
+	testing.expect(t, !bag.pots[0].live, "a pot whose fuse ends must break even in open air, and be spent by it")
 
-	for _ in 0 ..< POT_FLASH {
-		pot_step(&bag, terrain, pt.table)
+	lit := false
+	for b in pt.sb.bangs.bangs {
+		if b.life > 0 do lit = true
 	}
-	testing.expect(t, !bag.pots[0].live, "the flash must die out and take the pot with it")
+	testing.expect(t, lit, "and what is left of it must be a bang the world holds")
+
+	blast := int(sandbox_cell(&pt.sb, 64, 64))
+	testing.expectf(
+		t, blast == int(pt.table.blast),
+		"the cell it went off in must hold the blast material, and it holds %s",
+		pt.table.names[blast],
+	)
+}
+
+@(test)
+test_the_pot_carries_the_grains_its_blast_is_made_of :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	grains := i32(table.materials[int(table.powder)].force) * POT_GRAINS
+	testing.expectf(
+		t, i32(pot_power(table)) == grains,
+		"the pot holds %d grains of black powder at a force of %d each, so its blast must be %d, and Blast carries %d",
+		i32(POT_GRAINS), table.materials[int(table.powder)].force, grains, pot_power(table),
+	)
 }

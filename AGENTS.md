@@ -112,11 +112,18 @@ of the whole world.
 `docs/player.md` is the design note: how the wizard is built, the
 numbers he moves by, and what this phase leaves out. Read it before
 changing `src/player.odin` or `src/sprite.odin`.
-`docs/lighting.md` is the note for the light he carries and for the
-fireflies over the pond. Read it before changing `src/light.odin` or
-`src/firefly.odin`, and note the third rule below. `docs/water.md` is
-the note for the pond and the water shader; read it before changing
+`docs/lighting.md` is the note for the light he carries, for the
+fireflies over the pond, and for the bang an explosion gives off. Read
+it before changing `src/light.odin`, `src/firefly.odin` or
+`src/bang.odin`, and note the third rule below. `docs/water.md` is the
+note for the pond and the water shader; read it before changing
 `src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
+
+**Everything is a material, explosions and light included.** How
+bright a thing burns (`luminosity`), how hard it pushes (`force`), how
+long it lasts (`lifetime`) and whether it touches matter at all
+(`state = Phantom`) are fields on a row in `data/materials.txt`, not
+numbers in the code.
 
 Two rules there are easy to break and hard to see:
 
