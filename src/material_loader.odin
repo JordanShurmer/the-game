@@ -30,6 +30,13 @@ Material_Table :: struct {
 	fire:        u16,
 	soot:        u16,
 	powder:      u16,
+
+	// The lights of the world, and the material a bang is made of.
+	// See docs/lighting.md, "Every light is a material".
+	blast:       u16,
+	orb:         u16,
+	crystal:     u16,
+	firefly:     u16,
 }
 
 Reaction :: struct {
@@ -169,6 +176,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			case "Liquid":  current.state = .Liquid
 			case "Gas":     current.state = .Gas
 			case "Special": current.state = .Special
+			case "Phantom": current.state = .Phantom
 			}
 		case "density":
 			if v, vok := strconv.parse_f32(value); vok do current.density = v
@@ -182,8 +190,10 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if v, vok := strconv.parse_uint(value, 10); vok do current.conductivity = u8(v)
 		case "toxicity":
 			if v, vok := strconv.parse_uint(value, 10); vok do current.toxicity = u8(v)
-		case "explosive":
-			if v, vok := strconv.parse_uint(value, 10); vok do current.explosive = u8(v)
+		case "force":
+			if v, vok := strconv.parse_uint(value, 10); vok do current.force = u8(v)
+		case "luminosity":
+			if v, vok := strconv.parse_uint(value, 10); vok do current.luminosity = u8(v)
 		case "lifetime":
 			if v, vok := strconv.parse_i64(value); vok do current.lifetime = i32(v)
 		case "color":
@@ -230,6 +240,26 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.burns_to    = burns_to[:]
 	table.crumbles_to = crumbles_to[:]
 
+	// A phantom has no physical interaction, so no cell may ever turn into
+	// one. Refusing it here, once, is what lets the sandbox trust that
+	// every material it holds is matter.
+	for i in 0 ..< len(table.materials) {
+		products := [3]struct{what: string, to: u16} {
+			{"decays_to", table.decays_to[i]},
+			{"burns_to", table.burns_to[i]},
+			{"crumbles_to", table.crumbles_to[i]},
+		}
+		for product in products {
+			if int(product.to) == i do continue
+			if !material_is_phantom(table.materials[product.to]) do continue
+			fmt.eprintfln(
+				"%s: %s %s %s, which has no physical interaction and cannot be in a cell",
+				path, table.names[i], product.what, table.names[product.to],
+			)
+			return {}, false
+		}
+	}
+
 	if idx, found := find_material_index(table, "Fire"); found {
 		table.fire = u16(idx)
 	}
@@ -238,6 +268,18 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	}
 	if idx, found := find_material_index(table, "Gunpowder"); found {
 		table.powder = u16(idx)
+	}
+	if idx, found := find_material_index(table, "Blast"); found {
+		table.blast = u16(idx)
+	}
+	if idx, found := find_material_index(table, "Orb_Light"); found {
+		table.orb = u16(idx)
+	}
+	if idx, found := find_material_index(table, "Light_Crystal"); found {
+		table.crystal = u16(idx)
+	}
+	if idx, found := find_material_index(table, "Firefly_Light"); found {
+		table.firefly = u16(idx)
 	}
 
 	n := len(table.materials)
@@ -256,6 +298,14 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if aok && bok do bad = row.c
 			if aok && bok && cok do bad = row.d
 			fmt.eprintfln("%s:%d: [Reactions] names unknown material %q", path, row.line, bad)
+			return {}, false
+		}
+
+		if material_is_phantom(table.materials[ci]) || material_is_phantom(table.materials[di]) {
+			fmt.eprintfln(
+				"%s:%d: [Reactions] makes %s, which has no physical interaction and cannot be in a cell",
+				path, row.line, table.names[material_is_phantom(table.materials[ci]) ? ci : di],
+			)
 			return {}, false
 		}
 
@@ -390,14 +440,14 @@ test_load_materials_count :: proc(t: ^testing.T) {
 	table, ok := load_materials("data/materials.txt")
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "load must succeed")
-	testing.expect(t, len(table.materials) == 28, "expected 28 materials")
-	testing.expect(t, len(table.names) == 28, "names must match materials")
-	testing.expect(t, len(table.glyphs) == 28, "glyphs must match materials")
-	testing.expect(t, len(table.decays_to) == 28, "decay table must match materials")
-	testing.expect(t, len(table.burns_to) == 28, "burn table must match materials")
-	testing.expect(t, len(table.crumbles_to) == 28, "crumble table must match materials")
-	testing.expect(t, len(table.reaction_at) == 28 * 28, "reaction_at must be n*n")
-	testing.expect(t, len(table.reacts) == 28, "reacts must match materials")
+	testing.expect(t, len(table.materials) == 32, "expected 32 materials")
+	testing.expect(t, len(table.names) == 32, "names must match materials")
+	testing.expect(t, len(table.glyphs) == 32, "glyphs must match materials")
+	testing.expect(t, len(table.decays_to) == 32, "decay table must match materials")
+	testing.expect(t, len(table.burns_to) == 32, "burn table must match materials")
+	testing.expect(t, len(table.crumbles_to) == 32, "crumble table must match materials")
+	testing.expect(t, len(table.reaction_at) == 32 * 32, "reaction_at must be n*n")
+	testing.expect(t, len(table.reacts) == 32, "reacts must match materials")
 }
 
 @(test)
@@ -414,6 +464,93 @@ test_soot_and_powder_resolve_to_a_real_material :: proc(t: ^testing.T) {
 		t, table.powder != u16(MATERIAL_AIR),
 		"powder must resolve to a real material, or a pot's potency is always zero",
 	)
+}
+
+// Every light in the world is a row in the table, and so is the explosion the
+// light of a bang comes off. See docs/lighting.md, "Every light is a material".
+@(test)
+test_every_light_of_the_world_is_a_material :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	Case :: struct {
+		what:    string,
+		at:      u16,
+		phantom: bool,
+	}
+	cases := []Case {
+		{"the bang an explosion makes", table.blast, false},
+		{"the orb on his staff", table.orb, true},
+		{"a crystal of light", table.crystal, true},
+		{"a firefly", table.firefly, true},
+	}
+
+	for c in cases {
+		if !testing.expectf(t, c.at != u16(MATERIAL_AIR), "%s must be a material of its own", c.what) {
+			continue
+		}
+		m := table.materials[c.at]
+		testing.expectf(
+			t, m.luminosity > 0,
+			"%s must carry a luminosity, and %s carries none", c.what, table.names[c.at],
+		)
+		testing.expectf(
+			t, material_is_phantom(m) == c.phantom,
+			"%s: %s is %v and the world needs a phantom of %v",
+			c.what, table.names[c.at], m.state, c.phantom,
+		)
+	}
+
+	testing.expectf(
+		t, table.materials[table.orb].lifetime < 0,
+		"the orb he carries must not decay, and it lasts %d ticks",
+		table.materials[table.orb].lifetime,
+	)
+	testing.expectf(
+		t, table.materials[table.crystal].lifetime < 0,
+		"nor may a crystal he leaves, and it lasts %d ticks",
+		table.materials[table.crystal].lifetime,
+	)
+	testing.expectf(
+		t, table.materials[table.blast].lifetime > 0,
+		"a blast must decay, and it lasts %d ticks",
+		table.materials[table.blast].lifetime,
+	)
+}
+
+// Nothing may turn into a material with no physical interaction, because no
+// cell can hold one. The loader is the only place that can say so once.
+@(test)
+test_the_loader_refuses_a_table_that_turns_matter_into_a_phantom :: proc(t: ^testing.T) {
+	path := "materials_phantom.tmp.txt"
+	text := `
+[Air]
+state       = Gas
+color       = 0x00000000
+
+[Wisp]
+state       = Phantom
+color       = 0xFF112233
+luminosity  = 200
+
+[Straw]
+state       = Solid
+color       = 0xFF445566
+flammability= 4
+burns_to    = Wisp
+`
+	if !testing.expect(t, os.write_entire_file(path, transmute([]byte)text) == nil, "write temp file") {
+		return
+	}
+	defer os.remove(path)
+
+	table, ok := load_materials(path)
+	testing.expect(
+		t, !ok,
+		"a table where straw burns into a phantom must be refused, because no cell can hold one",
+	)
+	if ok do destroy_material_table(table)
 }
 
 @(test)
@@ -559,7 +696,7 @@ test_reaction_targets :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_explosive_and_crumbles_to :: proc(t: ^testing.T) {
+test_expulsive_force_and_crumbles_to :: proc(t: ^testing.T) {
 	table, ok := load_materials("data/materials.txt")
 	defer destroy_material_table(table)
 	testing.expect(t, ok)
@@ -572,10 +709,12 @@ test_explosive_and_crumbles_to :: proc(t: ^testing.T) {
 
 	testing.expect(t, int(table.crumbles_to[rock]) == gravel, "blasted rock must fall as gravel")
 	testing.expect(t, int(table.crumbles_to[water]) == water, "water must crumble into itself, so a blast leaves it alone")
-	testing.expectf(t, table.materials[gunpowder].explosive > 0, "gunpowder must be explosive")
-	testing.expectf(t, table.materials[tnt].explosive > table.materials[gunpowder].explosive,
+	testing.expectf(t, table.materials[gunpowder].force > 0, "gunpowder must carry an expulsive force")
+	testing.expectf(t, table.materials[tnt].force > table.materials[gunpowder].force,
 	                "tnt must hit harder than a single grain of gunpowder")
-	testing.expect(t, table.materials[water].explosive == 0, "water must not explode")
+	testing.expect(t, table.materials[water].force == 0, "water must not explode")
+	testing.expectf(t, table.materials[table.blast].force > 0,
+	                "the material an explosion is made of must carry an expulsive force of its own")
 }
 
 @(test)

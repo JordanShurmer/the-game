@@ -51,6 +51,7 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 		}
 	}
 
+	bang_age(&sb.bangs)
 	sb.tick += 1
 }
 

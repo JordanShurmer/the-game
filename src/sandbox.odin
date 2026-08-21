@@ -12,7 +12,7 @@ SANDBOX_CHUNK :: 64
 
 EXPLODE_MIN_RAYS      :: 24
 EXPLODE_RAYS_PER_CELL :: 6
-EXPLODE_FIRE_ODDS     :: 150  // out of 255: how much of the inner blast catches
+EXPLODE_BLAST_ODDS    :: 150  // out of 255: how much of the inner blast catches
 
 BLAST_LIFT      :: 16  // lift is energy per unit of weight, in sixteenths
 BLAST_SCATTER   :: 24  // lift at which matter flies clear
@@ -47,6 +47,8 @@ Sandbox :: struct {
 
 	tick:     u64,
 	seed:     u64,
+
+	bangs: Bang_Ring,
 
 	dirty:      []Sandbox_Rect,
 	next_dirty: []Sandbox_Rect,
@@ -94,6 +96,8 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.rows.above[0], sb.rows.above[width + 1] = CELL_WALL, CELL_WALL
 	sb.rows.here[0], sb.rows.here[width + 1] = CELL_WALL, CELL_WALL
 	sb.rows.below[0], sb.rows.below[width + 1] = CELL_WALL, CELL_WALL
+
+	bang_forget_all(&sb.bangs)
 
 	return sb, true
 }
@@ -143,6 +147,7 @@ sandbox_fill_from_world :: proc(sb: ^Sandbox, world: World, origin_x, origin_y: 
 		sb.lifetime[i] = material_start_life(world.materials, c)
 	}
 	mem.zero_slice(sb.moved)
+	bang_forget_all(&sb.bangs)
 
 	sandbox_mark_all(sb)
 }
@@ -271,6 +276,9 @@ sandbox_put :: #force_inline proc(sb: ^Sandbox, table: Material_Table, index: in
 
 sandbox_paint :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i32, material: Cell) -> (changed: int) {
 	if int(material) >= len(table.materials) do return 0
+	// A material with no physical interaction is not matter, so no cell can
+	// hold one. See docs/lighting.md, "Every light is a material".
+	if material_is_phantom(table.materials[material]) do return 0
 
 	r := radius < 0 ? 0 : radius
 	r2 := r * r
@@ -298,10 +306,10 @@ sandbox_ignite_cell :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
 	material := sb.cells[index]
 	m := table.materials[material]
 
-	if m.explosive > 0 {
-		sandbox_put(sb, table, index, MATERIAL_AIR)
-		sb.moved[index] = true
-		sandbox_explode(sb, table, x, y, i32(m.explosive), m.explosive)
+	// A material with an expulsive force goes off instead of burning. The
+	// blast writes the cell it goes off in, so the grain becomes the bang.
+	if m.force > 0 {
+		sandbox_explode(sb, table, x, y, i32(m.force), m.force)
 		return
 	}
 
@@ -392,12 +400,26 @@ blast_verdict :: proc(table: Material_Table, material: Cell, energy: i32) -> Bla
 sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i32, power: u8) -> (broken: int) {
 	r := radius < 0 ? 0 : radius
 	if r == 0 || power == 0 do return 0
+	if !sandbox_in_bounds(sb, cx, cy) do return 0
 
 	rays := max(EXPLODE_MIN_RAYS, r*EXPLODE_RAYS_PER_CELL)
 	inner_r := r / 3
 
+	blast_cell := Cell(table.blast)
 	fire_cell := Cell(table.fire)
 	soot_cell := Cell(table.soot)
+
+	// An explosion is a material. The cell it goes off in holds that material,
+	// and the world remembers the place as a bang, so the light can throw it
+	// and the eye can draw it for as long as the material lives. The blast
+	// pays for that cell exactly as a ray pays for the cells it crosses, so a
+	// blast set off inside what it cannot break leaves the cell standing.
+	origin := sandbox_index(sb, cx, cy)
+	if i32(table.materials[sb.cells[origin]].hardness)+1 <= i32(power) {
+		sandbox_put(sb, table, origin, blast_cell)
+		sb.moved[origin] = true
+	}
+	bang_add(&sb.bangs, table, cx, cy)
 
 	for ray in 0 ..< rays {
 		angle := f32(ray) / f32(rays) * 2 * math.PI
@@ -422,7 +444,7 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 			}
 			energy -= cost
 
-			if material == MATERIAL_AIR || material == fire_cell || sb.moved[i] {
+			if material == MATERIAL_AIR || material == fire_cell || material == blast_cell || sb.moved[i] {
 				prev = i
 				continue
 			}
@@ -433,8 +455,8 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 			case .Scatter:
 				broken += 1
 				target := MATERIAL_AIR
-				if step <= inner_r && sandbox_chance(sb, x, y, .Blast_Fire)&255 < EXPLODE_FIRE_ODDS {
-					target = fire_cell
+				if step <= inner_r && sandbox_chance(sb, x, y, .Blast_Fire)&255 < EXPLODE_BLAST_ODDS {
+					target = blast_cell
 				}
 				sandbox_put(sb, table, i, target)
 				sb.moved[i] = true
@@ -1200,6 +1222,15 @@ test_a_blast_against_bedrock_leaves_soot_on_its_face_and_the_wall_whole :: proc(
 		"the air against the wall must char with soot, and it holds %s",
 		table.names[sandbox_cell(&sb, 19, 5)],
 	)
+
+	// The blast pays for the cell it goes off in the way a ray pays for the
+	// cells it crosses, so one set off inside bedrock leaves it standing.
+	sandbox_explode(&sb, table, 20, 2, 20, 200)
+	testing.expectf(
+		t, int(sandbox_cell(&sb, 20, 2)) == bedrock,
+		"a blast inside bedrock must not even write itself there, and the cell holds %s",
+		table.names[sandbox_cell(&sb, 20, 2)],
+	)
 }
 
 @(test)
@@ -1279,6 +1310,78 @@ test_a_pot_grades_the_shipped_materials_as_the_note_says :: proc(t: ^testing.T) 
 			t, power < cost,
 			"the note says a pot's blast never reaches bedrock, but its cost of %d is not past a power of %d",
 			cost, power,
+		)
+	}
+}
+
+@(test)
+test_a_blast_is_made_of_a_material_that_decays_very_quickly :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 60, 60, 3)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	dirt, _ := find_material_index(table, "Dirt")
+	for y in i32(0) ..< 60 {
+		for x in i32(0) ..< 60 do sandbox_paint(&sb, table, x, y, 0, Cell(dirt))
+	}
+
+	sandbox_explode(&sb, table, 30, 30, 18, 90)
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+	sandbox_census(&sb, counts)
+
+	blast := int(table.blast)
+	testing.expect(
+		t, counts[blast] > 0,
+		"the heart of the crater must hold the material a blast is made of, and it holds none",
+	)
+	testing.expectf(
+		t, int(sandbox_cell(&sb, 30, 30)) == blast,
+		"the cell the blast went off in must hold it, and it holds %s",
+		table.names[sandbox_cell(&sb, 30, 30)],
+	)
+
+	life := int(table.materials[blast].lifetime)
+	testing.expectf(
+		t, life > 0 && life < int(table.materials[table.fire].lifetime),
+		"a blast must decay far quicker than the fire it leaves, %d ticks against %d",
+		life, table.materials[table.fire].lifetime,
+	)
+
+	for _ in 0 ..< life + 2 do sandbox_step(&sb, table)
+
+	for &c in counts do c = 0
+	sandbox_census(&sb, counts)
+	testing.expectf(
+		t, counts[blast] == 0,
+		"and every cell of it must be gone a couple of ticks after its life ends, %d left",
+		counts[blast],
+	)
+}
+
+@(test)
+test_a_cell_can_never_hold_a_material_with_no_physical_interaction :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 16, 16, 1)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	for light in ([]u16{table.orb, table.crystal, table.firefly}) {
+		phantom := material_is_phantom(table.materials[light])
+		if !testing.expectf(t, phantom, "%s must have no physical interaction", table.names[light]) {
+			continue
+		}
+
+		changed := sandbox_paint(&sb, table, 8, 8, 2, Cell(light))
+		testing.expectf(
+			t, changed == 0,
+			"the sandbox must refuse %s, and it took %d cells of it",
+			table.names[light], changed,
+		)
+		testing.expectf(
+			t, sandbox_cell(&sb, 8, 8) == MATERIAL_AIR,
+			"and the cell must be untouched, and it holds %s",
+			table.names[sandbox_cell(&sb, 8, 8)],
 		)
 	}
 }

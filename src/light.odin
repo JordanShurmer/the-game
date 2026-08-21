@@ -19,12 +19,17 @@ LIGHT_ORB_DY :: -19.0
 LIGHT_ORB_MIRROR :: -0.5
 LIGHT_ORB_SEEK :: 8
 
-LIGHT_ORB_POWER :: 255
 LIGHT_ORB_REACH :: 27
-LIGHT_CRYSTAL_POWER :: 168
 LIGHT_CRYSTAL_REACH :: 18
 
-#assert(LIGHT_CRYSTAL_POWER < LIGHT_ORB_POWER, "the trail he leaves must never outshine the orb he carries")
+// Every light in the world is a material, and how bright it burns is the
+// luminosity of that material. The order they burn in is a rule, held by
+// test_the_lights_of_the_world_are_ordered rather than by an #assert,
+// because the numbers are in data/materials.txt and not here.
+// See docs/lighting.md, "Every light is a material".
+light_lumens :: #force_inline proc(table: Material_Table, material: u16) -> u8 {
+	return table.materials[material].luminosity
+}
 
 Light_Fall :: struct {
 	open:       u8,
@@ -313,22 +318,27 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	l.next = (l.next + 1) % LIGHT_CRYSTALS
 	l.count = min(l.count + 1, LIGHT_CRYSTALS)
 
-	light_flood(l, l.stat, t, x, y, LIGHT_CRYSTAL_POWER, LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
+	table := t.world.materials
+	light_flood(l, l.stat, t, x, y, light_lumens(table, table.crystal), LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
 }
 
 light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil) {
+	table := t.world.materials
+
 	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
 	light_forget_flies(l, flies)
 	light_forget_pots(l, pots)
+	light_forget_bangs(l, t)
 
 	x, y := light_orb_source(t, p)
 	l.live_x = light_slot(x - l.origin_x)
 	l.live_y = light_slot(y - l.origin_y)
 	l.live_on = true
 
-	light_flood(l, l.live, t, x, y, LIGHT_ORB_POWER, LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	light_flood(l, l.live, t, x, y, light_lumens(table, table.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 	light_throw_flies(l, t, flies)
 	light_throw_pots(l, t, pots)
+	light_throw_bangs(l, t)
 }
 
 @(private = "file")
@@ -356,7 +366,7 @@ light_throw_flies :: proc(l: ^Light, t: Terrain, flies: ^Firefly_Swarm) {
 		ly := light_slot(y - l.origin_y)
 		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
 
-		light_flood(l, l.live, t, x, y, firefly_power(f^, flies.clock), FIREFLY_REACH, FIREFLY_FALL)
+		light_flood(l, l.live, t, x, y, firefly_power(t.world.materials, f^, flies.clock), FIREFLY_REACH, FIREFLY_FALL)
 		f.lx = lx
 		f.ly = ly
 		f.lit = true
@@ -370,15 +380,17 @@ light_forget_pots :: proc(l: ^Light, pots: ^Pot_Bag) {
 	for i in 0 ..< int(pots.count) {
 		p := &pots.pots[i]
 		if !p.lit do continue
-		light_clear_box(l.live, p.lx, p.ly, POT_FLASH_REACH)
+		light_clear_box(l.live, p.lx, p.ly, POT_FUSE_REACH)
 		p.lit = false
 	}
 }
 
+// A pot in flight carries its burning fuse, and a fuse is fire.
 @(private = "file")
 light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 	if pots == nil do return
 
+	table := t.world.materials
 	for i in 0 ..< int(pots.count) {
 		p := &pots.pots[i]
 		if !p.live do continue
@@ -390,14 +402,52 @@ light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 		ly := light_slot(y - l.origin_y)
 		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
 
-		if p.flash > 0 {
-			light_flood(l, l.live, t, x, y, pot_flash_power(p^), POT_FLASH_REACH, POT_FLASH_FALL)
-		} else {
-			light_flood(l, l.live, t, x, y, POT_FUSE_POWER, POT_FUSE_REACH, POT_FUSE_FALL)
-		}
+		light_flood(l, l.live, t, x, y, light_lumens(table, table.fire), POT_FUSE_REACH, POT_FUSE_FALL)
 		p.lx = lx
 		p.ly = ly
 		p.lit = true
+	}
+}
+
+@(private = "file")
+light_bang_slot :: proc(l: ^Light, sb: ^Sandbox, b: Bang) -> (lx, ly: i32, on: bool) {
+	lx = light_slot(sb.origin_x + b.x - l.origin_x)
+	ly = light_slot(sb.origin_y + b.y - l.origin_y)
+	return lx, ly, lx >= 0 && ly >= 0 && lx < LIGHT_W && ly < LIGHT_H
+}
+
+@(private = "file")
+light_forget_bangs :: proc(l: ^Light, t: Terrain) {
+	if t.sandbox == nil do return
+
+	// A bang that has run out keeps its place for one more tick, which is
+	// this one: the box it lit last tick is cleared here and never again.
+	for b in t.sandbox.bangs.bangs {
+		if b.life < 0 do continue
+		lx, ly, on := light_bang_slot(l, t.sandbox, b)
+		if !on do continue
+		light_clear_box(l.live, lx, ly, BANG_REACH)
+	}
+}
+
+// A bang is the brightest thing in the world while it lasts. It is one flood
+// at the heart of the crater, and it stands for every cell of the blast
+// material the crater holds, because they are all the same material and the
+// crater is smaller than the reach. See docs/lighting.md, "The bangs".
+@(private = "file")
+light_throw_bangs :: proc(l: ^Light, t: Terrain) {
+	if t.sandbox == nil do return
+
+	table := t.world.materials
+	for b in t.sandbox.bangs.bangs {
+		if b.life <= 0 do continue
+		if _, _, on := light_bang_slot(l, t.sandbox, b); !on do continue
+
+		light_flood(
+			l, l.live, t,
+			t.sandbox.origin_x + b.x, t.sandbox.origin_y + b.y,
+			bang_power(table, b), BANG_REACH, BANG_FALL,
+		)
 	}
 }
 
@@ -439,33 +489,141 @@ light_fill_box :: proc(sb: ^Sandbox, x0, y0, x1, y1: i32, c: Cell) {
 
 @(test)
 test_every_reach_outlasts_the_falloff_it_bounds :: proc(t: ^testing.T) {
-	orb := light_fall_reach(LIGHT_ORB_POWER, LIGHT_ORB_FALL)
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	Case :: struct {
+		what:  string,
+		power: u8,
+		reach: i32,
+		fall:  Light_Fall,
+	}
+	cases := []Case {
+		{"the orb", light_lumens(table, table.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL},
+		{"a crystal", light_lumens(table, table.crystal), LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL},
+		{"a bang", light_lumens(table, table.blast), BANG_REACH, BANG_FALL},
+		{"a fuse", light_lumens(table, table.fire), POT_FUSE_REACH, POT_FUSE_FALL},
+		{"a firefly", light_lumens(table, table.firefly), FIREFLY_REACH, FIREFLY_FALL},
+	}
+
+	for c in cases {
+		burns := light_fall_reach(c.power, c.fall)
+		testing.expectf(
+			t, burns <= c.reach,
+			"%s still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
+			c.what, burns, c.reach,
+		)
+	}
+}
+
+// The order the lights of the world burn in. It was an #assert while the
+// numbers were in the code; the numbers are in data/materials.txt now, so it
+// is a test over the shipped table instead.
+@(test)
+test_the_lights_of_the_world_are_ordered :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	bang := light_lumens(table, table.blast)
+	orb := light_lumens(table, table.orb)
+	crystal := light_lumens(table, table.crystal)
+	firefly := light_lumens(table, table.firefly)
+	fuse := light_lumens(table, table.fire)
+
 	testing.expectf(
-		t, orb <= LIGHT_ORB_REACH,
-		"the orb still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
-		orb, i32(LIGHT_ORB_REACH),
+		t, bang >= orb,
+		"a bang must be the brightest thing in the world while it lasts, got %d against an orb of %d",
+		bang, orb,
+	)
+	testing.expectf(
+		t, crystal < orb,
+		"the trail he leaves must never outshine the orb he carries, got %d against %d",
+		crystal, orb,
+	)
+	testing.expectf(
+		t, firefly < crystal,
+		"a firefly must never outshine the trail he leaves, got %d against %d",
+		firefly, crystal,
+	)
+	testing.expectf(
+		t, fuse < orb,
+		"the fuse on a thrown pot must not outshine the orb he carries, got %d against %d",
+		fuse, orb,
+	)
+}
+
+@(test)
+test_a_bang_lights_the_cave_it_goes_off_in :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
+	light_move(&s.light, 0, 0)
+	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
+
+	table := s.world.materials
+	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	p := light_test_player(20, 20, 1)
+
+	// Far enough from the wizard that nothing he carries reaches it.
+	away := i32(400)
+	light_step(&s.light, terrain, p)
+	testing.expectf(
+		t, light_lux(&s.light, away, away) == 0,
+		"this test means nothing unless the place is dark first, and it holds %d",
+		light_lux(&s.light, away, away),
 	)
 
-	crystal := light_fall_reach(LIGHT_CRYSTAL_POWER, LIGHT_CRYSTAL_FALL)
-	testing.expectf(
-		t, crystal <= LIGHT_CRYSTAL_REACH,
-		"a crystal still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
-		crystal, i32(LIGHT_CRYSTAL_REACH),
-	)
+	sandbox_explode(&s.sandbox, table, away, away, 20, 60)
+	light_step(&s.light, terrain, p)
 
-	flash := light_fall_reach(POT_FLASH_POWER, POT_FLASH_FALL)
-	testing.expectf(
-		t, flash <= POT_FLASH_REACH,
-		"a bang still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
-		flash, i32(POT_FLASH_REACH),
-	)
+	lit := light_lux(&s.light, away, away)
+	testing.expectf(t, lit > 0, "a bang must light the cave it goes off in, and it holds %d", lit)
 
-	fuse := light_fall_reach(POT_FUSE_POWER, POT_FUSE_FALL)
+	for _ in 0 ..< int(table.materials[table.blast].lifetime) + 2 {
+		sandbox_step(&s.sandbox, table)
+		light_step(&s.light, terrain, p)
+	}
+
+	after := light_lux(&s.light, away, away)
 	testing.expectf(
-		t, fuse <= POT_FUSE_REACH,
-		"a fuse still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
-		fuse, i32(POT_FUSE_REACH),
+		t, after == 0,
+		"a bang leaves no light behind it, the way a firefly does not, and it holds %d",
+		after,
 	)
+}
+
+// The colour a light is painted and the colour the material carries are two
+// numbers in two files that must agree, the same way the orb and the sheet do.
+@(test)
+test_every_light_is_painted_the_colour_its_material_carries :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	Case :: struct {
+		name:     string,
+		material: u16,
+		paint:    rl.Color,
+	}
+	cases := []Case {
+		{"the orb", table.orb, LIGHT_GLOW},
+		{"a crystal", table.crystal, LIGHT_CORE},
+		{"a firefly", table.firefly, FIREFLY_GLOW},
+		{"a bang", table.blast, BANG_CORE},
+	}
+
+	for c in cases {
+		got := rl_from_argb(table.materials[c.material].color)
+		testing.expectf(
+			t, got == c.paint,
+			"%s is drawn %v and the %s material is painted %v, and the two must agree",
+			c.name, c.paint, table.names[c.material], got,
+		)
+	}
 }
 
 @(test)
@@ -543,7 +701,7 @@ test_rock_stops_the_light_and_a_corridor_carries_it :: proc(t: ^testing.T) {
 	light_fill_box(&s.sandbox, 0, 248, 511, 263, MATERIAL_AIR)
 
 	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
-	light_flood(&s.light, s.light.live, terrain, 32, 256, LIGHT_ORB_POWER, LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	light_flood(&s.light, s.light.live, terrain, 32, 256, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	source := light_lux(&s.light, 32, 256)
 	along := light_lux(&s.light, 100, 256)
@@ -576,7 +734,7 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
 
 	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
-	light_flood(&s.light, s.light.live, terrain, 1024, 1024, LIGHT_ORB_POWER, LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	light_flood(&s.light, s.light.live, terrain, 1024, 1024, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	centre_x := light_slot(1024)
 	centre_y := light_slot(1024)
@@ -642,9 +800,11 @@ test_the_trail_he_leaves_never_outshines_the_orb_he_carries :: proc(t: ^testing.
 	brightest_orb := u8(0)
 	for v in s.light.live do brightest_orb = max(brightest_orb, v)
 
+	crystal := light_lumens(s.world.materials, s.world.materials.crystal)
 	testing.expectf(
-		t, brightest_trail <= LIGHT_CRYSTAL_POWER,
-		"no crystal may burn past LIGHT_CRYSTAL_POWER, got %d", brightest_trail,
+		t, brightest_trail <= crystal,
+		"no crystal may burn past the luminosity of Light_Crystal, got %d against %d",
+		brightest_trail, crystal,
 	)
 	testing.expectf(
 		t, brightest_orb > brightest_trail,

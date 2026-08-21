@@ -283,9 +283,11 @@ replay them, and compare. A match proves the replay was exact.
   is enough to make it happen without scanning every neighbour.
 - An explosion casts rays from a point, the way `sandbox_explode`
   does. A wall stops the ray that meets it and casts a shadow; a
-  corridor channels the blast on past it. A material with `explosive`
+  corridor channels the blast on past it. A material with `force`
   above zero does not just burn: reaching it sets off a blast of its
-  own, so a pile of gunpowder goes off grain by grain.
+  own, so a pile of gunpowder goes off grain by grain. The blast is a
+  material too: the cell it goes off in, and the heart of the crater it
+  opens, hold `Blast`, which lights the cave and decays to fire.
 - A blast crumbles what it breaks open. A neighbour with `crumbles_to`
   set — rock into gravel, for instance — turns into that material and
   falls, instead of leaving a clean hole.

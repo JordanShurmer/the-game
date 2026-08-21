@@ -69,7 +69,7 @@ than a `bool`.
 One complete loop: paint a biome map, paint the tiles a biome is made
 of, watch the world change, then save.
 
-- `data/materials.txt` holds the materials.
+- `data/materials.txt` holds the materials, the lights among them.
 - `data/biomes.txt` holds the biomes. Each biome has a key color, one
   fill material, and either a flat fill or a set of tiles.
 - `data/biome_map.png` is the world layout. One pixel is one region
@@ -162,6 +162,15 @@ that orb and hangs where it fell, so the way he came stays lit behind
 him and everything he has not been is gloom. `docs/lighting.md` says how
 that is built and what it costs.
 
+Everything in the game is a material, explosions and light included.
+An explosion is `Blast`: a row in `data/materials.txt` with a strong
+luminosity and an expulsive force, which sits in the crater it opens
+and decays very quickly into fire. The orb on his staff, the crystals
+he leaves and the fireflies are rows too, each with a luminosity of
+its own and no physical interaction at all, so nothing in the sandbox
+can touch one and one can touch nothing. `docs/lighting.md`, "Every
+light is a material", is the list and the rules it keeps.
+
 A short walk to his left there is a pond. Its water is drawn by a
 shader — a rippling surface, depths that go dark and cold, and a net of
 caustics sliding over the bottom — and a swarm of fireflies hangs over
@@ -250,7 +259,8 @@ he leaves it and comes back.
 | `src/shot.odin` | The world as a PNG, with no window |
 | `src/light.odin` | The orb, the crystals, and the gloom around them |
 | `src/firefly.odin` | The swarm that hangs over a pond and lights it |
-| `src/pot.odin` | The pot of black powder: the throw, the flight, and the bang |
+| `src/pot.odin` | The pot of black powder: the throw, the flight, and the break |
+| `src/bang.odin` | The explosion as a light: what the world remembers of one |
 | `src/pond.odin` | The pond dug into the world beside the spawn |
 | `src/water.odin` | The depth map of the water, and the shader over it |
 

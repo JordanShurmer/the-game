@@ -2,13 +2,56 @@
 
 The world is dark. The light in it comes off the orb on the wizard's
 staff, off the crystals of light that fall out of that orb as he walks
-and hang in the air where they fell, and off the fireflies that drift
-over a pond. So the picture a player reads is a warm pool around
-himself, a thread of small lights behind him marking every place he has
-been, a cold green shimmer over the water, and gloom everywhere else.
+and hang in the air where they fell, off the fireflies that drift over
+a pond, and off every explosion while it lasts. So the picture a player
+reads is a warm pool around himself, a thread of small lights behind
+him marking every place he has been, a cold green shimmer over the
+water, a bang that whites out a cave for a third of a second, and gloom
+everywhere else.
 
 This note says how that is built, what it costs, and the three rules
 that are easy to break and only visible in a shot.
+
+## Every light is a material
+
+Everything in this game is a material, and a light is no exception.
+There is no number in `src/light.odin` that says how bright the orb
+burns: there is a row called `Orb_Light` in `data/materials.txt` that
+carries a `luminosity`, and the light throws that. The same is true of
+every other light in the world.
+
+| Light | Material | Luminosity | Lifetime |
+| --- | --- | --- | --- |
+| a bang | `Blast` | 255 | 22 ticks, then it is fire |
+| the orb on his staff | `Orb_Light` | 255 | it does not decay |
+| a crystal he leaves | `Light_Crystal` | 168 | it does not decay |
+| the fuse on a thrown pot | `Fire` | 120 | 90 ticks |
+| a firefly | `Firefly_Light` | 96 | it does not decay |
+
+**The order they burn in is a rule.** A bang is the brightest thing in
+the world while it lasts, the orb comes next, the trail he leaves must
+never outshine the orb he carries, and a pond must never outshine the
+trail. That was three `#assert`s while the numbers were in the code.
+The numbers are in the table now, so it is
+`test_the_lights_of_the_world_are_ordered`, which reads the shipped
+file. `light_lumens` is the whole of the reading side.
+
+**A light that is only a light has no physical interaction.** The orb,
+a crystal and a firefly are `state = Phantom`, which says exactly that:
+matter cannot touch one and one cannot touch matter, so no cell of the
+sandbox ever holds one. `sandbox_paint` refuses a phantom, and the
+loader refuses a table where anything decays, burns, crumbles or reacts
+into one, so the sandbox is free to trust that every material it holds
+is matter. The world carries a phantom the way it always did — a
+position and a light — and the material row is what says how bright it
+is, what colour it is drawn, and that it does not decay.
+
+**A bang is not a phantom.** `Blast` is `Special`, like fire: it sits in
+the cells the explosion writes, it burns what it touches, it rises, and
+it decays very quickly into fire. That is the difference the request
+draws between the two: the explosion is matter that goes away, and the
+orb is a light that stays. `docs/physics.md`, "Explosions", says what
+the expulsive `force` on that same row does.
 
 ## What the codebase decides for us
 
@@ -32,7 +75,7 @@ sandbox covers. There are two such grids:
 | Grid | Holds | Cleared |
 | --- | --- | --- |
 | `stat` | what the crystals left behind | only when he leaves the square |
-| `live` | what the orb and the fireflies throw this tick | every tick, over the boxes they wrote |
+| `live` | what the orb, the fireflies, the pots and the bangs throw this tick | every tick, over the boxes they wrote |
 
 A cell reads the brighter of the two, interpolated between the four
 samples around it, so a light level is smooth across a wall that a
@@ -115,17 +158,21 @@ of travel, and hangs exactly where it fell.
 
 **A crystal has no physics and no interactions.** It does not fall to
 the floor, it does not collide, nothing in the sandbox can touch it and
-it can touch nothing. It is a position, a light that was flooded once,
-and a seed that keeps the twinkle of one out of step with the next. The
-whole of `Crystal` is twelve bytes.
+it can touch nothing. That is not a rule the crystal keeps for itself:
+it is what `Light_Crystal` being `state = Phantom` means, and the
+sandbox is the side that keeps it. What is left of a crystal here is a
+position, a light that was flooded once, and a seed that keeps the
+twinkle of one out of step with the next. The whole of `Crystal` is
+twelve bytes.
 
 They are kept in a ring of `LIGHT_CRYSTALS` (1024). When it wraps, the
 oldest crystal stops being drawn — but its light was flooded into
 `stat` and stays there, so the place it lit stays lit. The light soaks
 into a place; the crystal is only the thing you can see it coming from.
 
-**The trail never outshines the orb.** `LIGHT_CRYSTAL_POWER` is 168
-against the orb's 255, held by a `#assert` and by
+**The trail never outshines the orb.** `Light_Crystal` burns at 168
+against `Orb_Light`'s 255, held by
+`test_the_lights_of_the_world_are_ordered` and by
 `test_the_trail_he_leaves_never_outshines_the_orb_he_carries`. Break
 that and every place he has been is as bright as the place he is, and
 the picture stops saying which is which.
@@ -145,18 +192,49 @@ the same commands gives the same picture.
 `test_the_swarm_moves_the_same_way_every_time` holds that.
 
 **A firefly throws its light and takes it with it.** It floods into
-`live` like the orb, at `FIREFLY_POWER` (96) scaled by its blink, over
-a reach of 8 samples, and it leaves nothing behind: walk the swarm away
-and the water goes dark again. That is the difference between a firefly
-and a crystal, and `test_a_firefly_leaves_no_light_behind_it` is the
-line between them.
+`live` like the orb, at the luminosity of `Firefly_Light` (96) scaled
+by its blink, over a reach of 9 samples, and it leaves nothing behind:
+walk the swarm away and the water goes dark again. That is the
+difference between a firefly and a crystal, and
+`test_a_firefly_leaves_no_light_behind_it` is the line between them.
 
-The order of the three lights is a rule as well: **96 against the
-crystals' 168 against the orb's 255**, held by a `#assert`. A pond that
-outshone the trail would tell the player the wrong thing about where he
-has been.
+The order of the lights is a rule as well: **96 against the crystals'
+168 against the orb's 255**. A pond that outshone the trail would tell
+the player the wrong thing about where he has been.
 
 `docs/water.md` says what the pond is that they gather over.
+
+## The bangs
+
+An explosion writes the `Blast` material into the cell it goes off in
+and through the heart of the crater it opens, and the sandbox remembers
+the place as a **bang**: `src/bang.odin` holds a ring of `BANG_MAX`
+(16) of them, and each one is a position and what is left of the life
+of the material it is made of. `bang_age` counts that down once a tick,
+beside the sandbox's own tick.
+
+`light_throw_bangs` floods `live` from every live bang, at
+`bang_power`, which is the luminosity of `Blast` shaped by
+`(life / lifetime)` squared: the count runs down evenly, and squaring it
+holds the brightness near its peak for the first half and lets it fall
+away fast at the end, so a bang snaps bright the instant it goes off and
+gutters rather than dimming evenly.
+
+**One flood stands for the whole crater.** Every cell the blast writes
+holds the same material, and the crater is smaller than `BANG_REACH`
+(34 samples), so one flood at the point it went off says what all of
+them say, at the cost of one.
+
+**A bang leaves no light behind it, the way a firefly does not.** A bang
+that has run out keeps its place in the ring for one more tick, which is
+the tick `light_forget_bangs` clears the box it lit. Then the slot is
+free.
+
+The ring is in the sandbox and not in the pot, so **every** explosion
+lights the cave it goes off in: a thrown pot, a grain of gunpowder that
+a fire reached, a block of tnt, or an `explode` command from the MCP
+server. The pot is only one way to start one. `docs/pot.md` says what
+is left of the pot once it has.
 
 ## The orb is where the art says it is
 
@@ -172,7 +250,10 @@ body box.  `test_the_orb_light_starts_where_the_sheet_draws_the_orb`
 reads the shipped sheet at the point the constants compute, for both
 facings, and fails unless it lands on the orb the seeder drew. The
 light's colour and the orb's paint are the same two colours for the
-same reason.
+same reason, and `Orb_Light` is painted the first of them in the
+material table, which
+`test_every_light_is_painted_the_colour_its_material_carries` holds for
+every light in the world.
 
 **A buried orb still gives light.** His staff head rides six cells
 above his hat, so in a passage he cut himself the orb can sit inside
@@ -188,7 +269,9 @@ milliseconds for a sandbox tick of the same square. Almost all of it is
 the one orb flood, about 2500 samples of queue. Seven fireflies add
 about 11 microseconds a tick while he stands beside their pond, and
 nothing at all once they fall outside the grid. A crystal costs one
-smaller flood, once, and nothing afterwards. Drawing costs a table
+smaller flood, once, and nothing afterwards. A bang costs one flood a
+tick for the 22 ticks it lives, and a ring with nothing in it costs
+sixteen comparisons. Drawing costs a table
 lookup and about fifteen integer operations per texel, which at the
 zoom the game opens at is 320 x 180 of them.
 
@@ -200,11 +283,15 @@ The two grids and the queue are 768 KB together, allocated once per
 - **No shadows with edges.** Light is attenuated by what it passes
   through, not traced, so a wall darkens the light behind it rather
   than cutting a hard silhouette out of it.
-- **Nothing else in the world emits.** Lava, fire and burning oil are
-  drawn at their own colours and light nothing around them. They are
-  the obvious next sources, and they need no new machinery: a flood
-  into `live` at their position is all a light is here, which is all a
-  firefly is.
+- **A luminous cell does not light the world by itself.** `Fire`
+  carries a luminosity, because a pot's fuse is fire and that is the
+  light the fuse throws, but a fire burning in a room lights nothing
+  around it, and neither does lava or burning oil. A light is thrown
+  from a list of sources — the orb, the crystals, the flies, the pots,
+  the bangs — and not from a scan of four million cells looking for the
+  bright ones. Giving every luminous cell its own light needs a way to
+  gather them that costs less than the flood it feeds; the number each
+  one would throw is already in the table, waiting for it.
 - **The fireflies do not know the world.** They drift through the air
   over their pond on a fixed path, and rock in the way neither turns
   them nor stops them. Nothing can catch one, and one can catch

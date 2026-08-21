@@ -7,11 +7,11 @@ import rl "vendor:raylib"
 FIREFLY_MAX :: 24
 FIREFLY_PER_POND :: 7
 
-FIREFLY_POWER :: 96
-FIREFLY_REACH :: 8
+// A firefly is a light with no body, and the light it carries is the
+// Firefly_Light material. See docs/lighting.md, "Every light is a material";
+// test_the_lights_of_the_world_are_ordered holds it under the trail he leaves.
+FIREFLY_REACH :: 9
 FIREFLY_FALL :: Light_Fall{open = 176, open_diag = 150, dense = 96, dense_diag = 64}
-
-#assert(FIREFLY_POWER < LIGHT_CRYSTAL_POWER, "a firefly must never outshine the trail he leaves")
 
 FIREFLY_HOVER :: 8.0
 FIREFLY_SPREAD :: 0.82
@@ -108,8 +108,8 @@ firefly_glow :: proc(f: Firefly, clock: f64) -> f32 {
 	return FIREFLY_DIM + (1 - FIREFLY_DIM) * beat * beat * beat
 }
 
-firefly_power :: proc(f: Firefly, clock: f32) -> u8 {
-	return u8(f32(FIREFLY_POWER) * firefly_glow(f, f64(clock)))
+firefly_power :: proc(table: Material_Table, f: Firefly, clock: f32) -> u8 {
+	return u8(f32(light_lumens(table, table.firefly)) * firefly_glow(f, f64(clock)))
 }
 
 @(private = "file")
@@ -209,14 +209,15 @@ test_the_swarm_never_outshines_the_trail_or_the_orb :: proc(t: ^testing.T) {
 
 	for _ in 0 ..< 120 do sim_step_player(&s, {}, false)
 
+	power := light_lumens(s.world.materials, s.world.materials.firefly)
 	for i in 0 ..< int(s.flies.count) {
 		f := s.flies.flies[i]
 		lux := light_lux(&s.light, i32(math.floor(f.x)), i32(math.floor(f.y)))
 		testing.expectf(
 			t,
-			lux <= FIREFLY_POWER,
-			"no firefly may burn past FIREFLY_POWER, and one lights its own cell to %d",
-			lux,
+			lux <= power,
+			"no firefly may burn past the luminosity of Firefly_Light, and one lights its own cell to %d against %d",
+			lux, power,
 		)
 	}
 }
