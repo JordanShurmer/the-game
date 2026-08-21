@@ -46,6 +46,7 @@ and no display, which is how to look at what an edit did:
 ```sh
 make shot
 ./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
+./bin/shot walk=-600 out=shots/dark.png    # lit by the orb, and by what he left
 ```
 
 Built and tested against the Odin nightly of 2026-08-20, and not
@@ -140,6 +141,12 @@ cannot cut, and it throws part of what it removes back out of the hole
 as debris that then falls. `docs/player.md` says how he is built and what the phase
 leaves out.
 
+The world he walks into is dark. The orb on his staff is the only light
+in it, and every 21 cells a small crystal of light falls out of that orb
+and hangs where it fell, so the way he came stays lit behind him and
+everything he has not been is gloom. `docs/lighting.md` says how that is
+built and what it costs.
+
 The world editor takes the camera back, so the same keys pan it again:
 
 | Key | Action |
@@ -219,6 +226,7 @@ he leaves it and comes back.
 | `src/mcp*.odin` | The MCP server |
 | `src/main.odin` | The game window |
 | `src/shot.odin` | The world as a PNG, with no window |
+| `src/light.odin` | The orb, the crystals, and the gloom around them |
 
 ## Play and author through MCP
 

@@ -29,6 +29,7 @@ Sim :: struct {
 	tile_edit: Tile_Editor,
 	sandbox:   Sandbox,
 	queue:     Input_Queue,
+	light:     Light,
 
 	follow_player: bool,
 
@@ -102,7 +103,9 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 
 	editor_init(s)
 
+	s.light = light_make(biomes.world_seed)
 	s.player = player_spawn(s.world)
+	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
 	s.loaded = true
 
 	sim_open_sandbox(s, SANDBOX_DEFAULT_WIDTH, SANDBOX_DEFAULT_HEIGHT, 0, 0, 1, SANDBOX_DEFAULT_DELAY)
@@ -111,6 +114,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 
 sim_unload :: proc(s: ^Sim) {
 	if !s.loaded do return
+	light_destroy(&s.light)
 	sandbox_destroy(&s.sandbox)
 	editor_destroy(s)
 	destroy_tile_set(s.world.tiles)
@@ -187,6 +191,7 @@ sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
+	light_step(&s.light, terrain, s.player)
 }
 
 sim_play_begin :: proc(s: ^Sim) {
@@ -196,6 +201,8 @@ sim_play_begin :: proc(s: ^Sim) {
 
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
+
+	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
 
 	ox := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	oy := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE

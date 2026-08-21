@@ -1,5 +1,6 @@
 package game
 
+import "core:math"
 import "core:os"
 import "core:strings"
 import "core:testing"
@@ -14,6 +15,7 @@ Shot :: struct {
 	player:  Maybe(Player),
 	sprite:  Sprite_Sheet,
 	sandbox: ^Sandbox,
+	light:   ^Light,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -58,33 +60,47 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	pixels := make([]rl.Color, int(width) * int(height))
 	defer delete(pixels)
 
+	texels := make([]rl.Color, int(shot.view.w))
+	defer delete(texels)
+
 	for ty in 0 ..< shot.view.h {
 		row := cells[int(ty) * int(shot.view.w):][:shot.view.w]
 		wy := shot.view.y + ty * shot.view.step
 		fy := wy - origin_y
 		in_frame_row := has_player && fy >= 0 && fy < SPRITE_FRAME_H
 
+		for tx in 0 ..< shot.view.w {
+			wx := shot.view.x + tx * shot.view.step
+			c := lut[row[tx]]
+
+			if shot.light != nil {
+				c = light_shade(c, light_lux(shot.light, wx, wy))
+			}
+
+			if in_frame_row {
+				fx := wx - origin_x
+				if fx >= 0 && fx < SPRITE_FRAME_W {
+					sc := sprite_pixel(shot.sprite, motion, column, player.facing, fx, fy)
+					if sc.a != 0 do c = blend_over(sc, c)
+				}
+			}
+			texels[tx] = c
+		}
+
 		for sy in 0 ..< shot.scale {
 			line := pixels[int(ty * shot.scale + sy) * int(width):][:width]
 			for tx in 0 ..< shot.view.w {
-				c := lut[row[tx]]
-
-				if in_frame_row {
-					wx := shot.view.x + tx * shot.view.step
-					fx := wx - origin_x
-					if fx >= 0 && fx < SPRITE_FRAME_W {
-						sc := sprite_pixel(shot.sprite, motion, column, player.facing, fx, fy)
-						if sc.a != 0 do c = blend_over(sc, c)
-					}
-				}
-
 				for sx in 0 ..< shot.scale {
-					line[tx * shot.scale + sx] = c
+					line[tx * shot.scale + sx] = texels[tx]
 				}
 			}
 		}
 	}
 
+	if shot.light != nil {
+		shot_draw_crystals(shot, pixels, width, height)
+		if has_player do shot_draw_orb(shot, pixels, width, height, player)
+	}
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
 
 	img := rl.Image {
@@ -130,15 +146,55 @@ shot_biome_origin :: proc(world: World, biome: Biome_Id) -> (x: i32, y: i32, fou
 }
 
 @(private = "file")
-blend_over :: proc(fg, bg: rl.Color) -> rl.Color {
-	if fg.a == 255 do return fg
+shot_plot :: proc(shot: Shot, pixels: []rl.Color, width, height, tx, ty: i32, color: rl.Color) {
+	if tx < 0 || ty < 0 do return
+	x0 := tx * shot.scale
+	y0 := ty * shot.scale
+	if x0 >= width || y0 >= height do return
 
-	over :: proc(fg, bg: u8, a: f32) -> u8 {
-		return u8(f32(fg) * a + f32(bg) * (1 - a))
+	for y in y0 ..< min(y0 + shot.scale, height) {
+		for x in x0 ..< min(x0 + shot.scale, width) {
+			p := &pixels[int(y) * int(width) + int(x)]
+			p^ = blend_over(color, p^)
+		}
 	}
+}
 
-	a := f32(fg.a) / 255
-	return rl.Color{over(fg.r, bg.r, a), over(fg.g, bg.g, a), over(fg.b, bg.b, a), 255}
+@(private = "file")
+shot_draw_glow :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, wx, wy: f32, halo, blaze: i32, peak: f32) {
+	tx := floor_div(i32(math.floor(wx)) - shot.view.x, shot.view.step)
+	ty := floor_div(i32(math.floor(wy)) - shot.view.y, shot.view.step)
+	if tx < -halo || ty < -halo || tx > shot.view.w + halo || ty > shot.view.h + halo do return
+
+	for dy in -halo ..= halo {
+		for dx in -halo ..= halo {
+			away := dx * dx + dy * dy
+			if away <= blaze * blaze {
+				shot_plot(shot, pixels, width, height, tx + dx, ty + dy, LIGHT_CORE)
+				continue
+			}
+			fade := light_halo_fade(away, halo, peak)
+			if fade <= 0 do continue
+			shot_plot(shot, pixels, width, height, tx + dx, ty + dy, rl.Fade(LIGHT_GLOW, fade))
+		}
+	}
+}
+
+@(private = "file")
+shot_draw_crystals :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+	for i in 0 ..< int(shot.light.count) {
+		c := shot.light.crystals[i]
+		shot_draw_glow(
+			shot, pixels, width, height, c.x, c.y,
+			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_orb :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, p: Player) {
+	x, y := light_orb_at(p)
+	shot_draw_glow(shot, pixels, width, height, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK)
 }
 
 @(private = "file")
@@ -458,5 +514,74 @@ test_shot_open_sandbox_refuses_what_a_sandbox_cannot_hold :: proc(t: ^testing.T)
 	testing.expectf(
 		t, shot_open_sandbox(&s, coarse_step) == .Wrong_Step,
 		"ticks needs step 1: a sandbox is one cell per cell",
+	)
+}
+
+@(private = "file")
+shot_mean_brightness :: proc(colors: [^]rl.Color, width, x0, y0, w, h: i32) -> u32 {
+	total := u32(0)
+	for y in y0 ..< y0 + h {
+		for x in x0 ..< x0 + w {
+			c := colors[int(y) * int(width) + int(x)]
+			total += u32(c.r) + u32(c.g) + u32(c.b)
+		}
+	}
+	return total / u32(w * h * 3)
+}
+
+@(test)
+test_the_orb_lights_what_is_near_him_and_the_gloom_keeps_the_rest :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+
+	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
+	if !testing.expectf(t, result.err == .None, "the shipped sheet must load, got %v", result.err) do return
+	defer destroy_sprite_sheet(sheet)
+
+	for _ in 0 ..< 30 do sim_step_player(&s, {}, false)
+
+	player := s.player
+	view := World_View{x = i32(player.x) - 160, y = i32(player.y) - 90, w = 320, h = 180, step = 1}
+	shot := Shot{view = view, scale = 1, player = player, sprite = sheet, sandbox = &s.sandbox}
+
+	dim_path := "shot_gloom_off.tmp.png"
+	lit_path := "shot_gloom_on.tmp.png"
+	defer os.remove(dim_path)
+	defer os.remove(lit_path)
+
+	if !testing.expect(t, world_shot(s.world, shot, dim_path), "the unlit shot must be written") do return
+	shot.light = &s.light
+	if !testing.expect(t, world_shot(s.world, shot, lit_path), "the lit shot must be written") do return
+
+	read :: proc(t: ^testing.T, path: string) -> (rl.Image, [^]rl.Color, bool) {
+		cpath := strings.clone_to_cstring(path, context.temp_allocator)
+		img := rl.LoadImage(cpath)
+		if !testing.expectf(t, img.data != nil, "%s must load back", path) do return img, nil, false
+		return img, rl.LoadImageColors(img), true
+	}
+
+	dim_img, dim, dim_ok := read(t, dim_path)
+	defer rl.UnloadImage(dim_img)
+	defer rl.UnloadImageColors(dim)
+	lit_img, lit, lit_ok := read(t, lit_path)
+	defer rl.UnloadImage(lit_img)
+	defer rl.UnloadImageColors(lit)
+	if !dim_ok || !lit_ok do return
+
+	lit_near := shot_mean_brightness(lit, view.w, 140, 70, 40, 40)
+	lit_far := shot_mean_brightness(lit, view.w, 0, 0, 40, 40)
+	dim_far := shot_mean_brightness(dim, view.w, 0, 0, 40, 40)
+
+	testing.expectf(
+		t, lit_near > 2 * lit_far,
+		"the cells he stands among must read far brighter than the far corner, got %d against %d",
+		lit_near, lit_far,
+	)
+	testing.expectf(
+		t, lit_far < dim_far,
+		"the far corner must be darker for the light being on, got %d against %d",
+		lit_far, dim_far,
 	)
 }

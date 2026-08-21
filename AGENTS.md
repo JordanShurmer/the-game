@@ -29,12 +29,19 @@ make shot
 ./bin/shot biome=Coalmine grid=1 out=shots/grid.png     # with the tile lattice
 ./bin/shot biome=Coalmine step=2 out=shots/wide.png     # pulled back
 ./bin/shot player=1 out=shots/wizard.png                # the wizard where he starts
+./bin/shot walk=-600 out=shots/dark.png                 # walked, with the light he left
 ```
 
 Then open the PNG and look at it. `grid=1` draws the tile lattice and
 the region borders, which is how to tell a shape you drew from a seam
 the lattice left. Arguments are `key=value`: `out biome x y w h step
-scale grid`. Shots are not kept in the repository.
+scale grid player light walk ticks ignite explode`. Shots are not kept
+in the repository.
+
+`player=1` lights the shot, because the wizard carries the only light
+there is; `light=0` turns that off and draws the world flat, which is
+what terrain is judged by. `walk=N` walks him N ticks first (negative
+walks left), which is the way to see the trail of crystals he leaves.
 
 ## Iterate on the world
 
@@ -91,6 +98,8 @@ of the whole world.
 `docs/player.md` is the design note: how the wizard is built, the
 numbers he moves by, and what this phase leaves out. Read it before
 changing `src/player.odin` or `src/sprite.odin`.
+`docs/lighting.md` is the note for the light he carries. Read it
+before changing `src/light.odin`, and note the third rule below.
 
 Two rules there are easy to break and hard to see:
 
@@ -105,6 +114,11 @@ Two rules there are easy to break and hard to see:
 - **The drawing and the collision box are two numbers that must agree.**
   `tools/seed_wizard.py` holds the body box, `src/sprite.odin` asserts
   it matches `src/player.odin`, and `--check` holds the sheet to it.
+- **So do the drawing and the orb.** `tools/seed_wizard.py` paints the
+  orb on the staff, and `src/light.odin` says where the light leaves it
+  and in what colour. `test_the_orb_light_starts_where_the_sheet_draws_the_orb`
+  reads the sheet at the point the constants compute and fails if a
+  redrawn wizard moves the orb out from under his own light.
 
 ```sh
 tools/seed_wizard.py           # redraw data/sprites/wizard.png

@@ -77,6 +77,7 @@ main :: proc() {
 			0,
 			rl.WHITE,
 		)
+		app_draw_crystals(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
 		editor_draw(&app)
@@ -93,7 +94,7 @@ app_load_data :: proc(app: ^App) -> bool {
 	sim_play_begin(&app.sim)
 
 	for m, i in app.world.materials.materials {
-		app.color_lut[i] = rl_from_argb(m.color)
+		app.color_lut[i] = blend_over(rl_from_argb(m.color), BACKGROUND)
 	}
 
 	app.step = 1
@@ -167,11 +168,33 @@ app_regenerate :: proc(app: ^App) {
 	generate(app.world, view, app.cells)
 	if app.follow_player do app_draw_sandbox(app, view)
 
-	count := int(w) * int(h)
-	for i in 0 ..< count {
-		app.pixels[i] = app.color_lut[app.cells[i]]
+	if app_lighting(app) {
+		app_shade(app, view)
+	} else {
+		count := int(w) * int(h)
+		for i in 0 ..< count {
+			app.pixels[i] = app.color_lut[app.cells[i]]
+		}
 	}
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
+}
+
+app_lighting :: proc(app: ^App) -> bool {
+	return app.follow_player && !app.editor.open && !app.tile_edit.open
+}
+
+@(private = "file")
+app_shade :: proc(app: ^App, view: World_View) {
+	for ty in i32(0) ..< view.h {
+		wy := view.y + ty * view.step
+		row := app.cells[int(ty) * int(view.w):][:view.w]
+		out := app.pixels[int(ty) * int(view.w):][:view.w]
+
+		for tx in i32(0) ..< view.w {
+			wx := view.x + tx * view.step
+			out[tx] = light_shade(app.color_lut[row[tx]], light_lux(&app.light, wx, wy))
+		}
+	}
 }
 
 @(private = "file")
@@ -359,6 +382,45 @@ app_follow_player :: proc(app: ^App) {
 }
 
 @(private = "file")
+app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32) {
+	scale := f32(app.zoom) / f32(app.step)
+	x := (wx - f32(app.cam_x)) * scale
+	y := (wy - f32(app.cam_y)) * scale
+
+	margin := f32(halo) * scale
+	if x < -margin || y < -margin || x > WINDOW_W + margin || y > WINDOW_H + margin do return
+
+	at := rl.Vector2{x, y}
+	wide := f32(halo) * scale * glow
+	rl.DrawCircleV(at, wide, rl.Fade(LIGHT_GLOW, 0.16 * peak * glow))
+	rl.DrawCircleV(at, wide * 0.55, rl.Fade(LIGHT_GLOW, 0.32 * peak * glow))
+	rl.DrawCircleV(at, max(f32(blaze + 1) * scale * glow, 1.5), rl.Fade(LIGHT_CORE, glow))
+}
+
+@(private = "file")
+app_draw_crystals :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	clock := rl.GetTime()
+	for i in 0 ..< int(app.light.count) {
+		c := app.light.crystals[i]
+		app_draw_glow(
+			app, c.x, c.y,
+			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
+			light_crystal_glow(c, clock),
+		)
+	}
+}
+
+@(private = "file")
+app_draw_orb :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	x, y := light_orb_at(app.player)
+	app_draw_glow(app, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK, 1)
+}
+
+@(private = "file")
 app_draw_player :: proc(app: ^App) {
 	if app.sprite.pixels == nil do return
 
@@ -383,6 +445,7 @@ app_draw_player :: proc(app: ^App) {
 	}
 
 	rl.DrawTexturePro(app.sprite_texture, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
+	app_draw_orb(app)
 	app_draw_beam(app)
 }
 

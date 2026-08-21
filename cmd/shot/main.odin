@@ -29,6 +29,9 @@ Options :: struct {
 	grid:    bool,
 	player:  bool,
 	aimed:   bool,
+	light:      bool,
+	light_set:  bool,
+	walk:       i32,
 	ticks:      i32,
 	ticks_set:  bool,
 	ignite:     Point_Command,
@@ -46,6 +49,9 @@ main :: proc() {
 		scale = 2,
 	}
 	if !read_options(&options) do os.exit(1)
+
+	if options.walk != 0 do options.player = true
+	if !options.light_set do options.light = options.player
 
 	sim: game.Sim
 	if err := game.sim_load(&sim); err != .None {
@@ -70,6 +76,25 @@ main :: proc() {
 		player.on_ground = true
 
 		if !options.aimed && options.biome == "" {
+			options.x = i32(player.x) - options.w * options.step / 2
+			options.y = i32(player.y) - options.h * options.step / 2
+		}
+	}
+
+	if options.walk != 0 {
+		if options.ticks_set {
+			fmt.eprintfln("walk and ticks both drive the simulation, so use one or the other")
+			os.exit(1)
+		}
+
+		game.sim_play_begin(&sim)
+		held: game.Player_Input = options.walk > 0 ? {.Right} : {.Left}
+		for _ in 0 ..< abs(options.walk) {
+			game.sim_step_player(&sim, held, false)
+		}
+		player = sim.player
+
+		if !options.aimed {
 			options.x = i32(player.x) - options.w * options.step / 2
 			options.y = i32(player.y) - options.h * options.step / 2
 		}
@@ -142,12 +167,18 @@ main :: proc() {
 		scale = options.scale,
 		grid  = options.grid,
 	}
-	if options.ticks_set {
+	if options.ticks_set || options.walk != 0 {
 		shot.sandbox = &sim.sandbox
 	}
 	if options.player {
 		shot.player = player
 		shot.sprite = sheet
+	}
+	if options.light {
+		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
+		game.light_follow(&sim.light, i32(player.x), i32(player.y))
+		game.light_step(&sim.light, terrain, player)
+		shot.light = &sim.light
 	}
 
 	if !game.world_shot(sim.world, shot, options.out) {
@@ -218,6 +249,11 @@ read_options :: proc(options: ^Options) -> bool {
 			options.grid = value != "0" && value != "false"
 		case "player":
 			options.player = value != "0" && value != "false"
+		case "light":
+			options.light = value != "0" && value != "false"
+			options.light_set = true
+		case "walk":
+			options.walk, ok = number(key, value)
 		case "ticks":
 			options.ticks, ok = number(key, value)
 			options.ticks_set = true
