@@ -16,6 +16,7 @@ Shot :: struct {
 	sprite:  Sprite_Sheet,
 	sandbox: ^Sandbox,
 	light:   ^Light,
+	flies:   ^Firefly_Swarm,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -99,6 +100,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
+		shot_draw_fireflies(shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
 	}
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
@@ -161,7 +163,15 @@ shot_plot :: proc(shot: Shot, pixels: []rl.Color, width, height, tx, ty: i32, co
 }
 
 @(private = "file")
-shot_draw_glow :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, wx, wy: f32, halo, blaze: i32, peak: f32) {
+shot_draw_glow :: proc(
+	shot: Shot,
+	pixels: []rl.Color,
+	width, height: i32,
+	wx, wy: f32,
+	halo, blaze: i32,
+	peak: f32,
+	wide_color, core_color: rl.Color,
+) {
 	tx := floor_div(i32(math.floor(wx)) - shot.view.x, shot.view.step)
 	ty := floor_div(i32(math.floor(wy)) - shot.view.y, shot.view.step)
 	if tx < -halo || ty < -halo || tx > shot.view.w + halo || ty > shot.view.h + halo do return
@@ -170,12 +180,12 @@ shot_draw_glow :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, wx, w
 		for dx in -halo ..= halo {
 			away := dx * dx + dy * dy
 			if away <= blaze * blaze {
-				shot_plot(shot, pixels, width, height, tx + dx, ty + dy, LIGHT_CORE)
+				shot_plot(shot, pixels, width, height, tx + dx, ty + dy, core_color)
 				continue
 			}
 			fade := light_halo_fade(away, halo, peak)
 			if fade <= 0 do continue
-			shot_plot(shot, pixels, width, height, tx + dx, ty + dy, rl.Fade(LIGHT_GLOW, fade))
+			shot_plot(shot, pixels, width, height, tx + dx, ty + dy, rl.Fade(wide_color, fade))
 		}
 	}
 }
@@ -187,6 +197,21 @@ shot_draw_crystals :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
 		shot_draw_glow(
 			shot, pixels, width, height, c.x, c.y,
 			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
+			LIGHT_GLOW, LIGHT_CORE,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.flies == nil do return
+
+	for i in 0 ..< int(shot.flies.count) {
+		f := shot.flies.flies[i]
+		shot_draw_glow(
+			shot, pixels, width, height, f.x, f.y,
+			FIREFLY_HALO, FIREFLY_BLAZE, FIREFLY_PEAK * firefly_glow(f, f64(shot.flies.clock)),
+			FIREFLY_GLOW, FIREFLY_CORE,
 		)
 	}
 }
@@ -194,7 +219,11 @@ shot_draw_crystals :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
 @(private = "file")
 shot_draw_orb :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, p: Player) {
 	x, y := light_orb_at(p)
-	shot_draw_glow(shot, pixels, width, height, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK)
+	shot_draw_glow(
+		shot, pixels, width, height, x, y,
+		LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK,
+		LIGHT_GLOW, LIGHT_CORE,
+	)
 }
 
 @(private = "file")

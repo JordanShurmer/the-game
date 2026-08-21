@@ -32,14 +32,28 @@ make shot
 ./bin/shot walk=-600 out=shots/dark.png                 # walked, with the light he left
 ```
 
+The water shader runs on the GPU, so `bin/shot` cannot draw it and
+paints the pond flat. The game takes a shot of its own window instead,
+which needs a display:
+
+```sh
+make game
+./bin/the-game shot=shots/water.png frames=140 walk=-40
+# with no display: xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=...
+```
+
+Its arguments are `shot` (the PNG to write), `frames` (how many frames
+to draw first, which is what moves the water) and `walk` (ticks of walk
+before the picture, negative for left, toward the pond).
+
 Then open the PNG and look at it. `grid=1` draws the tile lattice and
 the region borders, which is how to tell a shape you drew from a seam
 the lattice left. Arguments are `key=value`: `out biome x y w h step
 scale grid player light walk ticks ignite explode`. Shots are not kept
 in the repository.
 
-`player=1` lights the shot, because the wizard carries the only light
-there is; `light=0` turns that off and draws the world flat, which is
+`player=1` lights the shot, because the wizard carries nearly all the
+light there is; `light=0` turns that off and draws the world flat, which is
 what terrain is judged by. `walk=N` walks him N ticks first (negative
 walks left), which is the way to see the trail of crystals he leaves.
 
@@ -89,7 +103,7 @@ of the whole world.
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
 | `cmd/bench/` | what a tick costs, on a real region |
-| `data/` | materials, biomes, the biome map, the tile sets, the sprites |
+| `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
 | `tools/` | the toolchain install, the tile seeder, and the wizard seeder |
 
@@ -98,8 +112,11 @@ of the whole world.
 `docs/player.md` is the design note: how the wizard is built, the
 numbers he moves by, and what this phase leaves out. Read it before
 changing `src/player.odin` or `src/sprite.odin`.
-`docs/lighting.md` is the note for the light he carries. Read it
-before changing `src/light.odin`, and note the third rule below.
+`docs/lighting.md` is the note for the light he carries and for the
+fireflies over the pond. Read it before changing `src/light.odin` or
+`src/firefly.odin`, and note the third rule below. `docs/water.md` is
+the note for the pond and the water shader; read it before changing
+`src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
 
 Two rules there are easy to break and hard to see:
 
