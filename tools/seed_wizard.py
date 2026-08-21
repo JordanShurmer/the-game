@@ -101,8 +101,8 @@ INK = (40, 58, 138, 255)
 INK_PALE = (84, 116, 205, 255)
 BEARD = (223, 227, 240, 255)
 BEARD_SHADE = (160, 173, 210, 255)
-ORB = (150, 214, 255, 255)
-ORB_CORE = (243, 251, 255, 255)
+ORB = (255, 208, 122, 255)
+ORB_CORE = (255, 251, 233, 255)
 
 # The jetpack plume. The game already burns at this color, so a player
 # reads the flame as fire before he is told what it is.
