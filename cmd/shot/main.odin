@@ -174,12 +174,16 @@ main :: proc() {
 		shot.player = player
 		shot.sprite = sheet
 	}
+	shot.drudges = &sim.drudges
+	shot.drudge_pots = &sim.drudge_pots
+
 	if options.light {
 		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
 		game.light_follow(&sim.light, i32(player.x), i32(player.y))
-		game.light_step(&sim.light, terrain, player, &sim.flies)
+		game.light_step(&sim.light, terrain, player, &sim.flies, &sim.pots, &sim.drudge_pots)
 		shot.light = &sim.light
 		shot.flies = &sim.flies
+		shot.pots = &sim.pots
 	}
 
 	if !game.world_shot(sim.world, shot, options.out) {

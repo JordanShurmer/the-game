@@ -295,10 +295,10 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 	return rl.Color{u8(min(r, 255)), u8(min(g, 255)), u8(min(b, 255)), 255}
 }
 
-light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil) {
+light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil) {
 	if l.stat == nil do return
 	light_drop(l, t, p)
-	light_throw(l, t, p, flies, pots)
+	light_throw(l, t, p, flies, pots, enemy_pots)
 }
 
 light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
@@ -322,12 +322,13 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	light_flood(l, l.stat, t, x, y, light_lumens(table, table.crystal), LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
 }
 
-light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil) {
+light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil) {
 	table := t.world.materials
 
 	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
 	light_forget_flies(l, flies)
 	light_forget_pots(l, pots)
+	light_forget_pots(l, enemy_pots)
 	light_forget_bangs(l, t)
 
 	x, y := light_orb_source(t, p)
@@ -338,6 +339,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_flood(l, l.live, t, x, y, light_lumens(table, table.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 	light_throw_flies(l, t, flies)
 	light_throw_pots(l, t, pots)
+	light_throw_pots(l, t, enemy_pots)
 	light_throw_bangs(l, t)
 }
 

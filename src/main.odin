@@ -104,7 +104,9 @@ main :: proc() {
 		app_draw_water(&app, w, h)
 		app_draw_crystals(&app)
 		app_draw_fireflies(&app)
-		app_draw_pots(&app)
+		app_draw_drudges(&app)
+		app_draw_pots(&app, &app.pots)
+		app_draw_pots(&app, &app.drudge_pots)
 		app_draw_bangs(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
@@ -550,13 +552,49 @@ app_draw_fireflies :: proc(app: ^App) {
 	}
 }
 
+// Two stacked rectangles, a torso and a head, the head leaning toward
+// whichever way he is walking or facing. See docs/drudge.md, "Looking at
+// him".
 @(private = "file")
-app_draw_pots :: proc(app: ^App) {
+app_draw_drudges :: proc(app: ^App) {
+	scale := f32(app.zoom) / f32(app.step)
+
+	for i in 0 ..< int(app.drudges.count) {
+		d := app.drudges.drudges[i]
+		facing := drudge_facing(d, app.player)
+
+		x0 := d.x - DRUDGE_BODY_W*0.5
+		y1 := d.y
+		y0 := y1 - DRUDGE_BODY_H
+		head_h := f32(DRUDGE_BODY_H) * 0.35
+		head_w := f32(DRUDGE_BODY_W) * 0.6
+		lean := f32(DRUDGE_BODY_W) * 0.2 * f32(facing)
+
+		torso := rl.Rectangle {
+			x = (x0 - f32(app.cam_x)) * scale,
+			y = (y0 + head_h - f32(app.cam_y)) * scale,
+			width  = f32(DRUDGE_BODY_W) * scale,
+			height = (f32(DRUDGE_BODY_H) - head_h) * scale,
+		}
+		head := rl.Rectangle {
+			x = (d.x - head_w*0.5 + lean - f32(app.cam_x)) * scale,
+			y = (y0 - f32(app.cam_y)) * scale,
+			width  = head_w * scale,
+			height = head_h * scale,
+		}
+
+		rl.DrawRectangleRec(torso, DRUDGE_BODY)
+		rl.DrawRectangleRec(head, DRUDGE_BODY_DARK)
+	}
+}
+
+@(private = "file")
+app_draw_pots :: proc(app: ^App, bag: ^Pot_Bag) {
 	if !app_lighting(app) do return
 
 	scale := f32(app.zoom) / f32(app.step)
-	for i in 0 ..< int(app.pots.count) {
-		p := app.pots.pots[i]
+	for i in 0 ..< int(bag.count) {
+		p := bag.pots[i]
 		if !p.live do continue
 
 		x := (p.x - f32(app.cam_x)) * scale

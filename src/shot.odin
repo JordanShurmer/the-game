@@ -16,8 +16,10 @@ Shot :: struct {
 	sprite:  Sprite_Sheet,
 	sandbox: ^Sandbox,
 	light:   ^Light,
-	flies:   ^Firefly_Swarm,
-	pots:    ^Pot_Bag,
+	flies:       ^Firefly_Swarm,
+	pots:        ^Pot_Bag,
+	drudges:     ^Drudge_Bag,
+	drudge_pots: ^Pot_Bag,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -102,7 +104,9 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
 		shot_draw_fireflies(shot, pixels, width, height)
-		shot_draw_pots(world, shot, pixels, width, height)
+		shot_draw_drudges(shot, pixels, width, height)
+		shot_draw_pots(world, shot, pixels, width, height, shot.pots)
+		shot_draw_pots(world, shot, pixels, width, height, shot.drudge_pots)
 		shot_draw_bangs(world, shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
 	}
@@ -220,11 +224,45 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 }
 
 @(private = "file")
-shot_draw_pots :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
-	if shot.pots == nil do return
+shot_draw_drudges :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.drudges == nil do return
 
-	for i in 0 ..< int(shot.pots.count) {
-		p := shot.pots.pots[i]
+	player, has_player := shot.player.?
+
+	for i in 0 ..< int(shot.drudges.count) {
+		d := shot.drudges.drudges[i]
+		facing := has_player ? drudge_facing(d, player) : d.dir
+
+		x0 := i32(math.floor(d.x - DRUDGE_BODY_W*0.5))
+		y1 := i32(math.floor(d.y))
+		y0 := y1 - DRUDGE_BODY_H
+		head_h := i32(math.floor(f32(DRUDGE_BODY_H) * 0.35))
+		head_w := i32(math.floor(f32(DRUDGE_BODY_W) * 0.6))
+		lean := i32(math.floor(f32(DRUDGE_BODY_W) * 0.2 * f32(facing)))
+
+		plot_box :: proc(shot: Shot, pixels: []rl.Color, width, height, x0, y0, x1, y1: i32, color: rl.Color) {
+			for wy in y0 ..< y1 {
+				ty := floor_div(wy-shot.view.y, shot.view.step)
+				for wx in x0 ..< x1 {
+					tx := floor_div(wx-shot.view.x, shot.view.step)
+					shot_plot(shot, pixels, width, height, tx, ty, color)
+				}
+			}
+		}
+
+		plot_box(shot, pixels, width, height, x0, y0+head_h, x0+DRUDGE_BODY_W, y1, DRUDGE_BODY)
+
+		hx0 := i32(math.floor(d.x)) - head_w/2 + lean
+		plot_box(shot, pixels, width, height, hx0, y0, hx0+head_w, y0+head_h, DRUDGE_BODY_DARK)
+	}
+}
+
+@(private = "file")
+shot_draw_pots :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32, bag: ^Pot_Bag) {
+	if bag == nil do return
+
+	for i in 0 ..< int(bag.count) {
+		p := bag.pots[i]
 		if !p.live do continue
 
 		shot_draw_glow(

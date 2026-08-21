@@ -153,6 +153,27 @@ player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
 	return material_stops_him(t.world.materials, world_cell_at(t.world, x, y))
 }
 
+// Walks the straight line between two points in steps of at most one cell,
+// the way a pot's own flight does, and answers only whether anything solid
+// ever stands in the way. See docs/drudge.md, "Sight: seeing him, not just
+// standing near him".
+terrain_line_clear :: proc(t: Terrain, x0, y0, x1, y1: f32) -> bool {
+	dx := x1 - x0
+	dy := y1 - y0
+	dist := math.sqrt(dx*dx + dy*dy)
+	steps := max(i32(math.ceil(dist)), 1)
+
+	sx := dx / f32(steps)
+	sy := dy / f32(steps)
+
+	for i in 0 ..= steps {
+		x := x0 + sx*f32(i)
+		y := y0 + sy*f32(i)
+		if player_solid_at(t, i32(math.floor(x)), i32(math.floor(y))) do return false
+	}
+	return true
+}
+
 @(private = "file")
 material_stops_him :: proc(table: Material_Table, c: Cell) -> bool {
 	if int(c) >= len(table.materials) do return false

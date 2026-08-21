@@ -59,6 +59,20 @@ Pot_Bag :: struct {
 pot_throw :: proc(bag: ^Pot_Bag, p: Player) -> bool {
 	if bag.rest > 0 do return false
 
+	cx, cy := player_centre(p)
+	dx, dy := player_aim_vector(p.aim)
+	reach := f32(PLAYER_BODY_W)*0.5 + 2
+
+	if !pot_launch(bag, f32(cx)+dx*reach, f32(cy)+dy*reach, dx*POT_SPEED+p.vx, dy*POT_SPEED-POT_LOB) do return false
+
+	bag.rest = POT_REST
+	return true
+}
+
+// The wizard's own hand and a drudge's own hand differ; the slot-finding and
+// the placing of a Pot into a bag do not. See docs/drudge.md, "He throws the
+// same pot, off his own bag".
+pot_launch :: proc(bag: ^Pot_Bag, x, y, vx, vy: f32) -> bool {
 	slot := -1
 	for i in 0 ..< int(bag.count) {
 		if !bag.pots[i].live {
@@ -72,20 +86,7 @@ pot_throw :: proc(bag: ^Pot_Bag, p: Player) -> bool {
 		bag.count += 1
 	}
 
-	bag.rest = POT_REST
-
-	cx, cy := player_centre(p)
-	dx, dy := player_aim_vector(p.aim)
-	reach := f32(PLAYER_BODY_W)*0.5 + 2
-
-	bag.pots[slot] = Pot {
-		x    = f32(cx) + dx*reach,
-		y    = f32(cy) + dy*reach,
-		vx   = dx*POT_SPEED + p.vx,
-		vy   = dy*POT_SPEED - POT_LOB,
-		fuse = POT_FUSE,
-		live = true,
-	}
+	bag.pots[slot] = Pot{x = x, y = y, vx = vx, vy = vy, fuse = POT_FUSE, live = true}
 	return true
 }
 
