@@ -12,6 +12,7 @@ SANDBOX_CHUNK :: 64
 
 EXPLODE_MIN_RAYS      :: 24
 EXPLODE_RAYS_PER_CELL :: 6
+EXPLODE_FIRE_ODDS     :: 150  // out of 255: how much of the inner blast catches
 
 BLAST_LIFT      :: 16  // lift is energy per unit of weight, in sixteenths
 BLAST_SCATTER   :: 24  // lift at which matter flies clear
@@ -212,6 +213,7 @@ Sandbox_Roll :: enum u32 {
 	Cut_Spray,
 	Blast_Chip,
 	Blast_Throw,
+	Blast_Fire,
 }
 
 sandbox_chance :: proc "contextless" (sb: ^Sandbox, x, y: i32, roll: Sandbox_Roll, index: u32 = 0) -> u32 {
@@ -355,6 +357,38 @@ sandbox_spread_fire :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> (
 	return fuel_nearby
 }
 
+// Density says where a paid-for cell's matter goes. A pure function of the
+// material and the energy a ray still carries there, so a test can hold it
+// to the note without running a blast.
+Blast_Verdict :: enum u8 {
+	Scatter,
+	Crumble,
+	Chip,
+	Char,
+}
+
+blast_lift :: proc(table: Material_Table, material: Cell, energy: i32) -> i32 {
+	m := table.materials[material]
+	heft := max(i32(m.density * BLAST_LIFT), 1)
+	return energy * BLAST_LIFT / heft
+}
+
+blast_verdict :: proc(table: Material_Table, material: Cell, energy: i32) -> Blast_Verdict {
+	lift := blast_lift(table, material, energy)
+	crumbled := Cell(table.crumbles_to[material])
+
+	switch {
+	case lift >= BLAST_SCATTER || table.kind[material] != .Still:
+		return .Scatter
+	case lift >= BLAST_CRUMBLE && crumbled != material:
+		return .Crumble
+	case lift >= BLAST_CHIP:
+		return .Chip
+	case:
+		return .Char
+	}
+}
+
 sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i32, power: u8) -> (broken: int) {
 	r := radius < 0 ? 0 : radius
 	if r == 0 || power == 0 do return 0
@@ -393,20 +427,21 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 				continue
 			}
 
-			m := table.materials[material]
-			heft := max(i32(m.density * BLAST_LIFT), 1)
-			lift := energy * BLAST_LIFT / heft
 			crumbled := Cell(table.crumbles_to[material])
 
-			switch {
-			case lift >= BLAST_SCATTER || table.kind[material] != .Still:
+			switch blast_verdict(table, material, energy) {
+			case .Scatter:
 				broken += 1
-				target := step <= inner_r ? fire_cell : MATERIAL_AIR
+				target := MATERIAL_AIR
+				if step <= inner_r && sandbox_chance(sb, x, y, .Blast_Fire)&255 < EXPLODE_FIRE_ODDS {
+					target = fire_cell
+				}
 				sandbox_put(sb, table, i, target)
 				sb.moved[i] = true
 				sandbox_crumble_neighbours(sb, table, x, y)
 
 				if crumbled != material {
+					lift := blast_lift(table, material, energy)
 					over := max(lift-BLAST_SCATTER, 0)
 					fly := min(step+BLAST_FLING*over/16, 2*r)
 					side := i32(sandbox_chance(sb, x, y, .Blast_Throw)%3) - 1
@@ -415,12 +450,12 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 					sandbox_throw(sb, table, crumbled, tx, ty)
 				}
 
-			case lift >= BLAST_CRUMBLE && crumbled != material:
+			case .Crumble:
 				broken += 1
 				sandbox_put(sb, table, i, crumbled)
 				sb.moved[i] = true
 
-			case lift >= BLAST_CHIP:
+			case .Chip:
 				if sandbox_chance(sb, x, y, .Blast_Chip)&255 < BLAST_CHIP_ODDS {
 					broken += 1
 					sandbox_put(sb, table, i, MATERIAL_AIR)
@@ -430,7 +465,7 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 					broken += 1
 				}
 
-			case:
+			case .Char:
 				if sandbox_char(sb, table, prev, i, soot_cell) do broken += 1
 			}
 
@@ -1191,6 +1226,61 @@ test_a_blast_in_a_room_throws_matter_clear_of_its_own_radius :: proc(t: ^testing
 		}
 	}
 	testing.expect(t, thrown_clear, "a scattered grain must be able to land past the blast's own radius")
+}
+
+@(test)
+test_a_pot_grades_the_shipped_materials_as_the_note_says :: proc(t: ^testing.T) {
+	table, load_ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, load_ok, "materials must load") do return
+
+	power := i32(pot_power(table))
+
+	Case :: struct {
+		name:    string,
+		verdict: Blast_Verdict,
+	}
+	// docs/physics.md, "Under a pot's blast": the rung each material lands
+	// on at point blank, which is the most a pot's own power can ever lift
+	// it, since lift only falls further into the blast.
+	cases := []Case {
+		{"Gunpowder", .Scatter},
+		{"Ash", .Scatter},
+		{"Snow", .Scatter},
+		{"Dirt", .Scatter},
+		{"Sand", .Scatter},
+		{"Wood", .Scatter},
+		{"Ice", .Scatter},
+		{"Rock", .Crumble},
+		{"Coal", .Chip},
+		{"Obsidian", .Chip},
+		{"Steel", .Chip},
+		{"Gold", .Char},
+	}
+
+	for c in cases {
+		idx, found := find_material_index(table, c.name)
+		if !testing.expectf(t, found, "%s must exist", c.name) do continue
+
+		material := Cell(idx)
+		energy := power - i32(table.materials[material].hardness) - 1
+		got := blast_verdict(table, material, energy)
+		testing.expectf(
+			t, got == c.verdict,
+			"the note says a pot's blast grades %s as %v at point blank, got %v (power %d, energy %d)",
+			c.name, c.verdict, got, power, energy,
+		)
+	}
+
+	bedrock, found := find_material_index(table, "Bedrock")
+	if testing.expect(t, found, "Bedrock must exist") {
+		cost := i32(table.materials[bedrock].hardness) + 1
+		testing.expectf(
+			t, power < cost,
+			"the note says a pot's blast never reaches bedrock, but its cost of %d is not past a power of %d",
+			cost, power,
+		)
+	}
 }
 
 @(test)

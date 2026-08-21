@@ -224,12 +224,21 @@ shot_draw_pots :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
 
 	for i in 0 ..< int(shot.pots.count) {
 		p := shot.pots.pots[i]
-		if !p.live || p.flash == 0 do continue
+		if !p.live do continue
 
-		glow := f32(pot_flash_power(p)) / 255
+		if p.flash > 0 {
+			glow := f32(pot_flash_power(p)) / 255
+			shot_draw_glow(
+				shot, pixels, width, height, p.x, p.y,
+				POT_HALO, POT_BLAZE, POT_PEAK*glow,
+				POT_GLOW, POT_CORE,
+			)
+			continue
+		}
+
 		shot_draw_glow(
-			shot, pixels, width, height, p.x, p.y,
-			POT_HALO, POT_BLAZE, POT_PEAK*glow,
+			shot, pixels, width, height, p.x, p.y-f32(POT_R),
+			POT_FUSE_HALO, POT_FUSE_BLAZE, POT_FUSE_PEAK,
 			POT_GLOW, POT_CORE,
 		)
 	}

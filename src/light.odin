@@ -381,7 +381,7 @@ light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 
 	for i in 0 ..< int(pots.count) {
 		p := &pots.pots[i]
-		if !p.live || p.flash == 0 do continue
+		if !p.live do continue
 
 		x := i32(math.floor(p.x))
 		y := i32(math.floor(p.y))
@@ -390,7 +390,11 @@ light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 		ly := light_slot(y - l.origin_y)
 		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
 
-		light_flood(l, l.live, t, x, y, pot_flash_power(p^), POT_FLASH_REACH, POT_FLASH_FALL)
+		if p.flash > 0 {
+			light_flood(l, l.live, t, x, y, pot_flash_power(p^), POT_FLASH_REACH, POT_FLASH_FALL)
+		} else {
+			light_flood(l, l.live, t, x, y, POT_FUSE_POWER, POT_FUSE_REACH, POT_FUSE_FALL)
+		}
 		p.lx = lx
 		p.ly = ly
 		p.lit = true
@@ -454,6 +458,13 @@ test_every_reach_outlasts_the_falloff_it_bounds :: proc(t: ^testing.T) {
 		t, flash <= POT_FLASH_REACH,
 		"a bang still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
 		flash, i32(POT_FLASH_REACH),
+	)
+
+	fuse := light_fall_reach(POT_FUSE_POWER, POT_FUSE_FALL)
+	testing.expectf(
+		t, fuse <= POT_FUSE_REACH,
+		"a fuse still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
+		fuse, i32(POT_FUSE_REACH),
 	)
 }
 
