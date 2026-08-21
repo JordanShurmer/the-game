@@ -1,6 +1,7 @@
 package game
 
 import "core:fmt"
+import "core:math"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -47,6 +48,9 @@ Window_Shot :: struct {
 	path:   string,
 	frames: int,
 	walk:   int,
+	throw:  bool,
+	aim:    u8,
+	ticks:  int,
 	on:     bool,
 }
 
@@ -73,6 +77,7 @@ main :: proc() {
 	defer app_destroy_view(&app)
 
 	if shot.on do app_walk(&app, shot.walk)
+	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
 
 	frames := 0
 	for !rl.WindowShouldClose() {
@@ -99,6 +104,7 @@ main :: proc() {
 		app_draw_water(&app, w, h)
 		app_draw_crystals(&app)
 		app_draw_fireflies(&app)
+		app_draw_pots(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
 		editor_draw(&app)
@@ -133,6 +139,13 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			if n, ok := strconv.parse_int(value); ok do shot.frames = max(n, 1)
 		case "walk":
 			if n, ok := strconv.parse_int(value); ok do shot.walk = n
+		case "throw":
+			if n, ok := strconv.parse_int(value); ok {
+				shot.throw = true
+				shot.aim = u8(i32(math.round(f32(n) / 360 * 256)) & 255)
+			}
+		case "ticks":
+			if n, ok := strconv.parse_int(value); ok do shot.ticks = max(n, 0)
 		}
 	}
 	return shot
@@ -144,6 +157,19 @@ app_walk :: proc(app: ^App, ticks: int) {
 
 	for _ in 0 ..< abs(ticks) {
 		sim_step_player(&app.sim, held, false)
+		sandbox_step(&app.sandbox, app.world.materials)
+	}
+	app_follow_player(app)
+	app.dirty = true
+}
+
+@(private = "file")
+app_throw :: proc(app: ^App, aim: u8, ticks: int) {
+	sim_step_player(&app.sim, {.Throw}, false, aim)
+	sandbox_step(&app.sandbox, app.world.materials)
+
+	for _ in 0 ..< ticks {
+		sim_step_player(&app.sim, {}, false, aim)
 		sandbox_step(&app.sandbox, app.world.materials)
 	}
 	app_follow_player(app)
@@ -409,6 +435,7 @@ app_handle_play :: proc(app: ^App) {
 	if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) do held += {.Run}
 	if rl.IsKeyDown(.SPACE) || rl.IsKeyDown(.W) || rl.IsKeyDown(.UP) do held += {.Jump}
 	if rl.IsKeyDown(.E) || rl.IsMouseButtonDown(.LEFT) do held += {.Dig}
+	if rl.IsKeyDown(.Q) || rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
 
 	jump_pressed := rl.IsKeyPressed(.SPACE) || rl.IsKeyPressed(.W) || rl.IsKeyPressed(.UP)
 
@@ -523,6 +550,30 @@ app_draw_fireflies :: proc(app: ^App) {
 }
 
 @(private = "file")
+app_draw_pots :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	scale := f32(app.zoom) / f32(app.step)
+	for i in 0 ..< int(app.pots.count) {
+		p := app.pots.pots[i]
+		if !p.live do continue
+
+		if p.flash > 0 {
+			glow := f32(pot_flash_power(p)) / 255
+			app_draw_glow(app, p.x, p.y, POT_HALO, POT_BLAZE, POT_PEAK, glow, POT_GLOW, POT_CORE)
+			continue
+		}
+
+		x := (p.x - f32(app.cam_x)) * scale
+		y := (p.y - f32(app.cam_y)) * scale
+		r := f32(POT_R) * scale
+
+		rl.DrawCircleV(rl.Vector2{x, y}, r, POT_BODY)
+		rl.DrawCircleV(rl.Vector2{x, y - r}, max(scale*0.5, 1), POT_GLOW)
+	}
+}
+
+@(private = "file")
 app_draw_orb :: proc(app: ^App) {
 	if !app_lighting(app) do return
 
@@ -629,7 +680,7 @@ draw_hud :: proc(app: ^App) {
 		rl.RAYWHITE,
 	)
 
-	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   Q/right-click throw a pot   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
 }
 
 @(test)
@@ -656,6 +707,17 @@ test_the_window_takes_a_shot_of_itself_only_when_it_is_asked_to :: proc(t: ^test
 		"a value that is not a number must leave the default standing, got frames=%d walk=%d",
 		junk.frames, junk.walk,
 	)
+}
+
+@(test)
+test_a_throw_argument_holds_the_button_for_one_tick_then_runs_the_ticks_it_names :: proc(t: ^testing.T) {
+	plain := read_window_shot([]string{"shot=shots/throw.png"})
+	testing.expect(t, !plain.throw, "with no throw argument the window must not throw")
+
+	asked := read_window_shot([]string{"shot=shots/throw.png", "throw=90", "ticks=10"})
+	testing.expect(t, asked.throw, "throw= must turn the throw on")
+	testing.expectf(t, asked.aim == PLAYER_AIM_DOWN, "throw=90 must read as aim down, got %d", asked.aim)
+	testing.expectf(t, asked.ticks == 10, "ticks must be read, got %d", asked.ticks)
 }
 
 @(test)

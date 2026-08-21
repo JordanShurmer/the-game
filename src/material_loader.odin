@@ -28,6 +28,8 @@ Material_Table :: struct {
 	wide_ok:    bool,
 
 	fire:        u16,
+	soot:        u16,
+	powder:      u16,
 }
 
 Reaction :: struct {
@@ -231,6 +233,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	if idx, found := find_material_index(table, "Fire"); found {
 		table.fire = u16(idx)
 	}
+	if idx, found := find_material_index(table, "Soot"); found {
+		table.soot = u16(idx)
+	}
+	if idx, found := find_material_index(table, "Gunpowder"); found {
+		table.powder = u16(idx)
+	}
 
 	n := len(table.materials)
 	reaction_at = make([]i16, n * n, allocator)
@@ -382,14 +390,30 @@ test_load_materials_count :: proc(t: ^testing.T) {
 	table, ok := load_materials("data/materials.txt")
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "load must succeed")
-	testing.expect(t, len(table.materials) == 27, "expected 27 materials")
-	testing.expect(t, len(table.names) == 27, "names must match materials")
-	testing.expect(t, len(table.glyphs) == 27, "glyphs must match materials")
-	testing.expect(t, len(table.decays_to) == 27, "decay table must match materials")
-	testing.expect(t, len(table.burns_to) == 27, "burn table must match materials")
-	testing.expect(t, len(table.crumbles_to) == 27, "crumble table must match materials")
-	testing.expect(t, len(table.reaction_at) == 27 * 27, "reaction_at must be n*n")
-	testing.expect(t, len(table.reacts) == 27, "reacts must match materials")
+	testing.expect(t, len(table.materials) == 28, "expected 28 materials")
+	testing.expect(t, len(table.names) == 28, "names must match materials")
+	testing.expect(t, len(table.glyphs) == 28, "glyphs must match materials")
+	testing.expect(t, len(table.decays_to) == 28, "decay table must match materials")
+	testing.expect(t, len(table.burns_to) == 28, "burn table must match materials")
+	testing.expect(t, len(table.crumbles_to) == 28, "crumble table must match materials")
+	testing.expect(t, len(table.reaction_at) == 28 * 28, "reaction_at must be n*n")
+	testing.expect(t, len(table.reacts) == 28, "reacts must match materials")
+}
+
+@(test)
+test_soot_and_powder_resolve_to_a_real_material :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	testing.expect(t, ok)
+
+	testing.expectf(
+		t, table.soot != u16(MATERIAL_AIR),
+		"soot must resolve to a real material, or a blast paints nothing on the walls it cannot break",
+	)
+	testing.expectf(
+		t, table.powder != u16(MATERIAL_AIR),
+		"powder must resolve to a real material, or a pot's potency is always zero",
+	)
 }
 
 @(test)

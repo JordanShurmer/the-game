@@ -9,6 +9,7 @@ Player_Button :: enum u8 {
 	Jump,
 	Run,
 	Dig,
+	Throw,
 }
 
 Player_Input :: bit_set[Player_Button; u8]

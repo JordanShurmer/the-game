@@ -13,6 +13,13 @@ SANDBOX_CHUNK :: 64
 EXPLODE_MIN_RAYS      :: 24
 EXPLODE_RAYS_PER_CELL :: 6
 
+BLAST_LIFT      :: 16  // lift is energy per unit of weight, in sixteenths
+BLAST_SCATTER   :: 24  // lift at which matter flies clear
+BLAST_CRUMBLE   :: 8   // lift at which matter breaks up and falls
+BLAST_CHIP      :: 2   // lift at which a blast still bites a face
+BLAST_CHIP_ODDS :: 96  // out of 255: how much of a chipped face goes
+BLAST_FLING     :: 2   // cells a scattered grain flies per unit of lift
+
 CUT_SPRAY_CHANCE :: 40 // out of 255
 
 CUT_SPRAY_NEAR :: 10
@@ -203,6 +210,8 @@ Sandbox_Roll :: enum u32 {
 	React_Roll,
 	Fire,
 	Cut_Spray,
+	Blast_Chip,
+	Blast_Throw,
 }
 
 sandbox_chance :: proc "contextless" (sb: ^Sandbox, x, y: i32, roll: Sandbox_Roll, index: u32 = 0) -> u32 {
@@ -354,13 +363,16 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 	inner_r := r / 3
 
 	fire_cell := Cell(table.fire)
+	soot_cell := Cell(table.soot)
 
 	for ray in 0 ..< rays {
 		angle := f32(ray) / f32(rays) * 2 * math.PI
 		dx := math.cos(angle)
 		dy := math.sin(angle)
+		px, py := -dy, dx
 
 		energy := i32(power)
+		prev := sandbox_index(sb, cx, cy)
 
 		for step in i32(1) ..= r {
 			x := cx + i32(math.round(dx * f32(step)))
@@ -370,20 +382,72 @@ sandbox_explode :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius
 			i := sandbox_index(sb, x, y)
 			material := sb.cells[i]
 			cost := i32(table.materials[material].hardness) + 1
-			if energy < cost do break
+			if energy < cost {
+				if sandbox_char(sb, table, prev, i, soot_cell) do broken += 1
+				break
+			}
 			energy -= cost
 
-			if material == MATERIAL_AIR || material == fire_cell do continue
+			if material == MATERIAL_AIR || material == fire_cell || sb.moved[i] {
+				prev = i
+				continue
+			}
 
-			broken += 1
-			target := step <= inner_r ? fire_cell : MATERIAL_AIR
-			sandbox_put(sb, table, i, target)
-			sb.moved[i] = true
+			m := table.materials[material]
+			heft := max(i32(m.density * BLAST_LIFT), 1)
+			lift := energy * BLAST_LIFT / heft
+			crumbled := Cell(table.crumbles_to[material])
 
-			sandbox_crumble_neighbours(sb, table, x, y)
+			switch {
+			case lift >= BLAST_SCATTER || table.kind[material] != .Still:
+				broken += 1
+				target := step <= inner_r ? fire_cell : MATERIAL_AIR
+				sandbox_put(sb, table, i, target)
+				sb.moved[i] = true
+				sandbox_crumble_neighbours(sb, table, x, y)
+
+				if crumbled != material {
+					over := max(lift-BLAST_SCATTER, 0)
+					fly := min(step+BLAST_FLING*over/16, 2*r)
+					side := i32(sandbox_chance(sb, x, y, .Blast_Throw)%3) - 1
+					tx := cx + i32(math.round(dx*f32(fly) + px*f32(side)))
+					ty := cy + i32(math.round(dy*f32(fly) + py*f32(side)))
+					sandbox_throw(sb, table, crumbled, tx, ty)
+				}
+
+			case lift >= BLAST_CRUMBLE && crumbled != material:
+				broken += 1
+				sandbox_put(sb, table, i, crumbled)
+				sb.moved[i] = true
+
+			case lift >= BLAST_CHIP:
+				if sandbox_chance(sb, x, y, .Blast_Chip)&255 < BLAST_CHIP_ODDS {
+					broken += 1
+					sandbox_put(sb, table, i, MATERIAL_AIR)
+					sb.moved[i] = true
+					sandbox_crumble_neighbours(sb, table, x, y)
+				} else if sandbox_char(sb, table, prev, i, soot_cell) {
+					broken += 1
+				}
+
+			case:
+				if sandbox_char(sb, table, prev, i, soot_cell) do broken += 1
+			}
+
+			prev = i
 		}
 	}
 	return broken
+}
+
+@(private = "file")
+sandbox_char :: proc(sb: ^Sandbox, table: Material_Table, at, hit: int, soot: Cell) -> bool {
+	if sb.cells[at] != MATERIAL_AIR do return false
+	if sb.cells[hit] == MATERIAL_AIR do return false
+
+	sandbox_put(sb, table, at, soot)
+	sb.moved[at] = true
+	return true
 }
 
 sandbox_crumble_neighbours :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) {
@@ -492,6 +556,7 @@ sandbox_throw :: proc(sb: ^Sandbox, table: Material_Table, material: Cell, tx, t
 	i := sandbox_index(sb, tx, ty)
 	if sb.cells[i] != MATERIAL_AIR do return
 	sandbox_put(sb, table, i, debris)
+	sb.moved[i] = true
 }
 
 sandbox_census :: proc(sb: ^Sandbox, counts: []int) {
@@ -1031,6 +1096,120 @@ test_gunpowder_pile_chain_detonates_and_leaves_a_crater :: proc(t: ^testing.T) {
 		counts[gunpowder], start_count,
 	)
 	testing.expect(t, counts[int(MATERIAL_AIR)] > 0, "the blast must leave a crater of air")
+}
+
+@(test)
+test_a_blast_scatters_light_matter_and_only_chips_heavy_matter :: proc(t: ^testing.T) {
+	survivors :: proc(t: ^testing.T, name: string) -> (left, total: int) {
+		sb, table := test_sandbox(t, 40, 40, 5)
+		defer sandbox_destroy(&sb)
+		defer destroy_material_table(table)
+
+		material, found := find_material_index(table, name)
+		if !testing.expectf(t, found, "%s must exist", name) do return 0, 1
+
+		for y in i32(0) ..< 40 {
+			for x in i32(0) ..< 40 do sandbox_paint(&sb, table, x, y, 0, Cell(material))
+		}
+
+		r := i32(12)
+		sandbox_explode(&sb, table, 20, 20, r, 90)
+
+		for y in i32(0) ..< 40 {
+			for x in i32(0) ..< 40 {
+				dx := x - 20
+				dy := y - 20
+				if dx*dx+dy*dy > r*r do continue
+				total += 1
+				if int(sandbox_cell(&sb, x, y)) == material do left += 1
+			}
+		}
+		return left, total
+	}
+
+	dirt_left, dirt_total := survivors(t, "Dirt")
+	gold_left, gold_total := survivors(t, "Gold")
+
+	testing.expectf(
+		t, dirt_left < dirt_total/4,
+		"loose dirt must scatter clear of most of the blast, %d of %d left",
+		dirt_left, dirt_total,
+	)
+	testing.expectf(
+		t, gold_left > gold_total/2,
+		"gold is heavy and has nothing to crumble into, so it must mostly stand, %d of %d left",
+		gold_left, gold_total,
+	)
+}
+
+@(test)
+test_a_blast_against_bedrock_leaves_soot_on_its_face_and_the_wall_whole :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 30, 10, 9)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	bedrock, _ := find_material_index(table, "Bedrock")
+	soot, _ := find_material_index(table, "Soot")
+
+	for y in i32(0) ..< 10 do sandbox_paint(&sb, table, 20, y, 0, Cell(bedrock))
+
+	sandbox_explode(&sb, table, 5, 5, 20, 200)
+
+	testing.expectf(
+		t, int(sandbox_cell(&sb, 20, 5)) == bedrock,
+		"nothing must dent bedrock, and the cell the ray stopped at holds %s",
+		table.names[sandbox_cell(&sb, 20, 5)],
+	)
+	testing.expectf(
+		t, int(sandbox_cell(&sb, 19, 5)) == soot,
+		"the air against the wall must char with soot, and it holds %s",
+		table.names[sandbox_cell(&sb, 19, 5)],
+	)
+}
+
+@(test)
+test_a_blast_in_a_room_throws_matter_clear_of_its_own_radius :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 90, 90, 4)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	rock, _ := find_material_index(table, "Rock")
+	gravel, _ := find_material_index(table, "Gravel")
+
+	sandbox_paint(&sb, table, 45, 45, 2, Cell(rock))
+
+	r := i32(4)
+	sandbox_explode(&sb, table, 45, 45, r, 200)
+
+	thrown_clear := false
+	for y in i32(0) ..< 90 {
+		for x in i32(0) ..< 90 {
+			if int(sandbox_cell(&sb, x, y)) != gravel do continue
+			dx := x - 45
+			dy := y - 45
+			if dx*dx+dy*dy > r*r do thrown_clear = true
+		}
+	}
+	testing.expect(t, thrown_clear, "a scattered grain must be able to land past the blast's own radius")
+}
+
+@(test)
+test_the_same_blast_twice_gives_the_same_checksum :: proc(t: ^testing.T) {
+	run :: proc(t: ^testing.T) -> u64 {
+		sb, table := test_sandbox(t, 40, 40, 12)
+		defer sandbox_destroy(&sb)
+		defer destroy_material_table(table)
+
+		rock, _ := find_material_index(table, "Rock")
+		for y in i32(0) ..< 40 {
+			for x in i32(0) ..< 40 do sandbox_paint(&sb, table, x, y, 0, Cell(rock))
+		}
+		sandbox_explode(&sb, table, 20, 20, 15, 150)
+		for _ in 0 ..< 60 do sandbox_step(&sb, table)
+		return sandbox_checksum(&sb)
+	}
+
+	testing.expect(t, run(t) == run(t), "the same blast must give the same checksum both times")
 }
 
 @(test)

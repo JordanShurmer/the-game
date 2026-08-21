@@ -31,6 +31,7 @@ Sim :: struct {
 	queue:     Input_Queue,
 	light:     Light,
 	flies:     Firefly_Swarm,
+	pots:      Pot_Bag,
 
 	follow_player: bool,
 
@@ -199,7 +200,11 @@ sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
 	firefly_step(&s.flies)
-	light_step(&s.light, terrain, s.player, &s.flies)
+
+	if .Throw in held do pot_throw(&s.pots, s.player)
+	pot_step(&s.pots, terrain, s.world.materials)
+
+	light_step(&s.light, terrain, s.player, &s.flies, &s.pots)
 }
 
 sim_play_begin :: proc(s: ^Sim) {

@@ -1,0 +1,306 @@
+package game
+
+import "core:math"
+import "core:testing"
+import rl "vendor:raylib"
+
+POT_MAX      :: 8      // pots in the air at once
+POT_GRAINS   :: 4      // grains of black powder the pot holds
+POT_SPEED    :: 190.0  // cells per second, along the aim
+POT_LOB      :: 42.0   // cells per second of lift, so it flies on an arc
+POT_GRAVITY  :: PLAYER_GRAVITY
+POT_MAX_FALL :: PLAYER_MAX_FALL
+POT_REST     :: 24     // ticks between throws
+POT_FUSE     :: 180    // ticks the fuse burns before it goes off in the air
+
+POT_FLASH       :: 22   // ticks the bang stays in the light
+POT_FLASH_POWER :: 255
+POT_FLASH_REACH :: 34
+POT_FLASH_FALL  :: Light_Fall{open = 220, open_diag = 204, dense = 112, dense_diag = 78}
+
+#assert(POT_FLASH_POWER >= LIGHT_ORB_POWER, "a bang must be the brightest thing in the world while it lasts")
+
+POT_R :: 2  // cells, the pot as it is drawn
+
+POT_HALO  :: 16
+POT_BLAZE :: 4
+POT_PEAK  :: 0.95
+POT_GLOW  :: rl.Color{255, 140, 40, 255}
+POT_CORE  :: rl.Color{255, 250, 230, 255}
+POT_BODY  :: rl.Color{48, 40, 32, 255}
+
+pot_power :: proc(table: Material_Table) -> u8 {
+	e := i32(table.materials[int(table.powder)].explosive) * POT_GRAINS
+	return u8(min(e, 255))
+}
+
+Pot :: struct {
+	x, y:   f32,
+	vx, vy: f32,
+	lx, ly: i32,
+	fuse:   i16,
+	flash:  u8,
+	lit:    bool,
+	live:   bool,
+}
+#assert(size_of(Pot) == 32)
+
+Pot_Bag :: struct {
+	pots:  [POT_MAX]Pot,
+	count: i32,
+	rest:  u8,
+}
+
+pot_throw :: proc(bag: ^Pot_Bag, p: Player) -> bool {
+	if bag.rest > 0 do return false
+
+	slot := -1
+	for i in 0 ..< int(bag.count) {
+		if !bag.pots[i].live {
+			slot = i
+			break
+		}
+	}
+	if slot < 0 {
+		if bag.count >= POT_MAX do return false
+		slot = int(bag.count)
+		bag.count += 1
+	}
+
+	bag.rest = POT_REST
+
+	cx, cy := player_centre(p)
+	dx, dy := player_aim_vector(p.aim)
+	reach := f32(PLAYER_BODY_W)*0.5 + 2
+
+	bag.pots[slot] = Pot {
+		x    = f32(cx) + dx*reach,
+		y    = f32(cy) + dy*reach,
+		vx   = dx*POT_SPEED + p.vx,
+		vy   = dy*POT_SPEED - POT_LOB,
+		fuse = POT_FUSE,
+		live = true,
+	}
+	return true
+}
+
+pot_step :: proc(bag: ^Pot_Bag, t: Terrain, table: Material_Table) {
+	if bag.rest > 0 do bag.rest -= 1
+
+	dt : f32 = 1.0 / PLAYER_TICK_HZ
+
+	for i in 0 ..< int(bag.count) {
+		pot := &bag.pots[i]
+		if !pot.live do continue
+
+		if pot.flash > 0 {
+			pot.flash -= 1
+			if pot.flash == 0 do pot.live = false
+			continue
+		}
+
+		pot.vy = min(pot.vy+POT_GRAVITY*dt, POT_MAX_FALL)
+		pot.fuse -= 1
+
+		broke := pot.fuse <= 0
+		if !broke do broke = pot_move(pot, t)
+		if broke do pot_break(pot, t, table)
+	}
+}
+
+@(private = "file")
+pot_move :: proc(pot: ^Pot, t: Terrain) -> bool {
+	dt : f32 = 1.0 / PLAYER_TICK_HZ
+	dx := pot.vx * dt
+	dy := pot.vy * dt
+
+	dist := math.sqrt(dx*dx + dy*dy)
+	steps := max(i32(math.ceil(dist)), 1)
+
+	sx := dx / f32(steps)
+	sy := dy / f32(steps)
+
+	for _ in 0 ..< steps {
+		nx := pot.x + sx
+		ny := pot.y + sy
+		if player_solid_at(t, i32(math.floor(nx)), i32(math.floor(ny))) do return true
+		pot.x = nx
+		pot.y = ny
+	}
+	return false
+}
+
+@(private = "file")
+pot_break :: proc(pot: ^Pot, t: Terrain, table: Material_Table) {
+	if t.sandbox == nil {
+		pot.live = false
+		return
+	}
+
+	sx := i32(math.floor(pot.x)) - t.sandbox.origin_x
+	sy := i32(math.floor(pot.y)) - t.sandbox.origin_y
+	if !sandbox_in_bounds(t.sandbox, sx, sy) {
+		pot.live = false
+		return
+	}
+
+	power := pot_power(table)
+	sandbox_explode(t.sandbox, table, sx, sy, i32(power), power)
+	pot.flash = POT_FLASH
+}
+
+pot_flash_power :: proc(p: Pot) -> u8 {
+	frac := f32(p.flash) / f32(POT_FLASH)
+	return u8(f32(POT_FLASH_POWER) * frac * frac)
+}
+
+@(private = "file")
+Pot_Test :: struct {
+	table: Material_Table,
+	world: World,
+	sb:    Sandbox,
+}
+
+@(private = "file")
+pot_test_setup :: proc(t: ^testing.T) -> (pt: Pot_Test, ok: bool) {
+	table, load_ok := load_materials("data/materials.txt")
+	if !testing.expect(t, load_ok, "materials must load") do return {}, false
+
+	sb, make_ok := sandbox_make(128, 128, 1)
+	if !testing.expect(t, make_ok, "the sandbox must open") do return {}, false
+
+	pot_fill_box(&sb, 0, 0, 127, 127, MATERIAL_AIR)
+	return Pot_Test{table = table, world = World{materials = table}, sb = sb}, true
+}
+
+@(private = "file")
+pot_test_destroy :: proc(pt: ^Pot_Test) {
+	sandbox_destroy(&pt.sb)
+	destroy_material_table(pt.table)
+}
+
+@(private = "file")
+pot_fill_box :: proc(sb: ^Sandbox, x0, y0, x1, y1: i32, c: Cell) {
+	for y in y0 ..= y1 {
+		for x in x0 ..= x1 {
+			if !sandbox_in_bounds(sb, x, y) do continue
+			sb.cells[sandbox_index(sb, x, y)] = c
+		}
+	}
+}
+
+@(test)
+test_a_thrown_pot_flies_and_breaks_on_a_wall_and_leaves_a_crater :: proc(t: ^testing.T) {
+	pt, ok := pot_test_setup(t)
+	if !ok do return
+	defer pot_test_destroy(&pt)
+
+	rock, found := find_material_index(pt.table, "Rock")
+	if !testing.expect(t, found, "Rock must exist") do return
+
+	pot_fill_box(&pt.sb, 90, 0, 95, 127, Cell(rock))
+
+	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+	p := Player{x = 20, y = 64, facing = 1, aim = PLAYER_AIM_RIGHT, on_ground = true}
+
+	bag: Pot_Bag
+	if !testing.expect(t, pot_throw(&bag, p), "the first throw must succeed") do return
+
+	broke := false
+	for _ in 0 ..< POT_FUSE {
+		pot_step(&bag, terrain, pt.table)
+		if bag.pots[0].flash > 0 {
+			broke = true
+			break
+		}
+	}
+	testing.expect(t, broke, "a pot aimed at a wall must break before its fuse runs out")
+
+	crater := false
+	for y in i32(0) ..< 128 {
+		for x in i32(90) ..< 96 {
+			if int(sandbox_cell(&pt.sb, x, y)) != rock do crater = true
+		}
+	}
+	testing.expect(t, crater, "the blast must have changed some of the wall it broke against")
+}
+
+@(test)
+test_the_bag_never_holds_more_pots_than_it_can :: proc(t: ^testing.T) {
+	p := Player{x = 20, y = 20, facing = 1, aim = PLAYER_AIM_RIGHT}
+
+	bag: Pot_Bag
+	for _ in 0 ..< POT_MAX {
+		testing.expect(t, pot_throw(&bag, p), "each of the first POT_MAX throws must succeed")
+		bag.rest = 0
+	}
+	testing.expect(t, !pot_throw(&bag, p), "a bag already full must refuse another pot")
+	testing.expectf(t, bag.count == POT_MAX, "the bag must not grow past POT_MAX, got %d", bag.count)
+}
+
+@(test)
+test_the_rest_between_throws_holds :: proc(t: ^testing.T) {
+	pt, ok := pot_test_setup(t)
+	if !ok do return
+	defer pot_test_destroy(&pt)
+
+	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+	p := Player{x = 20, y = 20, facing = 1, aim = PLAYER_AIM_RIGHT}
+
+	bag: Pot_Bag
+	testing.expect(t, pot_throw(&bag, p), "the first throw must succeed")
+	testing.expect(t, !pot_throw(&bag, p), "a second throw right away must be refused")
+
+	for _ in 0 ..< int(POT_REST) - 1 {
+		pot_step(&bag, terrain, pt.table)
+	}
+	testing.expect(t, !pot_throw(&bag, p), "the rest must still be holding one tick early")
+
+	pot_step(&bag, terrain, pt.table)
+	testing.expect(t, pot_throw(&bag, p), "the rest must have run out by now")
+}
+
+@(test)
+test_two_runs_of_the_same_throw_give_the_same_checksum :: proc(t: ^testing.T) {
+	run :: proc(t: ^testing.T) -> u64 {
+		pt, ok := pot_test_setup(t)
+		if !ok do return 0
+		defer pot_test_destroy(&pt)
+
+		rock, _ := find_material_index(pt.table, "Rock")
+		pot_fill_box(&pt.sb, 90, 0, 95, 127, Cell(rock))
+
+		terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+		p := Player{x = 20, y = 64, facing = 1, aim = PLAYER_AIM_RIGHT, on_ground = true}
+
+		bag: Pot_Bag
+		pot_throw(&bag, p)
+		for _ in 0 ..< 60 do pot_step(&bag, terrain, pt.table)
+
+		return sandbox_checksum(&pt.sb)
+	}
+
+	testing.expect(t, run(t) == run(t), "the same throw must give the same checksum both times")
+}
+
+@(test)
+test_a_pot_that_touches_nothing_goes_off_when_its_fuse_ends :: proc(t: ^testing.T) {
+	pt, ok := pot_test_setup(t)
+	if !ok do return
+	defer pot_test_destroy(&pt)
+
+	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+
+	bag: Pot_Bag
+	bag.count = 1
+	bag.pots[0] = Pot{x = 64, y = 64, fuse = 1, live = true}
+
+	pot_step(&bag, terrain, pt.table)
+	testing.expectf(t, bag.pots[0].flash > 0, "a pot whose fuse ends must break even in open air, got flash=%d", bag.pots[0].flash)
+	testing.expect(t, bag.pots[0].live, "it must still be alive while it flashes")
+
+	for _ in 0 ..< POT_FLASH {
+		pot_step(&bag, terrain, pt.table)
+	}
+	testing.expect(t, !bag.pots[0].live, "the flash must die out and take the pot with it")
+}

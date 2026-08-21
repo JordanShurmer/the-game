@@ -290,10 +290,10 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 	return rl.Color{u8(min(r, 255)), u8(min(g, 255)), u8(min(b, 255)), 255}
 }
 
-light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil) {
+light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil) {
 	if l.stat == nil do return
 	light_drop(l, t, p)
-	light_throw(l, t, p, flies)
+	light_throw(l, t, p, flies, pots)
 }
 
 light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
@@ -316,9 +316,10 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	light_flood(l, l.stat, t, x, y, LIGHT_CRYSTAL_POWER, LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
 }
 
-light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil) {
+light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil) {
 	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
 	light_forget_flies(l, flies)
+	light_forget_pots(l, pots)
 
 	x, y := light_orb_source(t, p)
 	l.live_x = light_slot(x - l.origin_x)
@@ -327,6 +328,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 
 	light_flood(l, l.live, t, x, y, LIGHT_ORB_POWER, LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 	light_throw_flies(l, t, flies)
+	light_throw_pots(l, t, pots)
 }
 
 @(private = "file")
@@ -358,6 +360,40 @@ light_throw_flies :: proc(l: ^Light, t: Terrain, flies: ^Firefly_Swarm) {
 		f.lx = lx
 		f.ly = ly
 		f.lit = true
+	}
+}
+
+@(private = "file")
+light_forget_pots :: proc(l: ^Light, pots: ^Pot_Bag) {
+	if pots == nil do return
+
+	for i in 0 ..< int(pots.count) {
+		p := &pots.pots[i]
+		if !p.lit do continue
+		light_clear_box(l.live, p.lx, p.ly, POT_FLASH_REACH)
+		p.lit = false
+	}
+}
+
+@(private = "file")
+light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
+	if pots == nil do return
+
+	for i in 0 ..< int(pots.count) {
+		p := &pots.pots[i]
+		if !p.live || p.flash == 0 do continue
+
+		x := i32(math.floor(p.x))
+		y := i32(math.floor(p.y))
+
+		lx := light_slot(x - l.origin_x)
+		ly := light_slot(y - l.origin_y)
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+
+		light_flood(l, l.live, t, x, y, pot_flash_power(p^), POT_FLASH_REACH, POT_FLASH_FALL)
+		p.lx = lx
+		p.ly = ly
+		p.lit = true
 	}
 }
 
@@ -411,6 +447,13 @@ test_every_reach_outlasts_the_falloff_it_bounds :: proc(t: ^testing.T) {
 		t, crystal <= LIGHT_CRYSTAL_REACH,
 		"a crystal still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
 		crystal, i32(LIGHT_CRYSTAL_REACH),
+	)
+
+	flash := light_fall_reach(POT_FLASH_POWER, POT_FLASH_FALL)
+	testing.expectf(
+		t, flash <= POT_FLASH_REACH,
+		"a bang still burns %d samples out and its box stops at %d, which draws a square of light and not a pool",
+		flash, i32(POT_FLASH_REACH),
 	)
 }
 
