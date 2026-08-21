@@ -1,14 +1,13 @@
 # The drudge
 
 The first bad guy. He was a miner once, and the coal took the rest of
-him: he walks the same stretch of tunnel he has always walked, back
-and forth, because a man can forget almost everything and still not
-forget the walk to the seam and back. He does not chase. He does not
-give up the walk for anything, even you. But if he sees you, he faces
-you, and every four seconds or so he lobs a pot of black powder in
-your direction — not to be fair, just to be rid of you. This note says
-how he is built, the numbers he moves by, and what this phase leaves
-out.
+him. He walks the same stretch of tunnel he has always walked, back
+and forth. He does not chase, and he does not give up the walk for
+anything, even you. But if he sees you, he faces you, and every four
+seconds or so he lobs a pot of black powder in your direction. He is
+not fair. He just wants you gone. He carries a lit lamp, so a careful
+player sees him first. This note says how he is built, the numbers he
+moves by, and what this phase leaves out.
 
 ## He is a fixed bag, like the pots he throws
 
@@ -101,12 +100,15 @@ whether or not he has seen the player, and nothing below changes his
 direction or his speed. Seeing the player changes only which way he
 *faces* and whether he *throws* — never where his feet are going.
 
-## Sight: seeing him, not just standing near him
+## Sight: seeing him before he sees you
 
 A drudge sees the player when all three hold:
 
-1. **Range.** The player is within `DRUDGE_SIGHT_RANGE` (140 cells) of
-   him, dead centre to dead centre.
+1. **Range.** The player is within `DRUDGE_SIGHT_RANGE` (30 cells) of
+   him, dead centre to dead centre. This is well under
+   `DRUDGE_SPAWN_MIN_DIST` (50 cells, see "Where he stands"), so a
+   player who has just found him is never already inside it — there is
+   always at least 20 cells of dark tunnel to approach through unseen.
 2. **The half he is walking toward.** The player is on the side of him
    his current patrol direction faces — not behind him. A drudge does
    not have eyes in the back of his head, and giving him a narrower
@@ -142,6 +144,44 @@ longer than half a second genuinely loses him — this is the sneaking
 the phase is about — and he goes back to facing his patrol direction
 and stops throwing. He never once moves toward where he last saw the
 player; losing sight costs him nothing but the aim.
+
+### He carries a lamp, so you see him first
+
+The whole point of `DRUDGE_SIGHT_RANGE` sitting well under
+`DRUDGE_SPAWN_MIN_DIST` is that the player gets a warning first: a
+drudge carries a lit lamp, floods light around himself as he walks
+(`DRUDGE_LAMP_REACH`, 25 cells, roughly the same shape as the pot's own
+fuse light — see `DRUDGE_LAMP_FALL`), and that pool of light is a
+bobbing point of warmth in an otherwise dark tunnel, visible on screen
+long before the player is anywhere near his `DRUDGE_SIGHT_RANGE`. Reach
+does not need to exceed sight range for this to work — the pool is
+drawn on screen at whatever distance the camera can see it, not only
+within the reach that lights the terrain around him.
+
+The lamp's brightness and colour are not its own: they are `Fire`'s,
+the same material the pot's own burning fuse already borrows in
+`light_throw_pots` (`src/light.odin`). A lamp is a flame, so this is
+not a stretch, and it buys something concrete. `data/materials.txt`
+sat at exactly 32 rows before this phase, and `SANDBOX_WIDE_IDS` in
+`src/sandbox_step_asm.odin` caps the hand-written AVX2 weight lookup —
+the fast path the whole sandbox physics loop runs through — at 32
+material ids. A 33rd row for the lamp's own light would have pushed
+the table over that ceiling and silently turned the fast path off for
+the entire game, not just the drudge. `test_the_shipped_materials_still_fit_the_wide_lookup`
+(`src/sandbox_step_asm.odin`) exists so the next feature that reaches
+for a new material row finds out immediately, in a test, rather than
+in a slower benchmark nobody was watching. Only how far the lamp's
+light reaches and how fast it falls off are code — `DRUDGE_LAMP_REACH`
+and `DRUDGE_LAMP_FALL` — the same split every other light in the world
+keeps between "how bright" (a material) and "how far" (a constant
+beside the thing that carries it).
+
+The lamp is drawn twice over: it lights the terrain near him, the way
+the orb lights terrain near the wizard, and it is also drawn as a
+small glow circle at his position — `DRUDGE_LAMP_HALO`,
+`DRUDGE_LAMP_BLAZE`, `DRUDGE_LAMP_PEAK` — the same way the pot's own
+fuse ember and the wizard's own orb are, so it reads on screen as a
+point of light and not only as a faint wash on the rock beside him.
 
 ## Throwing: gentler than the wizard's own hand
 
@@ -199,15 +239,28 @@ identical either way, which is the point.
 
 ## Where he stands
 
-He is placed `DRUDGE_SPAWN_X_OFFSET` (220 cells) to the right of
-wherever the wizard spawns, dropped straight down onto the first solid
-ground under that column the way `world_find_spawn` drops the wizard
-onto his own. That puts him inside the Coalmine, past the mouth the
-wizard walks in through, so the first thing the cave asks of a new
-player is to notice him before he notices them — not stumble over him
-in the first three steps. `./bin/shot player=1 w=512` (wide enough to
-carry 220 cells past the spawn point) shows both of them in the one
-picture.
+`drudge_place` scans outward from the wizard's own spawn, column by
+column, `DRUDGE_SPAWN_STEP` (2 cells) at a time, alternating left and
+right, from `DRUDGE_SPAWN_MIN_DIST` (50 cells) out to
+`DRUDGE_SPAWN_MAX_DIST` (2000 cells). A column only counts if it holds
+solid, unembedded ground, and — this is the part that matters — if
+that ground sits in the very biome region the wizard's own spawn sits
+in. The drudge is placed at the first column that answers both.
+
+That second test replaced a version of this phase that placed him a
+fixed `220` cells to the right of the spawn and dropped him straight
+down, with nothing checking what he landed on. In the shipped Gallery
+biome that put him on the far side of an undiggable Bedrock wall: on
+solid ground, technically not embedded, and completely unreachable, no
+digger the wizard carries can open a way through Bedrock. The test
+guarding this only checked that he landed roughly the right distance
+away, so it passed while the drudge himself was a dead end. Scanning
+for the wizard's own biome region instead means he can only ever land
+somewhere the same cave system the wizard spawns into actually
+reaches, and `test_the_shipped_world_places_a_drudge_the_player_can_reach`
+now proves it by walking the wizard there with `sim_step_player`, the
+way a player really would, rather than trusting a distance check to
+stand in for reachability.
 
 ## The numbers
 
@@ -218,12 +271,19 @@ picture.
 | `DRUDGE_BODY_H` | 12 | cells, what collides |
 | `DRUDGE_WALK_SPEED` | 22.0 | cells per second on patrol |
 | `DRUDGE_PATROL_LEG` | 60 | cells walked before the leash turns him anyway |
-| `DRUDGE_SIGHT_RANGE` | 140 | cells, centre to centre |
+| `DRUDGE_SIGHT_RANGE` | 30 | cells, centre to centre |
 | `DRUDGE_ALERT_HOLD` | 30 | ticks his sight of the player is remembered after it breaks |
+| `DRUDGE_LAMP_REACH` | 25 | cells the lamp's light floods out to |
+| `DRUDGE_LAMP_FALL` | see source | how the lamp's light falls off with distance |
+| `DRUDGE_LAMP_HALO` | 5 | cells, the radius of the lamp's glow circle |
+| `DRUDGE_LAMP_BLAZE` | 2 | cells, the radius of the lamp's bright core |
+| `DRUDGE_LAMP_PEAK` | 0.85 | how strongly the lamp's glow is drawn |
 | `DRUDGE_THROW_INTERVAL` | 240 | ticks between throws, 4 seconds |
 | `DRUDGE_THROW_SPEED` | 110.0 | cells per second, along the aim |
 | `DRUDGE_THROW_LOB` | 70.0 | cells per second of lift |
-| `DRUDGE_SPAWN_X_OFFSET` | 220 | cells right of the wizard's own spawn |
+| `DRUDGE_SPAWN_MIN_DIST` | 50 | cells, the nearest the placement scan may land him |
+| `DRUDGE_SPAWN_MAX_DIST` | 2000 | cells, bounds the placement scan |
+| `DRUDGE_SPAWN_STEP` | 2 | cells between one candidate column and the next |
 
 Gravity and terminal fall are not repeated here: they are
 `PLAYER_GRAVITY` and `PLAYER_MAX_FALL`, the same numbers a pot falls

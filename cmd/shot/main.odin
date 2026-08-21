@@ -180,7 +180,7 @@ main :: proc() {
 	if options.light {
 		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
 		game.light_follow(&sim.light, i32(player.x), i32(player.y))
-		game.light_step(&sim.light, terrain, player, &sim.flies, &sim.pots, &sim.drudge_pots)
+		game.light_step(&sim.light, terrain, player, &sim.flies, &sim.pots, &sim.drudge_pots, &sim.drudges)
 		shot.light = &sim.light
 		shot.flies = &sim.flies
 		shot.pots = &sim.pots

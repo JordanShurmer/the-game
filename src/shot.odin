@@ -104,7 +104,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
 		shot_draw_fireflies(shot, pixels, width, height)
-		shot_draw_drudges(shot, pixels, width, height)
+		shot_draw_drudges(world, shot, pixels, width, height)
 		shot_draw_pots(world, shot, pixels, width, height, shot.pots)
 		shot_draw_pots(world, shot, pixels, width, height, shot.drudge_pots)
 		shot_draw_bangs(world, shot, pixels, width, height)
@@ -224,7 +224,7 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 }
 
 @(private = "file")
-shot_draw_drudges :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+shot_draw_drudges :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
 	if shot.drudges == nil do return
 
 	player, has_player := shot.player.?
@@ -254,6 +254,13 @@ shot_draw_drudges :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
 
 		hx0 := i32(math.floor(d.x)) - head_w/2 + lean
 		plot_box(shot, pixels, width, height, hx0, y0, hx0+head_w, y0+head_h, DRUDGE_BODY_DARK)
+
+		lx, ly := drudge_centre(d)
+		shot_draw_glow(
+			shot, pixels, width, height, f32(lx), f32(ly),
+			DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK,
+			drudge_lamp_glow(world.materials), LIGHT_CORE,
+		)
 	}
 }
 

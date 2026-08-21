@@ -585,6 +585,15 @@ app_draw_drudges :: proc(app: ^App) {
 
 		rl.DrawRectangleRec(torso, DRUDGE_BODY)
 		rl.DrawRectangleRec(head, DRUDGE_BODY_DARK)
+
+		if app_lighting(app) {
+			lx, ly := drudge_centre(d)
+			app_draw_glow(
+				app, f32(lx), f32(ly),
+				DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK, 1,
+				drudge_lamp_glow(app.world.materials), LIGHT_CORE,
+			)
+		}
 	}
 }
 

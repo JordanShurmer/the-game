@@ -295,10 +295,10 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 	return rl.Color{u8(min(r, 255)), u8(min(g, 255)), u8(min(b, 255)), 255}
 }
 
-light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil) {
+light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil, drudges: ^Drudge_Bag = nil) {
 	if l.stat == nil do return
 	light_drop(l, t, p)
-	light_throw(l, t, p, flies, pots, enemy_pots)
+	light_throw(l, t, p, flies, pots, enemy_pots, drudges)
 }
 
 light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
@@ -322,13 +322,14 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	light_flood(l, l.stat, t, x, y, light_lumens(table, table.crystal), LIGHT_CRYSTAL_REACH, LIGHT_CRYSTAL_FALL)
 }
 
-light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil) {
+light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil, drudges: ^Drudge_Bag = nil) {
 	table := t.world.materials
 
 	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
 	light_forget_flies(l, flies)
 	light_forget_pots(l, pots)
 	light_forget_pots(l, enemy_pots)
+	light_forget_drudges(l, drudges)
 	light_forget_bangs(l, t)
 
 	x, y := light_orb_source(t, p)
@@ -340,6 +341,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_throw_flies(l, t, flies)
 	light_throw_pots(l, t, pots)
 	light_throw_pots(l, t, enemy_pots)
+	light_throw_drudges(l, t, drudges)
 	light_throw_bangs(l, t)
 }
 
@@ -372,6 +374,41 @@ light_throw_flies :: proc(l: ^Light, t: Terrain, flies: ^Firefly_Swarm) {
 		f.lx = lx
 		f.ly = ly
 		f.lit = true
+	}
+}
+
+// A drudge's lamp moves with him the way the orb moves with the wizard, so
+// it is cleared and re-thrown every tick rather than flooded once. See
+// docs/drudge.md, "Sight: seeing him before he sees you".
+@(private = "file")
+light_forget_drudges :: proc(l: ^Light, drudges: ^Drudge_Bag) {
+	if drudges == nil do return
+
+	for i in 0 ..< int(drudges.count) {
+		d := &drudges.drudges[i]
+		if !d.lamp_lit do continue
+		light_clear_box(l.live, d.lx, d.ly, DRUDGE_LAMP_REACH)
+		d.lamp_lit = false
+	}
+}
+
+@(private = "file")
+light_throw_drudges :: proc(l: ^Light, t: Terrain, drudges: ^Drudge_Bag) {
+	if drudges == nil do return
+
+	table := t.world.materials
+	for i in 0 ..< int(drudges.count) {
+		d := &drudges.drudges[i]
+		x, y := drudge_centre(d^)
+
+		lx := light_slot(x - l.origin_x)
+		ly := light_slot(y - l.origin_y)
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+
+		light_flood(l, l.live, t, x, y, light_lumens(table, table.fire), DRUDGE_LAMP_REACH, DRUDGE_LAMP_FALL)
+		d.lx = lx
+		d.ly = ly
+		d.lamp_lit = true
 	}
 }
 
