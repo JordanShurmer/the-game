@@ -17,6 +17,7 @@ Shot :: struct {
 	sandbox: ^Sandbox,
 	light:   ^Light,
 	flies:   ^Firefly_Swarm,
+	pots:    ^Pot_Bag,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -101,6 +102,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
 		shot_draw_fireflies(shot, pixels, width, height)
+		shot_draw_pots(shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
 	}
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
@@ -212,6 +214,23 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 			shot, pixels, width, height, f.x, f.y,
 			FIREFLY_HALO, FIREFLY_BLAZE, FIREFLY_PEAK * firefly_glow(f, f64(shot.flies.clock)),
 			FIREFLY_GLOW, FIREFLY_CORE,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_pots :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.pots == nil do return
+
+	for i in 0 ..< int(shot.pots.count) {
+		p := shot.pots.pots[i]
+		if !p.live || p.flash == 0 do continue
+
+		glow := f32(pot_flash_power(p)) / 255
+		shot_draw_glow(
+			shot, pixels, width, height, p.x, p.y,
+			POT_HALO, POT_BLAZE, POT_PEAK*glow,
+			POT_GLOW, POT_CORE,
 		)
 	}
 }

@@ -135,6 +135,7 @@ a hole into the caves.
 | `SPACE`, `W` or `UP` | Jump; hold it in the air to fly |
 | Mouse | Point the plasma digger |
 | `E` or left mouse | Dig: cut a beam out of his chest, where the cursor points |
+| `Q` or right mouse | Throw a pot of black powder, along the cursor |
 | Mouse wheel, `-`, `=` | Zoom out and in |
 | `TAB` | Open and close the world editor |
 
@@ -148,6 +149,12 @@ the cursor: it cuts a kerf he can walk down, it stops at what it
 cannot cut, and it throws part of what it removes back out of the hole
 as debris that then falls. `docs/player.md` says how he is built and what the phase
 leaves out.
+
+He also carries a little clay pot of black powder. Thrown, it flies on
+an arc and breaks on the first thing it touches: a small explosion
+that scatters matter by weight and gives off a bang of light as
+bright as his own orb while it lasts. `docs/pot.md` says how it flies,
+how it breaks, and what this phase leaves out.
 
 The world he walks into is dark. The orb on his staff is nearly the only
 light in it, and every 21 cells a small crystal of light falls out of
@@ -243,6 +250,7 @@ he leaves it and comes back.
 | `src/shot.odin` | The world as a PNG, with no window |
 | `src/light.odin` | The orb, the crystals, and the gloom around them |
 | `src/firefly.odin` | The swarm that hangs over a pond and lights it |
+| `src/pot.odin` | The pot of black powder: the throw, the flight, and the bang |
 | `src/pond.odin` | The pond dug into the world beside the spawn |
 | `src/water.odin` | The depth map of the water, and the shader over it |
 

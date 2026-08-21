@@ -186,7 +186,7 @@ reacts: []bool,        // n; whether this material is in any row at all
 ```
 
 `reaction_at` is a dense square of `i16`, indexed `a*n + b`. With the
-27 materials the game ships that is 729 entries, or 1458 bytes. A
+28 materials the game ships that is 784 entries, or 1568 bytes. A
 table of 200 materials would cost 80 KB, which is the bound worth
 knowing and far past what this game needs.
 
@@ -312,6 +312,65 @@ the next tick, and that grain detonates in its own hot pass.
 Without this rule one grain of gunpowder recurses through a whole pile
 inside one call and overflows the stack. With it, a pile takes a few
 ticks to go off, which is also what a chain should look like.
+
+### The blast grades what it meets
+
+Hardness says how far a blast reaches: it is the cost of the ray, so a
+harder wall eats more energy and stops it sooner. Density says where
+the matter goes: it is not read until a ray has already paid for a
+cell, and it grades that cell's own weight against the energy the ray
+still carries there.
+
+```odin
+heft := max(i32(m.density * BLAST_LIFT), 1)
+lift := energy * BLAST_LIFT / heft
+```
+
+`lift` reads as sixteenths of the ray's remaining energy per unit of
+the cell's density: light matter under a strong ray lifts easily,
+heavy matter barely lifts at all. Four rungs, checked in this order:
+
+1. **`lift >= BLAST_SCATTER`, or the material is not `.Still`.** The
+   cell clears exactly as it did before density mattered — Air, or
+   Fire in the inner third — and its `crumbles_to` is thrown outward
+   along the ray, past the crater, the same way `sandbox_cut` throws
+   its cuttings. Powder, liquid and gas are never `.Still`, so loose
+   matter always takes this rung: it flies when it moves at all.
+2. **`lift >= BLAST_CRUMBLE` and `crumbles_to` is not the material
+   itself.** The cell becomes its `crumbles_to` in place. Nothing is
+   thrown; the sandbox drops it on the next tick, the way any powder
+   falls.
+3. **`lift >= BLAST_CHIP`, or the cell has nothing to crumble into.**
+   A still material with no `crumbles_to` — gold, steel, obsidian —
+   lands here even at a lift the first two rungs would otherwise
+   ignore, because it has nowhere else to go. One roll of
+   `sandbox_chance` per cell: under `BLAST_CHIP_ODDS` out of 255 the
+   cell goes to Air, a bite taken out of the face; the rest of the
+   time it stands.
+4. **Anything else, and every cell that stops a ray outright because
+   `energy < cost`.** The cell stands, and the blast chars it: soot is
+   written into the cell the ray came from, but only when that cell is
+   exactly air and the cell it is charring is not. So soot sits on the
+   open face of what stopped the blast, never floating in a pocket of
+   air the ray never reached and never smothering the fire a rung one
+   cell burns in the inner third.
+
+A grain thrown by rung one flies `BLAST_FLING` cells per unit of lift
+past `BLAST_SCATTER`, out to at most one radius past the crater, with
+a small sideways jitter from `sandbox_chance` so a spray of gravel does
+not land in a single file. `sandbox_throw` already refuses a `.Still`
+grain and a cell that is not air, so a blast inside solid rock quietly
+loses most of what it throws, and a blast in an open room sprays it.
+
+| Material | Density | Under a pot's blast |
+| --- | --- | --- |
+| `Gunpowder`, `Ash`, `Snow` | 0.4 – 1.7 | scatters: not `.Still`, always rung one |
+| `Dirt`, `Sand` | 1.4 – 1.6 | scatters: not `.Still`, always rung one |
+| `Rock` | 2.5 | scatters near the crater, crumbles to gravel further out, chips or chars at the rim |
+| `Coal`, `Wood`, `Ice` | 0.7 – 1.5 | crumble in place where lift reaches `BLAST_CRUMBLE`, else chip |
+| `Obsidian`, `Steel` | 2.6 – 7.8 | chip: `.Still` with nothing to crumble into |
+| `Gold` | 19.3 | so dense that lift rarely clears `BLAST_CHIP`; most of a blast just chars it |
+| `Bedrock` | 3.0 | never reached: hardness alone stops the ray |
 
 ## Digging and breaking
 
@@ -758,6 +817,12 @@ two builds rather than running one after the other.
 | `PLAYER_DIG_RADIUS` | 5 | cells |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |
 | `EXPLODE_RAYS_PER_CELL` | 6 | rays per cell of radius above that |
+| `BLAST_LIFT` | 16 | sixteenths of energy per unit of density, in the lift formula |
+| `BLAST_SCATTER` | 24 | lift at which matter flies clear |
+| `BLAST_CRUMBLE` | 8 | lift at which matter breaks up and falls |
+| `BLAST_CHIP` | 2 | lift at which a blast still bites a face |
+| `BLAST_CHIP_ODDS` | 96 | out of 255: how much of a chipped face goes |
+| `BLAST_FLING` | 2 | cells a scattered grain flies per unit of lift |
 | `REACT_PROBES` | 1 | reaction rolls a cell makes per tick |
 | `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
 | `GALLERY_ROOM` | 128 | cells along one edge of a room |

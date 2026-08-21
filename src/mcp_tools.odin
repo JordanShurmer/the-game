@@ -84,8 +84,8 @@ MCP_TOOLS_JSON :: `{"tools":[
    "radius":{"type":"integer","description":"Disc radius in cells, for spawn, erase, ignite, explode and dig. 0 writes one cell. Default 0.","minimum":0,"maximum":512},
    "material":{"type":"string","description":"Material name for spawn, as listed by list_materials."},
    "power":{"type":"integer","description":"Blast or dig power, for explode and dig. Explode: the energy a ray starts with; each cell it crosses costs hardness+1, so air costs 1 and bedrock stops any blast in one cell. Dig: the hardness that can be removed; the wizard digs at 8. Required for explode and dig.","minimum":0,"maximum":255},
-   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons are held this tick."},
-   "pressed":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"For move: which buttons went down fresh this tick, for the jump edge."},
+   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig","throw"]},"description":"For move: which buttons are held this tick."},
+   "pressed":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig","throw"]},"description":"For move: which buttons went down fresh this tick, for the jump edge."},
    "aim":{"type":"number","description":"For move: where the digger points, in degrees. 0 is right, 90 is down, 180 is left, 270 is up, because y grows downward. Default: the way he faces.","minimum":0,"maximum":360},
    "source":{"type":"integer","description":"Sender number (0 to 7). Commands from different sources run in source order on the same tick. Default 0.","minimum":0,"maximum":7},
    "tick":{"type":"integer","description":"Exact execution tick. Leave this out to use the input delay. A tick that has already run is moved to the next tick and reported as late."}},
@@ -117,7 +117,7 @@ MCP_TOOLS_JSON :: `{"tools":[
 {"name":"player_move",
  "description":"Drive the wizard for a number of ticks with a set of held buttons and one aim, calling the same player_step the game window calls (docs/player.md, \"one path for a hand and a model\"). The first call turns on sim_play_begin, which snaps the play sandbox to the 2048 cell square he stands in so he stands on the running physics rather than a picture of it; after that it follows him when he leaves that square on its own.",
  "inputSchema":{"type":"object","properties":{
-   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig"]},"description":"Buttons held for every tick of this call."},
+   "buttons":{"type":"array","items":{"type":"string","enum":["left","right","jump","run","dig","throw"]},"description":"Buttons held for every tick of this call."},
    "jump":{"type":"boolean","description":"Whether jump is a fresh press on the first tick of this call, for the jump edge. A held jump that was already pressed in an earlier call should be false. Default false."},
    "aim":{"type":"number","description":"Where the digger points, in degrees, held for every tick of this call. 0 is right, 90 is down, 180 is left, 270 is up, because y grows downward. The digger is a beam out of the centre of his mass, so this is the only thing that says which way it cuts. Default: the way he faces.","minimum":0,"maximum":360},
    "ticks":{"type":"integer","description":"Ticks to run (1 to 6000, which is 100 seconds). Default 1.","minimum":1,"maximum":6000}},
@@ -657,12 +657,12 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		buttons, _ := json_rows_field(arguments, "buttons")
 		held, bad_held, held_ok := parse_player_buttons(buttons)
 		if !held_ok {
-			return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad_held), true
+			return fmt.tprintf("%q is not a button. Use left, right, jump, run, dig, or throw.", bad_held), true
 		}
 		pressed, _ := json_rows_field(arguments, "pressed")
 		edge, bad_pressed, pressed_ok := parse_player_buttons(pressed)
 		if !pressed_ok {
-			return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad_pressed), true
+			return fmt.tprintf("%q is not a button. Use left, right, jump, run, dig, or throw.", bad_pressed), true
 		}
 		command.buttons = held
 		command.pressed = edge
@@ -864,7 +864,7 @@ tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	names, _ := json_rows_field(arguments, "buttons")
 	held, bad, buttons_ok := parse_player_buttons(names)
 	if !buttons_ok {
-		return fmt.tprintf("%q is not a button. Use left, right, jump, run, or dig.", bad), true
+		return fmt.tprintf("%q is not a button. Use left, right, jump, run, dig, or throw.", bad), true
 	}
 
 	ticks := int(clamp(json_int_field(arguments, "ticks", 1), 1, 6000))
@@ -912,6 +912,7 @@ parse_player_buttons :: proc(names: []string) -> (held: Player_Input, bad: strin
 		case "jump":  held += {.Jump}
 		case "run":   held += {.Run}
 		case "dig":   held += {.Dig}
+		case "throw": held += {.Throw}
 		case:
 			return {}, name, false
 		}
@@ -1582,6 +1583,17 @@ test_enqueue_input_accepts_the_new_kinds :: proc(t: ^testing.T) {
 		t, counts[rock] < before_rock,
 		"explode and dig together must have removed some rock, got %d of %d before", counts[rock], before_rock,
 	)
+}
+
+@(test)
+test_enqueue_input_accepts_a_throw_button :: proc(t: ^testing.T) {
+	s := tool_sim(t)
+	defer sim_unload(&s)
+
+	move_text, move_failed := tool_enqueue_input(
+		&s, arguments_of(t, `{"kind":"move","buttons":["throw"]}`),
+	)
+	testing.expect(t, !move_failed, move_text)
 }
 
 @(test)

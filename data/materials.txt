@@ -450,6 +450,22 @@ immersion   =
 tags        =
 glyph       = B
 
+[Soot]
+state       = Solid
+density     = 0.5
+fall_speed  = 0
+hardness    = 1
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF17140F
+contact     =
+immersion   =
+tags        =
+glyph       = ,
+crumbles_to = Ash
+
 # ------------------------------------------------------------
 # Reactions. See docs/physics.md, "The reaction table".
 # ------------------------------------------------------------

@@ -172,6 +172,9 @@ ignite, one per new mechanic in docs/physics.md:
   himself digs at power 8, which is exactly the hardness of rock.
 - `move` drives the wizard for one tick: `buttons` is what is held,
   `pressed` is what went down fresh this tick, for the jump edge.
+  `throw` is one of the buttons: held, it throws a pot of black
+  powder along `aim`, which breaks into a small blast on the first
+  thing it touches. `docs/pot.md` says how it flies and breaks.
 
 `explode` and `dig` both need a `power` argument (0 to 255); there is
 no default worth guessing at a blast or a dig strength from. `move`
