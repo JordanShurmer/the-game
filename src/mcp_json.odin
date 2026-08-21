@@ -4,15 +4,6 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 
-/*
-JSON help for the MCP server.
-
-The server reads with the core parser and writes with a string
-builder. Reading needs a full parser. Writing does not: every
-message that this server sends has a shape that is known at compile
-time, so a builder is smaller and faster than a marshal step.
-*/
-
 json_object_field :: proc(object: json.Object, key: string) -> (json.Object, bool) {
 	value, found := object[key]
 	if !found do return {}, false
@@ -32,9 +23,6 @@ json_int_field :: proc(object: json.Object, key: string, fallback: i64) -> i64 {
 	return fallback
 }
 
-// A number that need not be whole. An angle is the first argument in
-// this server that is not a count of cells, and rounding it to an
-// integer before it is used would quantise a cursor twice.
 json_number_field :: proc(object: json.Object, key: string, fallback: f64) -> f64 {
 	value, found := object[key]
 	if !found do return fallback
@@ -66,7 +54,6 @@ json_bool_field :: proc(object: json.Object, key: string, fallback: bool) -> boo
 	return ok ? bool(b) : fallback
 }
 
-// An array of strings, which is how both editors take a picture.
 json_rows_field :: proc(object: json.Object, key: string, allocator := context.temp_allocator) -> (rows: []string, found: bool) {
 	value, has := object[key]
 	if !has do return nil, false
@@ -83,7 +70,6 @@ json_rows_field :: proc(object: json.Object, key: string, allocator := context.t
 	return out[:], true
 }
 
-// Write a JSON string, with the quotes and the escapes.
 json_write_string :: proc(b: ^strings.Builder, text: string) {
 	strings.write_byte(b, '"')
 	for i in 0 ..< len(text) {
@@ -110,7 +96,6 @@ json_write_string :: proc(b: ^strings.Builder, text: string) {
 	strings.write_byte(b, '"')
 }
 
-// Write a JSON-RPC id. The id comes back to the client unchanged.
 json_write_id :: proc(b: ^strings.Builder, id: json.Value) {
 	#partial switch item in id {
 	case json.Integer:

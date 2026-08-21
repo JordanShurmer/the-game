@@ -8,62 +8,12 @@ import rl "vendor:raylib"
 
 import game "../../src"
 
-/*
-Draw a rectangle of the authored world into a PNG file.
-
-This is how to look at the world without a window. It loads the same
-data the game loads and draws through the same generate path the game
-window draws through, so the picture is what a player would see.
-
-	make shot
-	./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
-	./bin/shot player=1 out=shots/wizard.png
-
-Arguments are key=value in any order:
-
-	out     where to write the PNG               (shots/world.png)
-	biome   aim at the first region of this biome
-	player  1 spawns the wizard and draws him standing at the cave
-	        mouth, aiming the view at him unless x, y or biome say
-	        otherwise                             (0)
-	x y     world cell at the top left           (0 0, or wherever
-	        player or biome aims the camera)
-	w h     size of the picture in texels        (384 256)
-	step    world cells per texel                (1)
-	scale   image pixels per texel               (2)
-	grid    1 draws the tile lattice and the region borders (0)
-	ticks   open a sandbox on exactly x,y,w,h and run this many
-	        ticks before drawing, instead of drawing the world as
-	        the generator paints it. Needs step=1 and w,h inside
-	        SANDBOX_MAX_WIDTH/HEIGHT.
-	ignite  x,y[,r]         set light material alight there before
-	                        the ticks run. Needs ticks.
-	explode x,y[,r][,power] set off a blast there before the ticks
-	                        run. Needs ticks.
-
-This is the check on the sprite and its collision box lining up:
-player=1 draws through the same Sprite_Sheet and the same
-sprite_frame_origin the game window will later use, so a wizard who is
-off by a cell here would be off by a cell there too.
-
-	./bin/shot biome=Gallery out=shots/gallery.png               # as painted
-	./bin/shot biome=Gallery ticks=600 out=shots/g600.png        # after 10 seconds
-	./bin/shot biome=Gallery x=0 y=-2560 w=128 h=128 scale=2 \
-	           ticks=300 ignite=64,64,4 out=shots/room11.png     # light the gunpowder first
-
-The data paths are relative, so run it from the repository root.
-*/
-
-// Defaults for explode= when a radius or a power is left out. Chosen so
-// the default reads as a fair-sized blast rather than a firecracker:
-// power/4 is the same ratio sandbox_ignite_cell uses to turn a lit
-// explosive's own power into the radius of the blast it sets off.
 EXPLODE_DEFAULT_POWER  :: 64
 EXPLODE_DEFAULT_RADIUS :: EXPLODE_DEFAULT_POWER / 4
 
 Point_Command :: struct {
 	x, y, r: i32,
-	power:   u8, // Explode only
+	power:   u8,
 	set:     bool,
 }
 
@@ -78,16 +28,14 @@ Options :: struct {
 	scale:   i32,
 	grid:    bool,
 	player:  bool,
-	aimed:   bool, // x or y was given, so a biome or the player must not move the camera
+	aimed:   bool,
 	ticks:      i32,
-	ticks_set:  bool, // the key was given at all; ticks=0 still opens a sandbox
+	ticks_set:  bool,
 	ignite:     Point_Command,
 	explode:    Point_Command,
 }
 
 main :: proc() {
-	// The image loader reports every file it reads. A picture is the
-	// only thing this tool has to say.
 	rl.SetTraceLogLevel(.WARNING)
 
 	options := Options {
@@ -106,12 +54,6 @@ main :: proc() {
 	}
 	defer game.sim_unload(&sim)
 
-	// Declared (and freed) here regardless of player=1, because Odin's
-	// defer fires at the end of the scope it is written in, not the end
-	// of the function: nesting the defer inside the `if options.player`
-	// block below would free this sheet before world_shot ever reads
-	// it. A zero-valued Sprite_Sheet has nil pixels, and destroying that
-	// is a no-op, so this is safe whether or not player=1 was given.
 	sheet: game.Sprite_Sheet
 	defer game.destroy_sprite_sheet(sheet)
 
@@ -125,19 +67,8 @@ main :: proc() {
 		}
 
 		player = game.player_spawn(sim.world)
-		// player_spawn already lands him on solid ground: world_find_spawn
-		// checks player_solid_at under his feet before it ever returns a
-		// point. A shot draws one still instant with no physics tick to
-		// discover that for itself the way player_step would on the
-		// game's first tick, so this states outright what that tick would
-		// otherwise compute, and draws him standing rather than mid-fall.
 		player.on_ground = true
 
-		// Aim the view at him unless the caller already aimed it some
-		// other way. A wizard is 24x32 cells; the default view is 384x256
-		// world cells starting at (0,0), and he spawns thousands of cells
-		// from the origin, so without this the default view would almost
-		// certainly not contain him at all.
 		if !options.aimed && options.biome == "" {
 			options.x = i32(player.x) - options.w * options.step / 2
 			options.y = i32(player.y) - options.h * options.step / 2
@@ -169,8 +100,6 @@ main :: proc() {
 	}
 
 	if options.ticks_set {
-		// See docs/physics.md, "Looking at it": the rectangle a shot with
-		// ticks= draws is the exact rectangle it opens the sandbox on.
 		if err := game.shot_open_sandbox(&sim, view); err != .None {
 			switch err {
 			case .Wrong_Step:
@@ -187,13 +116,6 @@ main :: proc() {
 			os.exit(1)
 		}
 
-		// Both go through sim_apply, the one procedure a hand-driven
-		// window and every MCP tool also call (docs/physics.md, "one
-		// path for a hand and a model"), rather than calling
-		// sandbox_ignite/sandbox_explode directly. A shot runs to
-		// completion in one process with nobody else to keep in step
-		// with, so there is no reason to route them through the input
-		// queue's delay: they are applied at once, before the ticks run.
 		if options.ignite.set {
 			game.sim_apply(&sim, game.Input_Command{
 				kind   = .Ignite,
@@ -312,9 +234,6 @@ read_options :: proc(options: ^Options) -> bool {
 	return true
 }
 
-// Parses "x,y[,r]" or "x,y[,r][,power]": a comma separated list of two
-// to four whole numbers, with a radius and (for explode=) a power that
-// fall back to the given defaults when they are left out.
 point_command :: proc(key, value: string, default_r: i32, default_power: u8) -> (Point_Command, bool) {
 	parts := strings.split(value, ",", context.temp_allocator)
 	if len(parts) < 2 || len(parts) > 4 {

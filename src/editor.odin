@@ -3,19 +3,6 @@ package game
 import "core:fmt"
 import rl "vendor:raylib"
 
-/*
-The in-game world editor.
-
-You paint biomes onto the map, and the world behind the overlay
-regenerates as you paint. There is no separate preview: the editor
-calls the same generate path the game calls, so what you see is what
-the player gets.
-
-Save writes the map image. Save is blocked while any painted region
-is cut off from the rest, because a world the player cannot walk
-across is a mistake, not a style.
-*/
-
 EDITOR_PANEL_X :: 16
 EDITOR_PANEL_W :: 290
 MAP_AREA_X :: EDITOR_PANEL_X + EDITOR_PANEL_W + 24
@@ -23,12 +10,6 @@ MAP_AREA_Y :: 64
 MAP_AREA_MAX :: 560
 
 STATUS_SECONDS :: 4.0
-
-/*
-A line of feedback that fades. Both editors report saves and blocked
-saves the same way, so they hold the same small struct rather than
-each keeping three loose fields.
-*/
 Status :: struct {
 	text:  string,
 	ok:    bool,
@@ -41,7 +22,6 @@ status_set :: proc(s: ^Status, text: string, ok: bool) {
 	s.until = rl.GetTime() + STATUS_SECONDS
 }
 
-// Draw the status line while it is still fresh.
 status_draw :: proc(s: Status, x, y: i32) {
 	if s.text == "" || rl.GetTime() >= s.until do return
 	rl.DrawText(fmt.ctprintf("%s", s.text), x, y, 18, s.ok ? rl.GREEN : rl.RED)
@@ -51,22 +31,11 @@ Editor :: struct {
 	open:            bool,
 	brush:           Biome_Id,
 
-	// One component label per map pixel. Stranded regions draw with a
-	// warning outline, so the reason Save is blocked is on screen.
 	labels:          []i32,
 	component_count: int,
 
 	status:          Status,
 }
-
-/*
-The model half of the editor.
-
-These procedures know about the world and the editor state, and
-nothing about a mouse, a key, or a screen. The input handler below
-calls them, and so does the MCP server. One path, so what a model
-paints and what a hand paints go through the same code.
-*/
 
 editor_init :: proc(s: ^Sim) {
 	s.editor.labels = make([]i32, len(s.world.biome_map.cells))
@@ -79,8 +48,6 @@ editor_destroy :: proc(s: ^Sim) {
 	s.editor.labels = nil
 }
 
-// Recount the components. This runs after every change to the map.
-// The map is small, so a full recount costs less than tracking edits.
 editor_refresh :: proc(s: ^Sim) {
 	s.editor.component_count = biome_map_label_components(s.world.biome_map, s.editor.labels)
 }
@@ -93,18 +60,10 @@ editor_set_status :: proc(s: ^Sim, text: string, ok: bool) {
 	status_set(&s.editor.status, text, ok)
 }
 
-// Is this map pixel inside the map?
 editor_in_map :: proc(s: ^Sim, px, py: i32) -> bool {
 	m := s.world.biome_map
 	return px >= 0 && py >= 0 && px < m.width && py < m.height
 }
-
-/*
-Paint one map pixel and recount the components.
-
-The result says whether the map changed, so the caller knows whether
-the world behind it has to be generated again.
-*/
 editor_paint_pixel :: proc(s: ^Sim, px, py: i32, id: Biome_Id) -> bool {
 	if !editor_in_map(s, px, py) do return false
 	if biome_map_at(s.world.biome_map, px, py) == id do return false
@@ -114,19 +73,9 @@ editor_paint_pixel :: proc(s: ^Sim, px, py: i32, id: Biome_Id) -> bool {
 	return true
 }
 
-// Clear one map pixel. An empty pixel generates as the off-map biome.
 editor_erase_pixel :: proc(s: ^Sim, px, py: i32) -> bool {
 	return editor_paint_pixel(s, px, py, BIOME_EMPTY)
 }
-
-/*
-Write the map image.
-
-Save is blocked while any painted region is cut off from the rest,
-because a world the player cannot walk across is a mistake, not a
-style. The result carries the reason, so a caller with no screen can
-report it.
-*/
 editor_save_map :: proc(s: ^Sim) -> (message: string, ok: bool) {
 	if !editor_can_save(s) {
 		return fmt.tprintf(
@@ -142,7 +91,6 @@ editor_save_map :: proc(s: ^Sim) -> (message: string, ok: bool) {
 	return fmt.tprintf("cannot write %s", path), false
 }
 
-// The size of one map pixel on screen, and where the map starts.
 @(private = "file")
 editor_map_layout :: proc(app: ^App) -> (cell: i32, x0: i32, y0: i32) {
 	m := app.world.biome_map
@@ -151,7 +99,6 @@ editor_map_layout :: proc(app: ^App) -> (cell: i32, x0: i32, y0: i32) {
 	return cell, MAP_AREA_X, MAP_AREA_Y
 }
 
-// The map pixel under the mouse, if the mouse is over the map.
 @(private = "file")
 editor_pixel_under_mouse :: proc(app: ^App) -> (px: i32, py: i32, over: bool) {
 	cell, x0, y0 := editor_map_layout(app)
@@ -171,7 +118,6 @@ editor_pixel_under_mouse :: proc(app: ^App) -> (px: i32, py: i32, over: bool) {
 editor_handle_input :: proc(app: ^App) {
 	e := &app.editor
 
-	// Pick a biome. The number keys follow the palette order.
 	for key, i in ([]rl.KeyboardKey{.ONE, .TWO, .THREE, .FOUR, .FIVE, .SIX, .SEVEN, .EIGHT, .NINE}) {
 		if i < len(app.world.biomes.biomes) && rl.IsKeyPressed(key) {
 			e.brush = Biome_Id(i)
@@ -181,7 +127,6 @@ editor_handle_input :: proc(app: ^App) {
 	px, py, over := editor_pixel_under_mouse(app)
 
 	if over {
-		// Paint on press and on drag, so a stroke covers a run of pixels.
 		painted := false
 		if rl.IsMouseButtonDown(.LEFT) {
 			painted = editor_paint_pixel(&app.sim, px, py, e.brush)
@@ -189,11 +134,8 @@ editor_handle_input :: proc(app: ^App) {
 			painted = editor_erase_pixel(&app.sim, px, py)
 		}
 
-		// The world behind the overlay follows the stroke at once.
 		if painted do app.dirty = true
 
-		// Jump the camera to the region under the cursor, so you can
-		// look at what you just painted.
 		if rl.IsMouseButtonPressed(.MIDDLE) || rl.IsKeyPressed(.M) {
 			editor_look_at_pixel(app, px, py)
 		}
@@ -207,24 +149,16 @@ editor_handle_input :: proc(app: ^App) {
 		editor_save(app)
 	}
 
-	// Open the tile set of the biome on the brush. This is the whole
-	// path of the phase: pick a biome here, paint one tile of its set,
-	// watch every region of that biome follow the paint.
 	if rl.IsKeyPressed(.T) {
 		tile_editor_open(app, e.brush)
 	}
 }
 
-// Centre the camera on the world region a map pixel covers.
 editor_look_at_pixel :: proc(app: ^App, px, py: i32) {
 	cpp := app.world.biomes.cells_per_pixel
 	centre_x := (px - app.world.biomes.origin_pixel_x) * cpp + cpp / 2
 	centre_y := (py - app.world.biomes.origin_pixel_y) * cpp + cpp / 2
 
-	// The view is app_view_cells texels wide, not WINDOW_W: at zoom
-	// above 1 that is fewer texels than the window has pixels, and
-	// centring on WINDOW_W would land M or middle-click off by the
-	// zoom factor.
 	w, h := app_view_cells(app)
 	app.cam_x = centre_x - (w / 2) * app.step
 	app.cam_y = centre_y - (h / 2) * app.step
@@ -257,19 +191,14 @@ editor_palette_under_mouse :: proc(app: ^App) -> (id: Biome_Id, hit: bool) {
 }
 
 editor_draw :: proc(app: ^App) {
-	// The tile editor covers this one. Both overlays draw a palette in
-	// the same place, so only the top one may draw.
 	if !app.editor.open || app.tile_edit.open do return
 	e := &app.editor
 
-	// Dim the world, but keep it visible. The point of the editor is
-	// to watch the world change while you paint.
 	rl.DrawRectangle(0, 0, WINDOW_W, WINDOW_H, rl.Fade(rl.BLACK, 0.55))
 
 	editor_draw_palette(app)
 	editor_draw_map(app)
 
-	// Status bar.
 	rl.DrawText("world editor", EDITOR_PANEL_X, 16, 26, rl.RAYWHITE)
 	rl.DrawText(
 		"LMB paint   RMB erase   M look   T tile   S save   TAB close",
@@ -312,8 +241,6 @@ editor_draw_palette :: proc(app: ^App) {
 			selected ? rl.RAYWHITE : rl.LIGHTGRAY,
 		)
 
-		// What the region becomes in the world: one flat material, or a
-		// set of tiles that T opens for painting.
 		if b.tile_base == TILE_NONE {
 			rl.DrawText(
 				fmt.ctprintf("%s", app.world.materials.names[b.fill_0]),
@@ -349,16 +276,12 @@ editor_draw_map :: proc(app: ^App) {
 			ry := y0 + y * cell
 
 			if id == BIOME_EMPTY {
-				// Empty pixels generate as the off-map biome. Show them
-				// as a hole, not as that biome, so the map stays honest.
 				rl.DrawRectangle(rx, ry, cell, cell, rl.Fade(rl.WHITE, 0.05))
 			} else {
 				rl.DrawRectangle(rx, ry, cell, cell, rl_from_argb(app.world.biomes.biomes[id].key_color))
 			}
 			rl.DrawRectangleLines(rx, ry, cell, cell, rl.Fade(rl.BLACK, 0.25))
 
-			// Mark every component after the first, so the blocked save
-			// points at the pixels that caused it.
 			if e.component_count > 1 {
 				label := e.labels[int(y) * int(m.width) + int(x)]
 				if label > 0 {
@@ -372,10 +295,8 @@ editor_draw_map :: proc(app: ^App) {
 		}
 	}
 
-	// The rectangle of world the camera shows, drawn on the map.
 	editor_draw_camera_box(app, cell, x0, y0)
 
-	// Highlight the pixel under the cursor.
 	if px, py, over := editor_pixel_under_mouse(app); over {
 		rl.DrawRectangleLinesEx(
 			rl.Rectangle{f32(x0 + px * cell), f32(y0 + py * cell), f32(cell), f32(cell)},
@@ -396,14 +317,9 @@ editor_draw_map :: proc(app: ^App) {
 editor_draw_camera_box :: proc(app: ^App, cell, x0, y0: i32) {
 	cpp := app.world.biomes.cells_per_pixel
 
-	// Map pixel coordinates are fractional here, so the box shows the
-	// camera exactly rather than snapping to a region.
 	left := f32(app.cam_x) / f32(cpp) + f32(app.world.biomes.origin_pixel_x)
 	top := f32(app.cam_y) / f32(cpp) + f32(app.world.biomes.origin_pixel_y)
 
-	// view_w and view_h are texels, not WINDOW_W/WINDOW_H: at zoom above
-	// 1 the window shows fewer texels than it has pixels, and a box
-	// drawn at the window size would be zoom times too large.
 	view_w, view_h := app_view_cells(app)
 	w := f32(view_w * app.step) / f32(cpp)
 	h := f32(view_h * app.step) / f32(cpp)

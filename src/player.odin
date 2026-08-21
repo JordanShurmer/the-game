@@ -3,224 +3,81 @@ package game
 import "core:math"
 import "core:testing"
 
-/*
-The player: a wizard who walks, runs, jumps, and holds the jump key to
-fly a jetpack that fills again on its own. He is a field of Sim, not a
-field of the window, because both the MCP server and the game window
-drive one Sim and neither owns the other; docs/player.md calls this
-out as a decision the rest of the codebase already made for us.
-
-He collides with Terrain, not with World directly. Terrain reads the
-running Sandbox where it covers him and the generator everywhere
-else, which is the join docs/physics.md calls "the whole point of the
-gallery": dig a hole in the sandbox under his feet and he falls in
-it, because his collision and the physics now read the same cells.
-See terrain_cell_at below for the whole of that join; it is two
-fields and one proc, on purpose.
-
-Because the generator is not cheap to ask, collision asks it as
-little as it can. Resolving a tick's move one cell at a time only ever
-tests the leading edge of the body: PLAYER_BODY_H cells for a sideways
-step, PLAYER_BODY_W for a vertical one, never the full 104 cell box.
-The full box is still tested, but only twice: once to place a fresh
-spawn, and once at the start of every tick, because the world editor
-regenerates the world under a running game on every paint stroke and a
-player can wake up inside rock through no fault of his own.
-
-His size is not a free choice either. Two tiles of a Wang set share a
-band WANG_SEAM cells wide along the edge where they meet, and every
-mouth the world carves narrows to whatever clear channel survives that
-whole band on every side at once. The shipped tile sets hold that
-channel to 16 cells. A body taller than that fits every cave and
-leaves none of them, which is why the body is 13 cells tall and 8
-wide, with a cell of air either side of it in the narrowest tunnel.
-test_the_player_fits_the_world is the guard on that number: it
-measures the real channel in the shipped tiles and fails before a
-wizard finds himself sealed in one.
-*/
-
-// ------------------------------------------------------------
-// Input
-// ------------------------------------------------------------
-
 Player_Button :: enum u8 {
 	Left,
 	Right,
 	Jump,
 	Run,
-	Dig, // remove terrain in front of him; see PLAYER_DIG_POWER below
+	Dig,
 }
 
 Player_Input :: bit_set[Player_Button; u8]
 
-// ------------------------------------------------------------
-// The numbers
-//
-// Cells and seconds, because that is what the world is measured in.
-// See docs/player.md for what each one does and why it is this value;
-// the names and values here must match that table exactly, because it
-// is the one place both a reader and a future editor go to check them.
-// The digging constants at the end of this block are the one
-// exception: PLAYER_DIG_POWER and PLAYER_DIG_RADIUS are documented in
-// docs/physics.md's own numbers table instead, and that is the place
-// to check them against. PLAYER_DIG_REACH is new here, with no table
-// of its own; the comment above it says what it does.
-// ------------------------------------------------------------
+PLAYER_TICK_HZ :: 60
 
-PLAYER_TICK_HZ :: 60 // steps per second
+PLAYER_BODY_W :: 8
+PLAYER_BODY_H :: 13
 
-PLAYER_BODY_W :: 8  // cells
-PLAYER_BODY_H :: 13 // cells
+PLAYER_WALK_SPEED       :: 42
+PLAYER_RUN_SPEED        :: 74
+PLAYER_GROUND_ACCEL     :: 320
+PLAYER_AIR_ACCEL        :: 140
+PLAYER_GROUND_FRICTION  :: 420
+PLAYER_AIR_DRAG         :: 30
 
-PLAYER_WALK_SPEED       :: 42  // cells per second
-PLAYER_RUN_SPEED        :: 74  // cells per second, holding Shift
-PLAYER_GROUND_ACCEL     :: 320 // how fast he reaches that speed
-PLAYER_AIR_ACCEL        :: 140 // less control in the air
-PLAYER_GROUND_FRICTION  :: 420 // how fast he stops
-PLAYER_AIR_DRAG         :: 30  // he keeps his speed in the air
+PLAYER_GRAVITY    :: 430
+PLAYER_JUMP_SPEED :: 155
+PLAYER_MAX_FALL   :: 420
 
-PLAYER_GRAVITY    :: 430 // cells per second per second
-PLAYER_JUMP_SPEED :: 155 // the launch: 26.7 cells at this tick rate
-PLAYER_MAX_FALL   :: 420 // terminal speed
+PLAYER_JET_ACCEL       :: 880
+PLAYER_JET_MAX_RISE    :: 130
+PLAYER_JET_DELAY_TICKS :: 6
 
-PLAYER_JET_ACCEL       :: 880 // up, against gravity, so 450 net
-PLAYER_JET_MAX_RISE    :: 130 // the jetpack does not accelerate for ever
-PLAYER_JET_DELAY_TICKS :: 6   // after a jump press, before thrust starts
+PLAYER_FUEL_MAX        :: 1.0
+PLAYER_JET_DRAIN       :: 0.5
+PLAYER_FUEL_ON_GROUND  :: 1.4
+PLAYER_FUEL_IN_AIR     :: 0.22
 
-PLAYER_FUEL_MAX        :: 1.0  // one tank
-PLAYER_JET_DRAIN       :: 0.5  // tanks per second under thrust, so 2.0 seconds
-PLAYER_FUEL_ON_GROUND  :: 1.4  // tanks per second standing, so 0.71 seconds
-PLAYER_FUEL_IN_AIR     :: 0.22 // tanks per second falling, and not under thrust
+PLAYER_WORLD_CHANNEL :: 3 * PLAYER_BODY_H
 
-// The channel the world owes him, as against the one he fits through.
-//
-// A body of 13 passes a channel of 15, and a world drawn to 15 is a
-// world of tunnels: he clears it and cannot move in it, which is what
-// the sets drew while they were sized off the mean run of the
-// reference capture (32 cells measured, under two of him).
-//
-// Three of him is the floor, not the aim. The shipped sets measure 77
-// cells at their narrowest, which is nearly six; this is set well
-// below that so an ordinary reseed has room to differ, and well above
-// what he fits through so a reseed that puts the tunnels back fails
-// here rather than in the hands of a player.
-PLAYER_WORLD_CHANNEL :: 3 * PLAYER_BODY_H // cells
+PLAYER_COYOTE_TICKS :: 5
 
-PLAYER_COYOTE_TICKS :: 5  // ticks after a ledge where a jump still works
-
-// The other half of the coyote rule, and the one that is missing from
-// most games in this shape.
-//
-// PLAYER_COYOTE_TICKS forgives a press that comes a little late, after
-// the ledge has gone. This forgives one that comes a little early,
-// before the ground arrives: a press is remembered for this many ticks
-// and spent on the first tick he can jump. Six ticks is a tenth of a
-// second.
-//
-// Early is the harder of the two to time and the worse of the two to
-// lose. A player watches the ground come up and presses for the
-// landing he can see coming, and a press that lands one tick before
-// the feet is a press the game simply throws away: he lands, he does
-// not jump, and nothing on the screen says why. Left alone, this is
-// the thing that reads as the controls being unresponsive.
 PLAYER_JUMP_BUFFER_TICKS :: 6
-PLAYER_CLIMB        :: 3  // cells he walks up without jumping
-PLAYER_DIG_OUT      :: 24 // cells he searches upward when buried
+PLAYER_CLIMB        :: 3
+PLAYER_DIG_OUT      :: 24
 
-SPAWN_MOUTH_DEPTH  :: 10   // cells a column must be clear to count as a way in
-SPAWN_CLEARANCE    :: 12   // cells from the mouth edge to the spawn
-SPAWN_SEARCH_RANGE :: 4096 // cells either side of x 0 that the scan covers
+SPAWN_MOUTH_DEPTH  :: 10
+SPAWN_CLEARANCE    :: 12
+SPAWN_SEARCH_RANGE :: 4096
 
-// Digging. See docs/physics.md, "Digging and breaking": rock is
-// hardness 8, exactly PLAYER_DIG_POWER, so he digs the world he lives
-// in and nothing harder; obsidian, steel and bedrock stay real walls
-// to him. This is not PLAYER_DIG_OUT above, which is de-penetration
-// searching for open air, not a tool cutting into solid ground.
-PLAYER_DIG_POWER :: 8 // hardness he can remove
+PLAYER_DIG_POWER :: 8
 
-// The tool is a beam out of the centre of his mass, not a ball in
-// front of him, so both of its sizes come off the body the way every
-// other number here does (docs/player.md, "The size of the wizard is
-// not a choice").
-//
-// The reach is two of him. Short enough that he has to walk into what
-// he cuts, long enough that one press opens a length of tunnel he can
-// see from the far end of.
-//
-// The width is his own height and a cell either side, because the cut
-// he makes is the cut he then has to fit through. A kerf narrower than
-// the body is a slit he can watch himself carve and never enter, which
-// is the one way a digging tool feels worse than no tool at all.
-PLAYER_DIG_RANGE :: 2 * PLAYER_BODY_H // 26 cells
-PLAYER_DIG_WIDTH :: PLAYER_BODY_H + 2 // 15 cells, a kerf he fits through
+PLAYER_DIG_RANGE :: 2 * PLAYER_BODY_H
+PLAYER_DIG_WIDTH :: PLAYER_BODY_H + 2
 
-// The room the spray leaves clear must hold the man who holds the tool.
-// A grain thrown into his own body box is a grain the de-penetration
-// search at the top of player_step then has to lift him off, and being
-// shoved upward by your own sawdust is not a feel anybody asked for.
-//
-// The beam starts at his chest, so the furthest the body reaches along
-// the beam is from the chest to the top of his head, whichever way he
-// points it. The scatter is across the beam and adds nothing to that.
 #assert(CUT_SPRAY_NEAR > PLAYER_BODY_H - PLAYER_BODY_H / 2)
 
-// ------------------------------------------------------------
-// Aim
-// ------------------------------------------------------------
-
-/*
-Where the digger points: one byte of turn, so 0 is right, 64 is down,
-128 is left, 192 is up, and 256 wraps back to 0 the way the circle
-does. y grows downward here as it does everywhere else in the world,
-which is why down and not up is the quarter turn after right.
-
-A byte, and not a pair of floats, for two reasons. Player has three
-spare bytes at its tail and no room at all for a vector, and a Move
-command carries the aim through the input queue, where a replay has to
-give the same cut on two machines and a float is a thing two machines
-can disagree about. A byte of turn is 1.4 degrees, which is finer than
-a hand on a mouse.
-*/
 PLAYER_AIM_RIGHT :: u8(0)
 PLAYER_AIM_DOWN  :: u8(64)
 PLAYER_AIM_LEFT  :: u8(128)
 PLAYER_AIM_UP    :: u8(192)
 
-// The aim that points along a delta measured in world cells. A delta
-// of nothing at all has no direction in it, and reads as right, which
-// is the way a fresh wizard faces.
 player_aim_of :: proc(dx, dy: f32) -> u8 {
 	if dx == 0 && dy == 0 do return PLAYER_AIM_RIGHT
 	turns := math.atan2(dy, dx) / (2 * math.PI)
 	return u8(i32(math.round(turns * 256)) & 255)
 }
 
-// The unit vector an aim points along.
 player_aim_vector :: proc(aim: u8) -> (dx, dy: f32) {
 	angle := f32(aim) * (2 * math.PI / 256)
 	return math.cos(angle), math.sin(angle)
 }
 
-// Which way the body turns to hold an aim: right for the half of the
-// circle that points right, left for the other half. Straight up and
-// straight down land on the right, because a body has to face one way
-// or the other and neither answer is truer than the other there.
 player_aim_facing :: proc(aim: u8) -> i8 {
 	return aim <= PLAYER_AIM_DOWN || aim >= PLAYER_AIM_UP ? 1 : -1
 }
 
-// ------------------------------------------------------------
-// Motion, for the sprite sheet
-// ------------------------------------------------------------
-
-/*
-Which animation row is playing.
-
-THIS ENUM IS A CONTRACT. src/sprite.odin reads it to pick a row of
-data/sprites/wizard.png, and the order matches the rows of that sheet
-one for one: Idle 0, Walk 1, Run 2, Rise 3, Fall 4, Jet 5. Reordering
-this enum silently reorders the sprite sheet reading from under it.
-*/
+// THIS ENUM IS A CONTRACT: src/sprite.odin reads it to match wizard.png rows.
 Player_Motion :: enum u8 {
 	Idle,
 	Walk,
@@ -230,11 +87,8 @@ Player_Motion :: enum u8 {
 	Jet,
 }
 
-// Not in the numbers above, because nothing but this classification
-// depends on them. A hair under walking speed reads as standing
-// still; a hair over it does not yet read as running.
-PLAYER_MOTION_IDLE_SPEED :: 3 // cells per second
-PLAYER_MOTION_RUN_MARGIN :: 3 // cells per second past PLAYER_WALK_SPEED
+PLAYER_MOTION_IDLE_SPEED :: 3
+PLAYER_MOTION_RUN_MARGIN :: 3
 
 player_motion :: proc(p: Player) -> Player_Motion {
 	if p.jetting do return .Jet
@@ -247,99 +101,33 @@ player_motion :: proc(p: Player) -> Player_Motion {
 	return .Walk
 }
 
-// ------------------------------------------------------------
-// The player
-// ------------------------------------------------------------
-
-/*
-Fields are ordered largest-first so the struct holds no interior
-padding: six f32 fields (24 bytes) come first, then five byte-sized
-flags the compiler can pack together and pad once at the tail, rather
-than scattering three bytes of padding between the floats.
-
-x and y are the feet position, in world cells. y is the floor row the
-feet rest on, not the top of the body: the body occupies cells
-[floor(x - W/2), floor(x + W/2)) across and [floor(y) - H, floor(y))
-down. Getting that backward is the difference between the wizard
-standing on the ground and hanging with his knees in it.
-*/
 Player :: struct {
-	x, y:   f32, // feet position, in world cells; see above
-	vx, vy: f32, // cells per second; y grows downward, like the world
-	fuel:   f32, // 0 to PLAYER_FUEL_MAX, tanks in the jetpack
-	anim:   f32, // seconds accumulated, for the sprite to pick a frame
+	x, y:   f32,
+	vx, vy: f32,
+	fuel:   f32,
+	anim:   f32,
 
-	coyote:      u8, // ticks of ledge grace left
-	jet_delay:   u8, // ticks left before a held jump becomes thrust
-	jump_buffer: u8, // ticks a press is still remembered for
-	facing:      i8, // +1 right, -1 left
-	aim:         u8, // where the digger points; see PLAYER_AIM_RIGHT above
+	coyote:      u8,
+	jet_delay:   u8,
+	jump_buffer: u8,
+	facing:      i8,
+	aim:         u8,
 	on_ground:   bool,
 	jetting:     bool,
-	digging:     bool, // the beam is on this tick, for the window to draw
+	digging:     bool,
 }
 
-// Two players per 64-byte cache line; keep it that way.
 #assert(size_of(Player) == 32)
 
-/*
-The centre of his mass, in world cells: half the body up from the feet.
-
-One proc, because three things have to measure from the same point or
-the tool reads as attached to nothing. The beam comes out of here, the
-cursor's aim is measured from here, and the window draws the beam from
-here.
-*/
 player_centre :: proc(p: Player) -> (x, y: i32) {
 	return i32(math.floor(p.x)), i32(math.floor(p.y)) - PLAYER_BODY_H / 2
 }
 
-// ------------------------------------------------------------
-// Collision
-// ------------------------------------------------------------
-
-/*
-What the wizard collides with: the running Sandbox where it covers
-him, and the generator everywhere else. This is the whole join
-between the physics and the player (docs/physics.md, "The wizard
-meets the sandbox"); every player_* collision helper below takes a
-Terrain instead of a World, and nothing about the numbers or the walk
-itself changes.
-
-World does NOT gain a sandbox pointer. worldgen.odin's header says why:
-generate is stateless and answers any rectangle in any order, which is
-the property that lets the world be unbounded, and a mutable pointer
-inside World would end that. So the two stay separate fields on a
-small struct built fresh by whoever is calling, not a change to World
-itself.
-
-sandbox may be nil: the spawn scan builds a Terrain with no sandbox at
-all, because a wizard is placed before any physics runs, and a caller
-that never asked to follow the play sandbox (a test, the MCP server
-opening its own) gets ordinary World collision by passing nil too.
-*/
 Terrain :: struct {
 	world:   World,
-	sandbox: ^Sandbox, // may be nil
+	sandbox: ^Sandbox,
 }
 
-/*
-The material at a world cell: the sandbox's, where the sandbox covers
-it, or the generator's otherwise.
-
-This is CHEAPER than reading the generator alone, not more expensive:
-a sandbox read is one bounds check and one array index, against
-world_cell_at's biome lookup and five splitmix64 hashes (worldgen.odin
-says why generation costs that). A reader used to the sandbox being
-the "slow, mutable" half of the world would assume the opposite, so
-this is worth saying plainly: the join makes the wizard faster where
-he stands, not slower.
-
-player_solid_at below does this same lookup itself rather than calling
-this, because it needs a second thing out of the same cell: whether
-that cell moved on the last tick. Asking twice would pay for the
-bounds test twice.
-*/
 terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
 	if t.sandbox != nil {
 		sx := wx - t.sandbox.origin_x
@@ -351,33 +139,6 @@ terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
 	return world_cell_at(t.world, wx, wy)
 }
 
-/*
-Whether a world cell stops the player. Rock, Gold, Dirt and Sand hold
-him up; Air, Water, Oil, Acid, Lava, Fire, Smoke and Steam do not,
-because only Solid and Powder resist a falling body.
-
-**A grain in mid air is not a floor.** A cell that moved on the last
-sandbox tick does not stop him, however solid the material in it is.
-Without that rule a stream of falling sand is a wall: it is Powder,
-Powder holds him up, and a wizard who flies into the sand pouring out
-of a hole he just cut stops dead against the falling column, or stands
-on it, or is carried by it. The eye reads that column as something
-moving through the air, and a body must be able to move through it
-too.
-
-The flag this reads is the sandbox's own `moved`, which is the whole
-of what makes the rule cost nothing. The step already clears it under
-the dirty rectangles and sets it on both sides of every swap, so it is
-exactly "this cell changed places on the last tick" and it is one
-array read next to the one this proc was already doing. Nothing new is
-stored and nothing new is cleared.
-
-Two things that look like corners and are not. A cell a grain moved
-*out* of holds air afterwards, which was never solid anyway. And a
-solid never moves at all, because the step treats every solid as a
-wall (src/cell.odin), so the only cells this rule ever changes the
-answer for are the loose ones it is meant for.
-*/
 player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
 	if t.sandbox != nil {
 		sx := x - t.sandbox.origin_x
@@ -391,9 +152,6 @@ player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
 	return material_stops_him(t.world.materials, world_cell_at(t.world, x, y))
 }
 
-// The material half of the question above, with the sandbox half left
-// out. The generator has no physics in it, so a cell read from the
-// generator is always at rest and this is the whole answer there.
 @(private = "file")
 material_stops_him :: proc(table: Material_Table, c: Cell) -> bool {
 	if int(c) >= len(table.materials) do return false
@@ -401,16 +159,11 @@ material_stops_him :: proc(table: Material_Table, c: Cell) -> bool {
 	return state == .Solid || state == .Powder
 }
 
-// The horizontal extent of the body. It does not depend on the feet
-// row, so callers that only need this half of the box (the on-ground
-// test, the vertical edge test) can skip computing the other half.
 @(private = "file")
 player_body_x_bounds :: proc(x: f32) -> (x0, x1: i32) {
 	return i32(math.floor(x - PLAYER_BODY_W * 0.5)), i32(math.floor(x + PLAYER_BODY_W * 0.5))
 }
 
-// The vertical extent of the body: the feet rest on the row at
-// floor(y), and the body fills the PLAYER_BODY_H rows above it.
 @(private = "file")
 player_body_y_bounds :: proc(y: f32) -> (y0, y1: i32) {
 	y1 = i32(math.floor(y))
@@ -418,16 +171,6 @@ player_body_y_bounds :: proc(y: f32) -> (y0, y1: i32) {
 	return
 }
 
-/*
-Whether the whole body box is free of solid ground: up to
-PLAYER_BODY_W * PLAYER_BODY_H, 104, cells.
-
-This is spawn's and de-penetration's proc, not the movement loop's.
-world_cell_at costs a biome lookup and five hashes, so a per-substep
-call here would multiply that cost by up to 14 substeps a tick. Spawn
-and de-penetration each run at most once a tick, which is a cost the
-world can afford that the inner loop below cannot.
-*/
 player_body_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
 	y0, y1 := player_body_y_bounds(y)
@@ -439,10 +182,6 @@ player_body_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	return true
 }
 
-// Whether the row the feet rest on holds him up, anywhere across the
-// body's width. Any one solid cell under him is enough to stand on,
-// which matches the edge test below: the same row blocks a downward
-// move for the same reason.
 @(private = "file")
 player_on_ground :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
@@ -453,14 +192,6 @@ player_on_ground :: proc(t: Terrain, x, y: f32) -> bool {
 	return false
 }
 
-/*
-The leading edge of a horizontal move at a candidate x: the one column
-the body would newly reach, spanning its full height. PLAYER_BODY_H
-cells, never the full box.
-
-x and y here are the candidate position, so a caller who wants to test
-"can I move to nx" passes nx directly; there is no separate delta.
-*/
 @(private = "file")
 player_edge_clear_x :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
@@ -472,17 +203,6 @@ player_edge_clear_x :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	return true
 }
 
-/*
-The leading edge of a vertical move at a candidate y, spanning the
-body's full width: PLAYER_BODY_W cells.
-
-Going up that is the top row of the body. Going down it is the row at
-floor(y), which the body does NOT occupy: y is the floor his feet rest
-on, so the row under his feet is the one that stops him. Testing the
-body's own bottom row instead would test a row he already stands in,
-which is always clear, and he would sink a whole cell into every floor
-before the next row down finally refused him.
-*/
 @(private = "file")
 player_edge_clear_y :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
@@ -494,9 +214,6 @@ player_edge_clear_y :: proc(t: Terrain, x, y: f32, dir: i32) -> bool {
 	return true
 }
 
-// The row directly above a body at (x,y), the width of the body. This
-// is the ceiling a climb must clear: raising the body past a step is
-// no good if his head has nowhere to go once he gets there.
 @(private = "file")
 player_ceiling_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	x0, x1 := player_body_x_bounds(x)
@@ -507,16 +224,6 @@ player_ceiling_clear :: proc(t: Terrain, x, y: f32) -> bool {
 	return true
 }
 
-/*
-Drop back to the floor after a climb.
-
-A climb always raises the body the full PLAYER_CLIMB, because testing
-every smaller height first would cost up to PLAYER_CLIMB times the
-leading-edge test for one step. Most steps are shorter than the
-maximum, so afterward he is standing in mid-air above wherever the
-real floor is; this walks him back down onto it, one cell at a time,
-for at most the cells he was just raised.
-*/
 @(private = "file")
 player_settle :: proc(t: Terrain, x: f32, y: ^f32, max_drop: i32) {
 	for _ in 0 ..< max_drop {
@@ -525,15 +232,6 @@ player_settle :: proc(t: Terrain, x: f32, y: ^f32, max_drop: i32) {
 	}
 }
 
-/*
-Take a step up rather than stopping at it.
-
-A climb tests the raised body and the ceiling above it, because in a
-16 cell channel a climb into rock is the common case, not the corner:
-skipping the ceiling test would let him wedge his head into it. Both
-tests use the candidate x, so a step he could never fit through
-sideways is refused before he is ever moved.
-*/
 @(private = "file")
 player_climb :: proc(t: Terrain, p: ^Player, nx: f32, dir: i32) -> bool {
 	raised_y := p.y - PLAYER_CLIMB
@@ -546,46 +244,17 @@ player_climb :: proc(t: Terrain, p: ^Player, nx: f32, dir: i32) -> bool {
 	return true
 }
 
-// Move current toward target by at most max_delta, and no further.
 @(private = "file")
 move_toward :: proc(current, target, max_delta: f32) -> f32 {
 	if abs(target - current) <= max_delta do return target
 	return current + (target > current ? max_delta : -max_delta)
 }
 
-// A sentinel jet_delay holds, distinct from every value the ordinary
-// countdown passes through. See the comment in player_step on why
-// running dry needs one.
 PLAYER_JET_LOCKED :: max(u8)
 
-/*
-One whole tick at PLAYER_TICK_HZ.
-
-Integration is semi-implicit Euler, velocity first and then position:
-every change to vx and vy happens before either is used to move him,
-because the two orders give jump heights 2.5 cells apart and only one
-of them is 26.7 cells at this tick rate.
-
-jump_pressed is the edge (true for one tick, the tick of the press)
-and .Jump in held is the level (true for as long as the key is down).
-A press launches him; holding the same key in the air, past
-PLAYER_JET_DELAY_TICKS, lights the jetpack instead. Without that
-split a held key would always fly, and there would be no jump at all.
-
-aim is where the digger points, and it is an input like the buttons
-are: the window reads it off the cursor every frame and the Move
-command carries it through the queue. It defaults to PLAYER_AIM_RIGHT
-so a test that never digs does not have to name a direction; every
-caller that can point at something passes a real one.
-*/
 player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
 	dt : f32 = 1.0 / PLAYER_TICK_HZ
 
-	// De-penetration. The world editor regenerates the world on every
-	// paint stroke, so a player can wake up inside rock through no
-	// fault of his own. Without this he freezes there for ever: every
-	// candidate move starts from a position already inside solid, so
-	// the leading edge test never once finds a clear step to take.
 	if !player_body_clear(t, p.x, p.y) {
 		for up in i32(1) ..= PLAYER_DIG_OUT {
 			ny := p.y - f32(up)
@@ -593,15 +262,12 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 				p.y = ny
 				break
 			}
-			// Nothing found within range: this tick moves freely, on
-			// the chance it carries him toward open air anyway.
 		}
 	}
 
 	on_ground := player_on_ground(t, p.x, p.y)
 	can_jump := on_ground || p.coyote > 0
 
-	// --- horizontal velocity ---
 	move_dir : f32 = 0
 	if .Left in held do move_dir -= 1
 	if .Right in held do move_dir += 1
@@ -614,31 +280,9 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	} else {
 		drag : f32 = on_ground ? PLAYER_GROUND_FRICTION : PLAYER_AIR_DRAG
 		p.vx = move_toward(p.vx, 0, drag * dt)
-		// Standing still, he turns to hold the aim. A wizard whose
-		// back is to his own beam reads as a bug, and a walk key is
-		// the only thing that outranks the cursor here: turning him
-		// away from the way he runs would need frames the sheet does
-		// not hold (docs/player.md, "The sprite").
 		p.facing = player_aim_facing(aim)
 	}
 
-	// --- jump ---
-	//
-	// A press is not spent on the tick it arrives. It is remembered
-	// for PLAYER_JUMP_BUFFER_TICKS and spent on the first of those
-	// ticks he can jump on, which is the mirror of the coyote rule
-	// above: one forgives a press that comes after the ground has
-	// gone, and this one forgives a press that comes before the ground
-	// has arrived.
-	//
-	// On the ground nothing about this is visible. The buffer is set
-	// and spent in the same tick, and the launch is the launch it
-	// always was.
-	// A press is remembered for PLAYER_JUMP_BUFFER_TICKS ticks, the one
-	// it was made on included, and it is spent on the first of them he
-	// can jump on. The countdown runs before the press is read, so a
-	// fresh press always gets the whole count whatever was left of an
-	// older one.
 	if p.jump_buffer > 0 do p.jump_buffer -= 1
 	if jump_pressed do p.jump_buffer = PLAYER_JUMP_BUFFER_TICKS
 
@@ -649,31 +293,15 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 		p.jet_delay = PLAYER_JET_DELAY_TICKS
 	}
 
-	// Coyote time starts counting down the moment the ground goes
-	// away, and a fresh landing refills it. This runs after the jump
-	// check above, so a jump that just spent the grace does not also
-	// get a tick knocked off it here.
 	if on_ground {
 		p.coyote = PLAYER_COYOTE_TICKS
 	} else if p.coyote > 0 {
 		p.coyote -= 1
 	}
 
-	// --- jet delay and thrust ---
-	//
-	// jet_delay counts down PLAYER_JET_DELAY_TICKS to 0 before a fresh
-	// hold lights the jetpack. PLAYER_JET_LOCKED is a second, larger
-	// value it can hold: once a burn ends because the tank ran dry,
-	// jet_delay is set there instead of back to 0. Held-down fuel fills
-	// at PLAYER_FUEL_IN_AIR even while locked, so without this a tiny
-	// trickle of it would re-light the instant it cleared zero, a few
-	// ticks of thrust would burn it straight back off, and holding the
-	// button down would hover him forever on scraps instead of falling.
-	// Only letting go, or touching ground, clears the lock.
 	thrusting := false
 	if .Jump in held && !on_ground {
 		if p.jet_delay == PLAYER_JET_LOCKED {
-			// Spent for this hold; wait for release.
 		} else if p.jet_delay > 0 {
 			p.jet_delay -= 1
 		} else if p.fuel > 0 {
@@ -692,14 +320,10 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	} else {
 		p.vy = min(p.vy + PLAYER_GRAVITY * dt, PLAYER_MAX_FALL)
 
-		// Fuel does not fill under thrust: a burn has to cost
-		// something, or holding the key down is free flight for ever.
 		fill : f32 = on_ground ? PLAYER_FUEL_ON_GROUND : PLAYER_FUEL_IN_AIR
 		p.fuel = min(p.fuel + fill * dt, PLAYER_FUEL_MAX)
 	}
 
-	// --- position: one cell at a time, first contact rather than an
-	// arbitrary end position ---
 	remaining_x := p.vx * dt
 	for remaining_x != 0 {
 		d := clamp(remaining_x, -1, 1)
@@ -709,9 +333,8 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 		if player_edge_clear_x(t, nx, p.y, dir) {
 			p.x = nx
 		} else if on_ground && player_climb(t, p, nx, dir) {
-			// p.x and p.y were updated inside player_climb.
 		} else {
-			p.vx = 0 // this axis only: a wall must not cancel a fall
+			p.vx = 0
 			break
 		}
 		remaining_x -= d
@@ -726,12 +349,6 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 		if player_edge_clear_y(t, p.x, ny, dir) {
 			p.y = ny
 		} else {
-			// Land flush on the row that stopped him rather than
-			// wherever in the cell the last substep happened to leave
-			// him. Without this he rests at a fraction, and every tick
-			// after gravity moves him a little further into the cell
-			// until it rounds down: a slow sink into every floor he
-			// stands on, and a position that means nothing exact.
 			if dir > 0 do p.y = math.floor(ny)
 			p.vy = 0
 			break
@@ -742,33 +359,11 @@ player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bo
 	p.on_ground = player_on_ground(t, p.x, p.y)
 	p.anim += dt
 
-	// Digging happens after the move resolves, so the beam starts from
-	// where he actually ended the tick, not where he began it. It runs
-	// every tick the button is held, the same level a walk key reads
-	// at: docs/physics.md gives digging no separate edge.
 	p.aim = aim
 	p.digging = .Dig in held
 	if p.digging do player_dig(p^, t)
 }
 
-/*
-Cut with the plasma digger: a beam out of the centre of his mass along
-p.aim, PLAYER_DIG_RANGE cells long and PLAYER_DIG_WIDTH across.
-sandbox_cut is the whole of what it does to the world, the flying
-debris included.
-
-The tool this replaced was a disc PLAYER_DIG_REACH cells in front of
-his facing. What that cost was never reach. It was that a tool with no
-cursor in it is a tool that happens near a man rather than one he
-holds: he could dig only the two directions he could walk, the hole
-opened beside him instead of out of him, and nothing on the screen
-said where the next hole would be until it was already there.
-
-Nothing happens with no sandbox under him. sandbox_cut mutates a
-running Sandbox; the generator has no dig at all, so a Terrain built
-with sandbox = nil (the spawn scan, a caller that never asked to
-follow) leaves the world untouched rather than failing.
-*/
 player_dig :: proc(p: Player, t: Terrain) -> int {
 	if t.sandbox == nil do return 0
 
@@ -787,13 +382,6 @@ player_dig :: proc(p: Player, t: Terrain) -> int {
 	)
 }
 
-// ------------------------------------------------------------
-// Spawn
-// ------------------------------------------------------------
-
-// The first map row a tiled biome owns. Its top edge is the surface:
-// everything above it is open sky, and the spawn search measures
-// depth down from here.
 @(private = "file")
 world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 	m := world.biome_map
@@ -807,11 +395,6 @@ world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 	return 0, false
 }
 
-// A mouth is a column clear for SPAWN_MOUTH_DEPTH cells below the
-// surface: a way down into the caves, not a crack in solid rock. The
-// search starts at x 0 and grows outward, so the mouth found is the
-// nearest one to the middle of the map, not just the first in scan
-// order.
 @(private = "file")
 world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
 	is_mouth :: proc(t: Terrain, x, surface_y: i32) -> bool {
@@ -830,12 +413,6 @@ world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, f
 	return 0, false
 }
 
-// SPAWN_CLEARANCE cells out from a mouth, in both directions, to the
-// nearest column with solid ground at the surface and a clear body
-// box above it. The nearest solid column to a mouth is the lip of the
-// hole, and an 8 cell body placed there hangs half over the edge and
-// falls in on the first tick, which is why the search starts a full
-// SPAWN_CLEARANCE out rather than at the mouth itself.
 @(private = "file")
 world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, found: bool) {
 	for dist := i32(SPAWN_CLEARANCE); dist < SPAWN_SEARCH_RANGE; dist += 1 {
@@ -849,13 +426,6 @@ world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, 
 	return 0, false
 }
 
-/*
-If no mouth or ground can be found, stand him in the open sky above
-the first tiled region rather than refuse to spawn him at all. A
-repainted map can put rock exactly there, so this is tested for
-solidity too, not assumed clear: a fallback that itself buries him is
-worse than no fallback.
-*/
 @(private = "file")
 world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
 	surface_row, row_found := world_find_surface_row(t.world)
@@ -869,24 +439,6 @@ world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
 	return fx, fy, true
 }
 
-/*
-Where he starts: beside a hole, not in it.
-
-	1. Find the surface: the top edge of the first map row a tiled
-	   biome owns.
-	2. Scan for a mouth: a column clear for SPAWN_MOUTH_DEPTH cells
-	   below the surface.
-	3. Step SPAWN_CLEARANCE cells out from the mouth to solid ground
-	   with a clear body box above it.
-
-Any step that finds nothing falls back to world_spawn_fallback.
-
-This builds its own Terrain with no sandbox, because a wizard is
-placed before any physics runs (docs/physics.md, "The wizard meets the
-sandbox"): there is nothing yet for the scan to read but the
-generator. player_spawn keeps taking a plain World, so nothing outside
-this file has to know a Terrain exists just to place him.
-*/
 world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	t := Terrain{world = world}
 
@@ -909,16 +461,6 @@ world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	return ground_x, surface_y, true
 }
 
-/*
-A fresh wizard: found and standing, or at the world's fallback spot if
-even that fails, facing right with a full tank.
-
-on_ground is asked of the world rather than left false. A spawn that
-reports itself airborne makes the first frame draw a falling wizard on
-solid ground, and every caller that only wants to place him and look at
-him has to run a physics tick or patch the flag by hand. The world
-already knows the answer, so this asks it once.
-*/
 player_spawn :: proc(world: World) -> Player {
 	x, y, found := world_find_spawn(world)
 	if !found do x, y = 0, 0
@@ -932,18 +474,6 @@ player_spawn :: proc(world: World) -> Player {
 	}
 }
 
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
-
-// Two biomes, both uniform fill, so no tile set has to load: Rock
-// holds him up and Air does not. cells_per_pixel is 1, so one map
-// pixel is one world cell and a test can paint an exact wall, step or
-// ceiling instead of hoping a procedural cave happens to have one.
-// Anything left unpainted reads as the off-map biome, which is Rock,
-// so a test that never paints a cell gets solid ground under it and a
-// test that walks off the edge of its painted area meets a wall
-// rather than an infinite drop.
 @(private = "file")
 PLAYER_TEST_ROCK :: Biome_Id(0)
 @(private = "file")
@@ -986,8 +516,6 @@ destroy_flat_world :: proc(world: World) {
 	destroy_material_table(world.materials)
 }
 
-// Open sky in every row above floor_row, across the whole map width.
-// Rows at and below floor_row are left unpainted, which is solid Rock.
 @(private = "file")
 carve_open_floor :: proc(world: World, floor_row: i32) {
 	for y in i32(0) ..< floor_row {
@@ -995,8 +523,6 @@ carve_open_floor :: proc(world: World, floor_row: i32) {
 	}
 }
 
-// The whole map, open air. Used where a test needs no ground nearby
-// at all.
 @(private = "file")
 carve_all_air :: proc(world: World) {
 	for y in i32(0) ..< world.biome_map.height {
@@ -1027,7 +553,6 @@ test_he_does_not_pass_through_a_wall :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 20)
-	// A wall from the ground up into the open sky, columns 60 to 69.
 	for y in i32(0) ..< 20 {
 		for x in i32(60) ..< 70 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
@@ -1050,9 +575,6 @@ test_hitting_a_wall_does_not_cancel_a_fall :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_all_air(world)
-	// A wall with no floor at its foot: it spans the whole map, so
-	// sliding down its face never lands him anywhere, and the test
-	// stays about the wall rather than about the ground below it.
 	for y in i32(0) ..< 2000 {
 		for x in i32(15) ..< 25 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
@@ -1108,7 +630,7 @@ test_a_jump_from_the_ground_rises_and_returns_to_the_ground :: proc(t: ^testing.
 	player_step(&p, terrain, {.Jump}, true)
 	min_y = min(min_y, p.y)
 	for _ in 0 ..< 300 {
-		player_step(&p, terrain, {}, false) // released: no thrust, a pure arc
+		player_step(&p, terrain, {}, false)
 		min_y = min(min_y, p.y)
 		if p.on_ground && p.vy == 0 do break
 	}
@@ -1126,7 +648,7 @@ test_a_jump_press_with_no_ground_and_no_coyote_does_not_change_vy :: proc(t: ^te
 	carve_all_air(world)
 	terrain := Terrain{world = world}
 
-	p := Player{x = 10, y = 10, vy = 50, facing = 1} // already falling, coyote already spent
+	p := Player{x = 10, y = 10, vy = 50, facing = 1}
 	before := p.vy
 	player_step(&p, terrain, {}, true)
 
@@ -1140,7 +662,6 @@ test_coyote_time_lets_him_jump_soon_after_a_ledge_but_not_later :: proc(t: ^test
 	if !ok do return
 	defer destroy_flat_world(world)
 
-	// A platform under x < 40; open air, all the way down, at and past it.
 	for y in i32(0) ..< 20 {
 		for x in i32(0) ..< 100 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
@@ -1154,7 +675,6 @@ test_coyote_time_lets_him_jump_soon_after_a_ledge_but_not_later :: proc(t: ^test
 		player_step(&p, terrain, {.Right}, false)
 		if !p.on_ground do break
 	}
-	// p now holds the state right after the first tick off the platform.
 
 	first_failing_tick := -1
 	for tick in 0 ..< int(PLAYER_COYOTE_TICKS) + 4 {
@@ -1229,9 +749,6 @@ test_a_climb_under_a_low_ceiling_is_refused :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 20 {
 		for x in i32(0) ..< 50 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
-	// A step exactly PLAYER_CLIMB tall, with exactly PLAYER_BODY_H of
-	// headroom above it and rock past that: the raised body itself
-	// fits, so only the ceiling test can catch this.
 	for y in i32(4) ..< 20 - PLAYER_CLIMB {
 		for x in i32(50) ..< 120 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
@@ -1247,9 +764,6 @@ test_a_climb_under_a_low_ceiling_is_refused :: proc(t: ^testing.T) {
 
 @(test)
 test_the_jetpack_lifts_him_drains_the_tank_and_he_falls_when_empty :: proc(t: ^testing.T) {
-	// Tall enough that falling at terminal speed for the whole test
-	// never reaches the off-map floor below the painted air: hitting
-	// that would land him, refuel him, and quietly pass a broken test.
 	world, ok := make_flat_world(t, 40, 20000)
 	if !ok do return
 	defer destroy_flat_world(world)
@@ -1327,8 +841,6 @@ test_a_player_buried_in_rock_reaches_open_air_within_dig_out_and_is_not_frozen :
 	if !ok do return
 	defer destroy_flat_world(world)
 
-	// Open air from row 200 up; solid rock below it. He starts buried
-	// exactly PLAYER_DIG_OUT cells under the surface of the air.
 	for y in i32(0) ..< 200 {
 		for x in i32(0) ..< 60 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
@@ -1379,13 +891,6 @@ test_the_same_input_list_gives_the_same_position_twice :: proc(t: ^testing.T) {
 	testing.expect(t, x1 == x2 && y1 == y2, "the same input list must give the same position twice")
 }
 
-/*
-terrain_cell_at is the whole join, so it gets its own test rather than
-riding along inside a player test: the sandbox rect sits astride zero,
-so a coordinate on the wrong side of floor_div would read the wrong
-half silently, and this exercises both the near and the far corner of
-it plus a cell well outside it at a negative coordinate.
-*/
 @(test)
 test_terrain_cell_at_reads_the_sandbox_inside_its_rect_and_the_world_outside_it :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 4000, 40)
@@ -1425,13 +930,6 @@ test_terrain_cell_at_reads_the_sandbox_inside_its_rect_and_the_world_outside_it 
 	)
 }
 
-/*
-The test that proves the join docs/player.md used to say never
-happened. The world alone is open air all the way down: with no
-sandbox a wizard here falls forever. Add a sandbox holding sand where
-the world holds nothing but air, and the same position must read solid
-ground, because Terrain reads the sandbox first.
-*/
 @(test)
 test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 4000)
@@ -1447,7 +945,6 @@ test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
 	defer sandbox_destroy(&sb)
 	sb.origin_x = 50
 	sb.origin_y = 100
-	// A floor of sand across the sandbox from row 40 down; air above it.
 	for y in i32(0) ..< sb.height {
 		for x in i32(0) ..< sb.width {
 			sb.cells[sandbox_index(&sb, x, y)] = y >= 40 ? Cell(sand) : MATERIAL_AIR
@@ -1458,7 +955,7 @@ test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
 	terrain_with_sandbox := Terrain{world = world, sandbox = &sb}
 
 	px := f32(sb.origin_x + 32)
-	py := f32(sb.origin_y + 40) // the world y of the sand row
+	py := f32(sb.origin_y + 40)
 
 	without := Player{x = px, y = py - 5, facing = 1}
 	for _ in 0 ..< 300 do player_step(&without, terrain_no_sandbox, {}, false)
@@ -1470,17 +967,12 @@ test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
 	testing.expectf(t, i32(math.floor(with.y)) == sb.origin_y + 40, "he must land on the sand row, got y=%f", with.y)
 }
 
-/*
-Sandbox physics reaching the player: dig the floor out from under him
-and he must fall through it, not hang on the rock the generator would
-still hold there underneath.
-*/
 @(test)
 test_digging_the_floor_out_from_under_him_makes_him_fall :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 200)
 	if !ok do return
 	defer destroy_flat_world(world)
-	carve_open_floor(world, 100) // air above row 100; rock at and below it
+	carve_open_floor(world, 100)
 
 	sb, sb_ok := sandbox_make(64, 64, 1)
 	if !testing.expect(t, sb_ok, "the sandbox must open") do return
@@ -1493,29 +985,13 @@ test_digging_the_floor_out_from_under_him_makes_him_fall :: proc(t: ^testing.T) 
 	for _ in 0 ..< 10 do player_step(&p, terrain, {}, false)
 	testing.expect(t, p.on_ground, "he must be standing on the sandbox's copy of the rock floor first")
 
-	// Dig the floor out from under him: sandbox-local (32,30) is world
-	// (72,100), exactly where he stands.
 	sandbox_dig(&sb, world.materials, 32, 30, 6, 255)
 
-	// A handful of ticks, not a long settle: the dig is a disc, not a
-	// bottomless shaft, so given long enough he falls clean through it
-	// and lands again on the rock below. This only has to catch him
-	// leaving the ground he started on.
 	for _ in 0 ..< 5 do player_step(&p, terrain, {}, false)
 	testing.expect(t, !p.on_ground, "the floor is gone from the sandbox: he must fall through it")
 	testing.expectf(t, p.vy > 0, "gravity must be pulling him down through the hole, got vy=%f", p.vy)
 }
 
-// A sandbox filled with one material, placed so that it covers the
-// wizard and everything his beam can reach. The beam is a march out
-// from his chest, so a sandbox that does not hold his chest is a
-// sandbox the beam never starts in.
-//
-// Rock is the medium every test of the shape of the cut uses, because
-// rock crumbles into gravel: a cell that was cut reads as cut whether
-// the beam left air there or a grain flew back into it. In sand, which
-// crumbles into itself, a cut cell and a cell a grain landed in are
-// the same material and the shape cannot be measured at all.
 @(private = "file")
 dig_test_sandbox :: proc(t: ^testing.T, world: World, p: Player, name: string) -> (sb: Sandbox, ok: bool) {
 	material, found := find_material_index(world.materials, name)
@@ -1531,8 +1007,6 @@ dig_test_sandbox :: proc(t: ^testing.T, world: World, p: Player, name: string) -
 	return sb, true
 }
 
-// What the beam cut, in cells of the sandbox: the count of cells no
-// longer holding `material` inside a box around his chest.
 @(private = "file")
 dig_test_count_cut :: proc(sb: ^Sandbox, p: Player, material: Cell) -> (cut: int) {
 	for i in 0 ..< len(sb.cells) {
@@ -1541,13 +1015,6 @@ dig_test_count_cut :: proc(sb: ^Sandbox, p: Player, material: Cell) -> (cut: int
 	return cut
 }
 
-/*
-The beam follows the cursor, not the way he walks.
-
-This is the whole of what the aim bought, so it is the first thing
-tested: he faces right, the aim points up, and the cut has to be
-above him and nowhere near the cell the old disc would have cleared.
-*/
 @(test)
 test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1569,15 +1036,12 @@ test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.
 	sx := cx - sb.origin_x
 	sy := cy - sb.origin_y
 
-	// Straight up from the chest, the whole reach of the beam.
 	for step in i32(1) ..= PLAYER_DIG_RANGE {
 		testing.expectf(
 			t, sandbox_cell(&sb, sx, sy - step) != rock,
 			"the beam aimed up must clear the cell %d above his chest", step,
 		)
 	}
-	// Where the old disc dug, level with his chest and ahead of his
-	// facing, nothing may have moved but the width of the kerf.
 	ahead := sx + PLAYER_DIG_WIDTH
 	testing.expect(
 		t, sandbox_cell(&sb, ahead, sy) == rock,
@@ -1585,11 +1049,6 @@ test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.
 	)
 }
 
-/*
-The kerf is the cut he then has to fit through, so it is measured
-across and held to PLAYER_DIG_WIDTH. A slit narrower than the body is
-a tunnel he can carve and never enter.
-*/
 @(test)
 test_the_kerf_is_wide_enough_for_his_body :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1607,7 +1066,7 @@ test_the_kerf_is_wide_enough_for_his_body :: proc(t: ^testing.T) {
 	player_dig(p, terrain)
 
 	cx, cy := player_centre(p)
-	sx := cx - sb.origin_x + PLAYER_DIG_RANGE / 2 // half way out, clear of both ends
+	sx := cx - sb.origin_x + PLAYER_DIG_RANGE / 2
 	sy := cy - sb.origin_y
 
 	clear_cells := 0
@@ -1624,10 +1083,6 @@ test_the_kerf_is_wide_enough_for_his_body :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-Bedrock is a wall to him, and the beam has to stop at it rather than
-reach through it. This is the shadow a blast casts, said for a beam.
-*/
 @(test)
 test_the_digger_stops_at_what_it_cannot_cut :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1648,7 +1103,6 @@ test_the_digger_stops_at_what_it_cannot_cut :: proc(t: ^testing.T) {
 	sx := cx - sb.origin_x
 	sy := cy - sb.origin_y
 
-	// A bedrock pane across the beam, half way out.
 	wall := sx + PLAYER_DIG_RANGE / 2
 	for y in i32(0) ..< sb.height do sb.cells[sandbox_index(&sb, wall, y)] = Cell(bedrock)
 
@@ -1669,15 +1123,6 @@ test_the_digger_stops_at_what_it_cannot_cut :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-The cuttings fly. A beam through rock leaves gravel behind its own
-frontier, because rock crumbles into gravel and the throw goes back
-down the hole the beam just opened.
-
-The count is loose on purpose: which cells fly is a hash of the place
-and the tick (docs/physics.md, "The step is deterministic"), and a
-test that named the exact cells would be a test of the hash.
-*/
 @(test)
 test_the_digger_throws_its_cuttings_back_down_the_hole :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1709,10 +1154,6 @@ test_the_digger_throws_its_cuttings_back_down_the_hole :: proc(t: ^testing.T) {
 	)
 }
 
-// A cut cell that cannot fall is vapour, not a grain hanging in the
-// air. Sand is a powder with no crumbled form of its own, so it flies
-// as itself; that is the case this holds, because the other one (a
-// solid with no crumbled form) leaves nothing to look for.
 @(test)
 test_a_thrown_grain_is_something_that_can_fall :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1732,11 +1173,6 @@ test_a_thrown_grain_is_something_that_can_fall :: proc(t: ^testing.T) {
 	}
 }
 
-/*
-Holding the button cuts, every tick, through the same player_step the
-window calls. This is the button end of the tool, where the four tests
-above are the beam end of it.
-*/
 @(test)
 test_holding_dig_cuts_the_sandbox_where_the_aim_points :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1768,13 +1204,11 @@ test_holding_dig_cuts_the_sandbox_where_the_aim_points :: proc(t: ^testing.T) {
 	)
 }
 
-// The two ends of the aim have to agree, or the beam points one way
-// and the picture of it points another.
 @(test)
 test_an_aim_round_trips_through_its_byte_of_turn :: proc(t: ^testing.T) {
 	cases := []struct{dx, dy: f32, aim: u8, name: string} {
 		{1, 0, PLAYER_AIM_RIGHT, "right"},
-		{0, 1, PLAYER_AIM_DOWN, "down"},   // y grows downward
+		{0, 1, PLAYER_AIM_DOWN, "down"},
 		{-1, 0, PLAYER_AIM_LEFT, "left"},
 		{0, -1, PLAYER_AIM_UP, "up"},
 	}
@@ -1794,23 +1228,6 @@ test_an_aim_round_trips_through_its_byte_of_turn :: proc(t: ^testing.T) {
 	testing.expect(t, player_aim_facing(PLAYER_AIM_UP + 32) == 1, "the right half of the circle faces right")
 }
 
-/*
-A grain that is still falling is not a floor, and the same grain once
-it lands is.
-
-Both halves in one test, because either alone is half a rule: a
-wizard who falls through settled sand has no ground at all, and a
-wizard who stands on sand that is pouring past him is standing on
-something the eye can see is not there.
-*/
-/*
-A press that arrives just before the landing still jumps.
-
-The shape of this test is the coyote test's, run the other way round.
-That one drops him off a ledge and presses later and later. This one
-drops him toward the ground and presses earlier and earlier, and the
-press has to still be there when his feet arrive.
-*/
 @(test)
 test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 40, 200)
@@ -1819,8 +1236,6 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 	carve_open_floor(world, 150)
 	terrain := Terrain{world = world}
 
-	// Falling toward the floor, far enough up that the press below is
-	// made well clear of it.
 	falling := Player{x = 20, y = 100, facing = 1}
 	for _ in 0 ..< 200 {
 		player_step(&falling, terrain, {}, false)
@@ -1828,7 +1243,6 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 	}
 	if !testing.expect(t, falling.on_ground, "he must reach the floor with no input at all") do return
 
-	// The tick he landed on, counted from a fresh drop.
 	land_tick := 0
 	drop := Player{x = 20, y = 100, facing = 1}
 	for !drop.on_ground && land_tick < 200 {
@@ -1836,10 +1250,6 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 		land_tick += 1
 	}
 
-	// Press earlier and earlier before the landing and find the first
-	// press that is too early to survive it. The buffer holds a press
-	// for PLAYER_JUMP_BUFFER_TICKS ticks counting the one it was made
-	// on, so that is exactly the press this must be.
 	first_failing_early := -1
 	for early in 0 ..= int(PLAYER_JUMP_BUFFER_TICKS) + 3 {
 		trial := Player{x = 20, y = 100, facing = 1}
@@ -1852,8 +1262,6 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 		if !jumped && first_failing_early == -1 do first_failing_early = early
 	}
 
-	// A press older than the buffer has to be forgotten, or a key held
-	// down through a fall would bounce him off the ground for ever.
 	testing.expectf(
 		t,
 		first_failing_early == int(PLAYER_JUMP_BUFFER_TICKS),
@@ -1862,8 +1270,6 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 	)
 }
 
-// On the ground the buffer is set and spent in the same tick, so a
-// plain jump has to be exactly the jump it always was.
 @(test)
 test_the_jump_buffer_changes_nothing_about_a_jump_from_the_ground :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 40, 200)
@@ -1898,15 +1304,12 @@ test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
 	if !testing.expect(t, sb_ok, "the sandbox must open") do return
 	defer sandbox_destroy(&sb)
 
-	// A floor for the grain to land on, and one grain well above it.
 	floor_row := i32(40)
 	for x in i32(0) ..< sb.width do sandbox_paint(&sb, world.materials, x, floor_row, 0, Cell(rock))
 	sandbox_paint(&sb, world.materials, 16, 4, 0, Cell(sand))
 
 	terrain := Terrain{world = world, sandbox = &sb}
 
-	// One tick, and the grain is in the air with the last tick's move
-	// still on it.
 	sandbox_step(&sb, world.materials)
 	grain_y := i32(-1)
 	for y in i32(0) ..< floor_row {
@@ -1918,8 +1321,6 @@ test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
 		"a grain that moved on the last tick must not hold him up",
 	)
 
-	// Long enough to land and settle. The tick it lands still counts as
-	// a move; the tick after it does not.
 	for _ in 0 ..< 64 do sandbox_step(&sb, world.materials)
 	testing.expect(
 		t, sandbox_cell(&sb, 16, floor_row - 1) == Cell(sand),
@@ -1935,15 +1336,6 @@ test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-He flies behind the falling pixels.
-
-One grain is the whole of the case: a horizontal move tests the full
-PLAYER_BODY_H leading column, so one solid cell anywhere in it is a
-wall. The two halves run the same tick from the same position against
-the same grain, and the only difference between them is whether that
-grain is still moving.
-*/
 @(test)
 test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)
@@ -1954,14 +1346,10 @@ test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc
 	sand, sand_found := find_material_index(world.materials, "Sand")
 	if !testing.expect(t, sand_found, "Sand must exist") do return
 
-	// The grain sits in the column his leading edge reaches next, level
-	// with his chest, so nothing but that one cell can stop him.
 	start := Player{x = 40, y = 40, vx = PLAYER_RUN_SPEED, facing = 1}
 	grain_x := i32(start.x) + PLAYER_BODY_W/2
 	_, chest := player_centre(start)
 
-	// Falling: paint the grain, step the sandbox once so the move is on
-	// it, then give him one tick.
 	falling_sb, falling_ok := sandbox_make(128, 128, 1)
 	if !testing.expect(t, falling_ok, "the sandbox must open") do return
 	defer sandbox_destroy(&falling_sb)
@@ -1971,11 +1359,9 @@ test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc
 	falling := start
 	player_step(&falling, Terrain{world = world, sandbox = &falling_sb}, {.Right, .Run}, false)
 
-	// Landed: the same grain, in the same cell, with no move on it.
 	landed_sb, landed_ok := sandbox_make(128, 128, 1)
 	if !testing.expect(t, landed_ok, "the sandbox must open") do return
 	defer sandbox_destroy(&landed_sb)
-	// Where the falling grain ended up, so the two runs face the same cell.
 	for y in i32(0) ..< landed_sb.height {
 		if sandbox_cell(&falling_sb, grain_x, y) != Cell(sand) do continue
 		sandbox_paint(&landed_sb, world.materials, grain_x, y, 0, Cell(sand))
@@ -1984,8 +1370,6 @@ test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc
 	landed := start
 	player_step(&landed, Terrain{world = world, sandbox = &landed_sb}, {.Right, .Run}, false)
 
-	// One tick at a run is 1.2 cells, so this is his leading edge
-	// crossing the grain's column, not him clearing the whole grain.
 	testing.expectf(
 		t, falling.x > start.x,
 		"a grain still in the air must not stop him: he moved to %f from %f", falling.x, start.x,
@@ -2038,15 +1422,6 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-Beside the hole, not in it.
-
-The two tests above say the spawn cell is solid and the body box is
-clear, which a cell on the very lip of a mouth also satisfies. Neither
-of them says he is still there a second later. This runs him with no
-buttons held, which is what a player sees before touching anything: if
-the spawn hangs him over the edge, gravity finds out.
-*/
 @(test)
 test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
 	s: Sim
@@ -2074,13 +1449,6 @@ test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
 	testing.expect(t, player_body_clear(terrain, p.x, p.y), "and still clear of the ground")
 }
 
-/*
-The clear channel through one WANG_SEAM band of a tile: the cells open
-through every row (north or south) or every column (east or west) of
-the band, not just one of them. A body that only needs to clear one
-row of the band could still be pinched by rock in another, so the
-intersection across the whole band is what actually gets him through.
-*/
 @(private = "file")
 tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table, side: Wang_Band) -> int {
 	is_clear :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table, x, y: i32) -> bool {
@@ -2090,9 +1458,6 @@ tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table,
 		return state != .Solid && state != .Powder
 	}
 
-	// The longest unbroken run, not the total. A body passes through one
-	// opening or none: a band with two gaps of six cells holds twelve
-	// clear cells and stops a body of seven.
 	longest, run := 0, 0
 	count :: proc(open: bool, longest, run: ^int) {
 		run^ = open ? run^ + 1 : 0
@@ -2101,7 +1466,6 @@ tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table,
 
 	switch side {
 	case .North, .South:
-		// The opening runs along x, so this band limits how WIDE he can be.
 		y0 : i32 = side == .North ? 0 : TILE_SIZE - WANG_SEAM
 		for x in i32(WANG_SEAM) ..< TILE_SIZE - WANG_SEAM {
 			open := true
@@ -2114,7 +1478,6 @@ tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table,
 			count(open, &longest, &run)
 		}
 	case .East, .West:
-		// The opening runs along y, so this band limits how TALL he can be.
 		x0 : i32 = side == .West ? 0 : TILE_SIZE - WANG_SEAM
 		for y in i32(WANG_SEAM) ..< TILE_SIZE - WANG_SEAM {
 			open := true
@@ -2131,32 +1494,12 @@ tile_band_channel :: proc(set: Tile_Set, id: Tile_Id, materials: Material_Table,
 	return longest
 }
 
-/*
-The regression guard for the whole feature.
-
-For every tile of every biome that owns a set, for every side that
-carries edge colour 1, this measures the clear channel through that
-side's WANG_SEAM band and holds it to what the body actually needs. A
-north or south band's opening runs along x and so limits how wide he
-can be; an east or west band's opening runs along y and limits how
-tall. Reseed a tile set with a narrower mouth and this test says so
-before a player finds out.
-
-It holds the sets to two different floors. The per-tile one is the
-body: a channel under it seals him in. The one at the end is the
-world: a channel over the body and under several of it is a world he
-fits through and does not walk through, which is what the sets used to
-draw and what PLAYER_WORLD_CHANNEL now refuses.
-*/
 @(test)
 test_the_player_fits_the_world :: proc(t: ^testing.T) {
 	s: Sim
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
-	// The narrowest channel any tile offers. It is checked at the end,
-	// because a set drawn as solid rock would pass every test above by
-	// having no open side at all.
 	measured_min := int(TILE_SIZE)
 
 	for b, bi in s.world.biomes.biomes {
@@ -2206,15 +1549,12 @@ test_the_player_fits_the_world :: proc(t: ^testing.T) {
 		}
 	}
 
-	// A set with no open side at all would satisfy every test above by
-	// never entering one, and would be a world of sealed boxes.
 	testing.expectf(
 		t,
 		measured_min <= TILE_SIZE - 2 * WANG_SEAM,
 		"no tile of any shipped set carries an open edge, so nothing measured a channel",
 	)
 
-	// And the world is drawn to him, not merely around him.
 	testing.expectf(
 		t,
 		measured_min >= PLAYER_WORLD_CHANNEL,

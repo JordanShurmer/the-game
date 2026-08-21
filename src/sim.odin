@@ -4,32 +4,9 @@ import "core:fmt"
 import "core:os"
 import "core:testing"
 
-/*
-The game state, with no window in it.
-
-A Sim holds everything the game knows: the authored world, the state
-of both editors, the sandbox that runs physics, and the input queue
-that feeds it. It holds nothing that needs a screen.
-
-Two programs own one of these. The game window wraps it in an App and
-adds a camera and a texture. The MCP server drives it with no camera
-at all. Both call the same procedures, so a model and a mouse cannot
-build different worlds.
-
-A tick has two parts and always in this order:
-
-  1. Take the commands of the tick from the queue and apply them.
-  2. Step the sandbox.
-
-Nothing else writes to the sandbox. That single rule is what makes a
-run repeatable: the sandbox is a function of the seed, the region it
-was filled from, and the command list.
-*/
-
 MATERIALS_PATH :: "data/materials.txt"
 BIOMES_PATH :: "data/biomes.txt"
 
-// The map starts this big when there is no image on disk yet.
 STARTER_MAP_W :: 16
 STARTER_MAP_H :: 16
 
@@ -37,33 +14,6 @@ SANDBOX_DEFAULT_WIDTH  :: 128
 SANDBOX_DEFAULT_HEIGHT :: 72
 SANDBOX_DEFAULT_DELAY  :: 2
 
-/*
-The square of world the physics runs on under the wizard. See
-docs/physics.md, "The wizard meets the sandbox".
-
-It was one region, and it is now sixteen of them. What that buys is
-what the sandbox forgets: a square he leaves is regenerated from the
-map rather than restored from what he did to it, so at 512 a wizard
-who walked out of a cave and back could find his tunnel filled in. At
-2048 the edge is 157 of his own heights away.
-
-What it costs, measured on the shipped map where he spawns: 0.57 ms a
-tick settled, against a 16.7 ms frame, and 16 MB. Re-opening on a
-crossing costs 11 ms, one frame, and he has to run flat out for 27
-seconds in one direction to earn it.
-
-Bigger is not free, and the measurement says where it stops. 4096
-holds 8 by 8 regions and costs 31 ms a tick, which is already past a
-frame, and the whole 8192 map costs 140. The cost is not the cells: a
-block of 4096 by 4096 that holds only mine settles at 7 ms, and the
-same 4096 square with a Lake in it does not settle at all, because a
-liquid region beside a cave system drains into it for ever. So the
-number this can climb to is a question about what the map is made of,
-not about how fast the step is.
-
-It is a power of two and a whole number of chunks, which SANDBOX_CHUNK
-needs, and it no longer has anything to do with cells_per_pixel.
-*/
 SANDBOX_PLAY_SIZE :: 2048
 
 #assert(
@@ -73,17 +23,13 @@ SANDBOX_PLAY_SIZE :: 2048
 #assert(SANDBOX_PLAY_SIZE % SANDBOX_CHUNK == 0, "the play sandbox must be a whole number of chunks")
 
 Sim :: struct {
-	world:     World,       // the authored world: materials, biomes, map, tiles
-	player:    Player,      // the wizard; see docs/player.md
-	editor:    Editor,      // biome map editing state
-	tile_edit: Tile_Editor, // tile editing state
-	sandbox:   Sandbox,     // the rectangle that runs physics
-	queue:     Input_Queue, // commands waiting for their tick
+	world:     World,
+	player:    Player,
+	editor:    Editor,
+	tile_edit: Tile_Editor,
+	sandbox:   Sandbox,
+	queue:     Input_Queue,
 
-	// Whether the sandbox follows the wizard's region. sim_load leaves
-	// this false, so the MCP server and every test that opens a sandbox
-	// by hand keep exactly the sandbox they asked for; only a caller
-	// that says sim_play_begin gets the sandbox re-snapped under him.
 	follow_player: bool,
 
 	loaded: bool,
@@ -100,12 +46,6 @@ Sim_Error :: enum u8 {
 	Bad_Size,
 }
 
-/*
-Load every data file and open a sandbox on the world.
-
-Each failure says what is wrong and where, because a half-loaded world
-is worse than no world.
-*/
 sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOMES_PATH) -> Sim_Error {
 	materials, mat_ok := load_materials(materials_path)
 	if !mat_ok {
@@ -113,7 +53,6 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		return .Materials_Not_Found
 	}
 
-	// A sandbox clears to zeroed memory, so Air must be index 0.
 	air, air_found := find_material_index(materials, "Air")
 	if !air_found || air != int(MATERIAL_AIR) {
 		fmt.eprintfln("%s: Air must be the first material", materials_path)
@@ -163,14 +102,9 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 
 	editor_init(s)
 
-	// Beside a hole, not in it: world_find_spawn scans the shipped map
-	// for the mouth into the caves and stands him clear of its lip. He
-	// owns no allocation, so nothing here needs a matching teardown.
 	s.player = player_spawn(s.world)
 	s.loaded = true
 
-	// Open a sandbox on the world origin, so a client can run physics
-	// without setting one up first.
 	sim_open_sandbox(s, SANDBOX_DEFAULT_WIDTH, SANDBOX_DEFAULT_HEIGHT, 0, 0, 1, SANDBOX_DEFAULT_DELAY)
 	return .None
 }
@@ -187,14 +121,6 @@ sim_unload :: proc(s: ^Sim) {
 	s^ = {}
 }
 
-/*
-Open a sandbox on a rectangle of the authored world.
-
-The cells come from the generator, so the physics starts from what the
-player would walk into. This is the join between the two halves of the
-game: paint a tile, open a sandbox on a region of that biome, and the
-paint is what falls.
-*/
 sim_open_sandbox :: proc(s: ^Sim, width, height, origin_x, origin_y: i32, seed: u64, delay: u8) -> Sim_Error {
 	sb, ok := sandbox_make(width, height, seed)
 	if !ok do return .Bad_Size
@@ -207,29 +133,16 @@ sim_open_sandbox :: proc(s: ^Sim, width, height, origin_x, origin_y: i32, seed: 
 	return .None
 }
 
-/*
-Refill the sandbox from the world, keeping its size and its place.
-
-The editors change the world under a running sandbox. This is how a
-client sees an edit reach the physics: paint, refill, run.
-*/
 sim_refill_sandbox :: proc(s: ^Sim) {
 	sandbox_fill_from_world(&s.sandbox, s.world, s.sandbox.origin_x, s.sandbox.origin_y)
 	s.sandbox.tick = 0
 	input_queue_init(&s.queue, s.queue.delay)
 }
 
-// Put a command in the queue for a later tick. It does not run yet.
 sim_enqueue :: proc(s: ^Sim, command: Input_Command, at_tick: i64 = -1) -> (Input_Command, Enqueue_Status) {
 	return input_queue_push(&s.queue, s.sandbox.tick, command, at_tick)
 }
 
-/*
-Run `count` ticks.
-
-The commands of a tick run before the sandbox steps, so a command
-placed on tick N sees the world as it was at the end of tick N-1.
-*/
 sim_run :: proc(s: ^Sim, count: int) -> (applied: int) {
 	buffer: [INPUT_PER_SLOT]Input_Command
 
@@ -258,20 +171,10 @@ sim_apply :: proc(s: ^Sim, command: Input_Command) {
 	case .Dig:
 		sandbox_dig(&s.sandbox, s.world.materials, command.x, command.y, i32(command.radius), command_power(command))
 	case .Move:
-		// The same single implementation the window's direct path
-		// calls: docs/physics.md's "one path for a hand and a model."
 		sim_step_player(s, command.buttons, .Jump in command.pressed, u8(command.x))
 	}
 }
 
-/*
-The power an Explode or a Dig carries.
-
-Both ride the `material` field, because it is the spare u16 and a
-power is not a material anywhere else. A power is a u8, so a caller
-that writes a larger number gets the largest power rather than a
-number folded round to a small one.
-*/
 command_power :: proc(command: Input_Command) -> u8 {
 	return command.material > 255 ? 255 : u8(command.material)
 }
@@ -280,77 +183,17 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 	return find_material_index(s.world.materials, name)
 }
 
-/*
-One whole tick of the wizard.
-
-He is not on the Input_Queue (docs/player.md says why: held movement
-keys through the queue's delay is input lag, not fairness), so this is
-a second, simpler path into the Sim, taken directly rather than
-through sim_apply. The window keeps the fixed-step accumulator and
-calls this a whole number of times per frame; the Move command above
-calls it too, so both paths still run the one player_step.
-
-The Terrain built here is the whole of the join (docs/physics.md, "The
-wizard meets the sandbox"): a sandbox pointer only when s.follow_player
-says he is standing on the running physics, nil otherwise, so a caller
-that never asked to follow gets the same World-only collision the
-wizard always had. Following also re-snaps the sandbox after the
-move, in case this tick carried him out of that square.
-
-aim is where his digger points, one byte of turn (src/player.odin,
-PLAYER_AIM_RIGHT). It defaults the same way player_step's does, so a
-caller with nothing to point at does not have to name a direction.
-*/
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
 }
 
-/*
-Start following: open the play sandbox on the square the wizard is
-already standing in, and turn on the flag that keeps it there.
-
-sim_load does not call this. It opens its own sandbox at the world
-origin for the MCP server and for every test that wants a sandbox of
-its own choosing, and follow_player defaults to false, so none of
-those callers see their sandbox move out from under them. Only a
-caller that wants the play experience asks for it.
-*/
 sim_play_begin :: proc(s: ^Sim) {
 	s.follow_player = true
 	sim_follow_player(s)
 }
 
-/*
-Re-snap the play sandbox to the square the wizard is standing in, if
-it has moved.
-
-The square is a lattice of SANDBOX_PLAY_SIZE, not of regions. The
-sandbox used to snap to the region corner, which tied the physics to
-cells_per_pixel: a map painted at a larger region could not be
-followed at all, and that check and its silent fallback lived here.
-The size of the sandbox and the size of a region answer two different
-questions — how much world moves at once, and how much world one map
-pixel owns — and neither has to be the other. So the sandbox now owns
-its own lattice, the runtime check is a compile-time assert beside the
-constant, and cells_per_pixel is free to change without asking the
-physics first.
-
-floor_div, not a truncating divide, because a square can sit on the
-negative side of zero and the wizard spawns above it.
-
-What this costs, said plainly: a square he leaves and returns to is
-regenerated from the world, not restored from what he changed in it.
-The rung that fixes it outright is still a store of touched squares,
-keyed by their corner, which this phase does not build. What the size
-buys is that he has to walk 2048 cells, 157 of his own heights, to
-reach the edge of what is remembered, where it used to be 512. A
-re-snap also runs through sim_open_sandbox, which resets the input
-queue the same way any other call to it always has; a crossing is now
-rare enough, and the loss small enough, that this phase accepts it
-rather than adding a second way to open a sandbox that preserves one.
-*/
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
 
@@ -364,24 +207,6 @@ sim_follow_player :: proc(s: ^Sim) {
 	sim_open_sandbox(s, SANDBOX_PLAY_SIZE, SANDBOX_PLAY_SIZE, ox, oy, s.sandbox.seed, s.queue.delay)
 }
 
-// ------------------------------------------------------------
-// Loading the world files
-// ------------------------------------------------------------
-
-/*
-Read every authored tile, and write a flat one for any tile a set
-names but nobody has painted yet.
-
-This is the same bargain load_or_create_biome_map makes: a fresh
-checkout opens on a world you can see, and the files it writes are the
-files the editor saves. A biome that has just been given
-`generator = wang` gets a complete flat set, which draws exactly the
-world its old flat fill drew until somebody paints into it.
-
-A set that disagrees with itself still loads. It came from a pixel
-editor that knows nothing of the seam rule, and the way to fix it is
-to open it and press N, not to refuse to start.
-*/
 load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) -> (set: Tile_Set, ok: bool) {
 	loaded, result, id := load_tile_set(biomes, materials, true)
 
@@ -406,8 +231,6 @@ load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) 
 		return {}, false
 	}
 
-	// Say so once, at load, rather than letting the author find the
-	// broken seam in the world.
 	for b, i in biomes.biomes {
 		if b.tile_base == TILE_NONE do continue
 		conflict := wang_find_conflict(loaded, b)
@@ -424,13 +247,6 @@ load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) 
 	return loaded, true
 }
 
-/*
-Read every picture an image biome names.
-
-Unlike a tile set, there is no flat fallback to fall back to: the
-picture is the whole region, so a missing or wrong-sized file is a
-hard stop, reported the same way a bad tile is.
-*/
 load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (images: [][]Cell, ok: bool) {
 	loaded, result, bad_biome := load_image_set(biomes, materials)
 	if result.err != .None {
@@ -456,11 +272,6 @@ load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (im
 	return loaded, true
 }
 
-/*
-Read the map image, or paint a starter map and write it. A new
-checkout then opens on a world you can see, and the file it writes is
-the same file the editor saves.
-*/
 load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool) {
 	path := biomes.map_image_path
 
@@ -490,11 +301,6 @@ load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool
 	return m, true
 }
 
-/*
-A layered starter world: sky over a mine, sand and a lake below it,
-then oil, and deep rock at the bottom. Every pixel is painted, so the
-map is connected and can be saved as it is.
-*/
 make_starter_biome_map :: proc(biomes: Biome_Table) -> Biome_Map {
 	m := make_biome_map(STARTER_MAP_W, STARTER_MAP_H)
 
@@ -539,10 +345,6 @@ make_starter_biome_map :: proc(biomes: Biome_Table) -> Biome_Map {
 	return m
 }
 
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
-
 @(private = "file")
 new_sim :: proc(t: ^testing.T) -> Sim {
 	s: Sim
@@ -560,8 +362,6 @@ test_sim_opens_a_sandbox_on_the_world :: proc(t: ^testing.T) {
 	testing.expect(t, s.sandbox.height == SANDBOX_DEFAULT_HEIGHT)
 	testing.expect(t, s.sandbox.tick == 0)
 
-	// The sandbox is filled from the generator, so every cell must
-	// agree with what the world says is there.
 	for y in i32(0) ..< s.sandbox.height {
 		for x in i32(0) ..< s.sandbox.width {
 			expected := world_cell_at(s.world, s.sandbox.origin_x + x, s.sandbox.origin_y + y)
@@ -580,7 +380,6 @@ test_command_waits_for_its_tick :: proc(t: ^testing.T) {
 	s := new_sim(t)
 	defer sim_unload(&s)
 
-	// A bare sandbox, so the world behind does not hide the change.
 	sandbox_paint(&s.sandbox, s.world.materials, 0, 0, 1000, MATERIAL_AIR)
 
 	sand, _ := sim_material_index(&s, "Sand")
@@ -607,8 +406,6 @@ test_command_waits_for_its_tick :: proc(t: ^testing.T) {
 
 @(test)
 test_same_commands_give_the_same_sandbox :: proc(t: ^testing.T) {
-	// This is the check old network code ran every frame. Two machines
-	// with the same seed and the same input must agree.
 	run :: proc(t: ^testing.T) -> u64 {
 		s := new_sim(t)
 		defer sim_unload(&s)
@@ -637,8 +434,6 @@ test_same_commands_give_the_same_sandbox :: proc(t: ^testing.T) {
 
 @(test)
 test_arrival_order_does_not_change_the_sandbox :: proc(t: ^testing.T) {
-	// Two senders paint the same tick in a different arrival order. The
-	// queue sorts them, so both sandboxes must match.
 	build :: proc(t: ^testing.T, swap: bool) -> u64 {
 		s := new_sim(t)
 		defer sim_unload(&s)
@@ -680,8 +475,6 @@ test_a_command_for_a_passed_tick_still_runs :: proc(t: ^testing.T) {
 
 @(test)
 test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
-	// The whole join in one test: paint a tile, refill the sandbox from
-	// the world, and the paint is in the physics.
 	s := new_sim(t)
 	defer sim_unload(&s)
 
@@ -690,10 +483,6 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 	b := s.world.biomes.biomes[mine]
 	if !testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set") do return
 
-	// A region the mine owns. Map pixel (0,3) is Coalmine in the
-	// starter map, so it starts at world cell (0 - origin) * cpp. The
-	// sandbox is wider than one tile, so it reads several squares of
-	// the lattice and the whole set has to be painted.
 	cpp := s.world.biomes.cells_per_pixel
 	ox := (0 - s.world.biomes.origin_pixel_x) * cpp
 	oy := (3 - s.world.biomes.origin_pixel_y) * cpp
@@ -710,10 +499,6 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 	sandbox_census(&s.sandbox, counts)
 	testing.expect(t, counts[gold] == 128*128, "the painted set must fill the sandbox")
 }
-
-// ------------------------------------------------------------
-// The join: sim_play_begin, sim_follow_player, and the Move command
-// ------------------------------------------------------------
 
 @(test)
 test_sim_load_leaves_following_off_so_a_hand_opened_sandbox_stays_put :: proc(t: ^testing.T) {
@@ -758,12 +543,6 @@ test_sim_play_begin_opens_the_sandbox_on_the_players_square :: proc(t: ^testing.
 	)
 }
 
-/*
-Leaving the square re-snaps the sandbox origin to the new one. This
-carries him a whole square to the side directly, rather than walking
-him there tick by tick, because the crossing is what the test is
-about, not the walk that reaches it.
-*/
 @(test)
 test_sim_follow_player_re_snaps_the_sandbox_when_he_leaves_the_square :: proc(t: ^testing.T) {
 	s := new_sim(t)
@@ -782,15 +561,6 @@ test_sim_follow_player_re_snaps_the_sandbox_when_he_leaves_the_square :: proc(t:
 	testing.expect(t, s.sandbox.origin_x != before_x, "the origin must actually have moved")
 }
 
-/*
-And a region border is no longer a crossing.
-
-This is the whole of what the size buys, so it is worth a test of its
-own: the sandbox is sixteen regions now, and walking out of the one he
-spawned in leaves the physics, and everything he has changed in it,
-exactly where it was. Re-opening is what forgets, and this no longer
-re-opens.
-*/
 @(test)
 test_sim_follow_player_holds_across_a_region_border :: proc(t: ^testing.T) {
 	s := new_sim(t)
@@ -808,8 +578,6 @@ test_sim_follow_player_holds_across_a_region_border :: proc(t: ^testing.T) {
 	before_x := s.sandbox.origin_x
 	before_tick := s.sandbox.tick
 
-	// Far enough to be in the next region, near enough to be in the
-	// same sandbox square.
 	s.player.x = f32(before_x + cpp)
 	sim_follow_player(&s)
 
@@ -823,12 +591,6 @@ test_sim_follow_player_holds_across_a_region_border :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-A Move command through the queue must move him exactly as the direct
-path does, given the same inputs. This is the check docs/player.md
-asks for: "one path for a hand and a model" only holds if both paths
-call the same player_step and reach the same position.
-*/
 @(test)
 test_a_move_command_through_the_queue_matches_the_direct_path :: proc(t: ^testing.T) {
 	Recorded :: struct {

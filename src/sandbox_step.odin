@@ -2,102 +2,18 @@ package game
 
 import "core:mem"
 
-/*
-One tick of the sandbox.
-
-THE SHAPE OF THE OLD STEP, AND WHY IT CHANGED
-
-The old step walked one cell at a time and settled everything about
-that cell before it looked at the next one: a 32 byte Material load, a
-chain of early returns, and a running random generator drawn from a
-different number of times depending on which branch it took. Nothing
-in that shape can be done to two cells at once, because the answer for
-one cell depends on work already done for the cell beside it.
-
-This step is a row at a time, in four passes, and no pass carries an
-answer from one cell to the next:
-
-	LOAD    turns the row of material ids, and the rows above and
-	        below it, into weights and kinds. This is the only place
-	        the step reads the material table, and two of its three
-	        rows go through an asm template that reads that table 32
-	        cells at a time (src/sandbox_step_asm.odin).
-
-	HOT     is everything that is not a move: a lifetime running out,
-	        a reaction with a neighbour, fire spreading along fuel.
-	        Two comparisons find the cells that need it, which is few
-	        of a dry row and most of a wet one.
-
-	INTENT  compares the three rows and writes, for each cell, the one
-	        step it wants to take. It reads only, so it is a fixed
-	        list of comparisons repeated across the row.
-
-	APPLY   walks the cells that want to move and moves them.
-
-INTENT is the pass this shape exists for, because it is the one that
-looks at every cell and carries no answer from one cell to the next.
-sandbox_step_simd.odin is the same pass in vectors, and a test holds
-the two to the same answer. It is no longer where the tick is spent:
-in vectors it costs about a tenth, and LOAD and HOT cost about three
-quarters between them. See docs/physics.md, "Where the tick goes now",
-before making the step quicker: it holds the split by pass, and the
-two changes to HOT that were measured and thrown away.
-
-WEIGHT IS THE WHOLE MOVE RULE
-
-Air weighs nothing and a wall weighs everything (src/cell.odin), so
-"can this cell go there" is one comparison between two u16. Beyond the
-edge of the sandbox is a wall and a cell that already moved this tick
-is a wall, so the comparison needs no bounds test and no second flag.
-
-The scan still runs from the bottom row up, so a cell that falls does
-not fall again in the same tick, and a cell that moves is a wall for
-the rest of the tick, so every cell moves at most once.
-*/
-
-// ------------------------------------------------------------
-// The move rules, as comparisons between two weights
-// ------------------------------------------------------------
-
-// A cell sinks into anything lighter than itself. Air is lightest, so
-// this covers falling into empty space; a wall is heaviest, so it
-// covers refusing to enter a solid.
 sandbox_sinks :: #force_inline proc "contextless" (src, dst: u16) -> bool {
 	return dst < src
 }
 
-// A cell is under something it can change places with when that thing
-// is heavier than it and is not a wall.
 sandbox_heavier :: #force_inline proc "contextless" (src, dst: u16) -> bool {
 	return dst > src && dst != CELL_WALL
 }
 
-// A cell rises into empty space, or changes places with anything
-// heavier. This is how smoke climbs through air and how oil comes up
-// through water.
 sandbox_rises :: #force_inline proc "contextless" (src, dst: u16) -> bool {
 	return dst == CELL_AIR || sandbox_heavier(src, dst)
 }
 
-/*
-Whether a liquid gains anything by taking one step to the side.
-
-A liquid flows for two reasons: the floor falls away on that side, or
-something at least as heavy as itself rests on top and presses it out.
-A cell with neither reason holds still, which is what stops a settled
-pool swapping left and right for ever.
-
-A wall on top presses nothing. It is the roof of the cave the pool is
-in, and a pool that ran out from under its own roof would never
-settle.
-
-A hole with a fluid over it is left alone, because that fluid is about
-to fall into it. Without this rule the pool never packs: the scan
-reaches a row before the row above it, a cell takes the hole beside it
-and leaves a hole where it was, and the cell that was going to drop
-into the first hole is refused. The holes then walk from side to side
-for ever and the pool keeps every one of them.
-*/
 sandbox_spreads :: #force_inline proc "contextless" (self, side, below_side, above, above_side: u16) -> bool {
 	room      := side == CELL_AIR
 	unclaimed := above_side == CELL_AIR || above_side == CELL_WALL
@@ -106,14 +22,6 @@ sandbox_spreads :: #force_inline proc "contextless" (self, side, below_side, abo
 	return room && unclaimed && (downhill || pressed)
 }
 
-/*
-The weight of one cell, with the two rules that let every comparison
-above skip its bounds test: beyond the edge of the sandbox is a wall,
-and a cell that already moved this tick is a wall.
-
-This is the only cell read in the step that goes through the material
-table, and the LOAD pass is this proc across a row.
-*/
 sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> u16 {
 	if !sandbox_in_bounds(sb, x, y) do return CELL_WALL
 	i := sandbox_index(sb, x, y)
@@ -121,31 +29,10 @@ sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, 
 	return table.weight[sb.cells[i]]
 }
 
-// ------------------------------------------------------------
-// The tick
-// ------------------------------------------------------------
-
-/*
-Run one tick of the simulation.
-
-Only the dirty rectangles are scanned; a chunk with nothing dirty in
-it costs nothing. See docs/physics.md step 3.
-*/
 sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
-	// Two sets, not one. `dirty` is what this scan reads; `next_dirty`
-	// is what sandbox_mark builds while this tick runs, and what a
-	// command already built between the last tick and this one.
-	// Swapping before any cell is touched is what stops a mark made
-	// mid-scan from dragging this tick's own work past where the scan
-	// already is (rule 1): a single falling grain must not turn into a
-	// scan that chases it down the sandbox.
 	sb.dirty, sb.next_dirty = sb.next_dirty, sb.dirty
 	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
 
-	// Clear `moved` only under this tick's dirty rectangles, and clear
-	// all of it before any cell is stepped. A cell reads `moved` on
-	// neighbours the row scan below has not reached yet, so every
-	// dirty cell must read false before the scan starts.
 	for r in sb.dirty {
 		if r.min_x > r.max_x do continue
 		width := int(r.max_x - r.min_x + 1)
@@ -167,22 +54,9 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 	sb.tick += 1
 }
 
-/*
-The four passes, over the cells x0 to x1 of one row.
-
-Two of the four are skipped outright most of the time, and LOAD is
-what says so: it reads the row once and reports whether any cell in it
-has a lifetime or a reaction, so a row of rock and air pays nothing for
-the hot pass. INTENT reports the same about movement, so a row that
-has settled pays nothing for the apply pass either.
-*/
 sandbox_step_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 	if sandbox_load_row(sb, table, y, x0, x1) {
 		if sandbox_hot_row(sb, table, y, x0, x1) {
-			// The hot pass wrote cells, so what LOAD read is out of
-			// date. This costs a second read of a row now and then; it
-			// saves a flag on every cell that would say whether the
-			// first read is still good.
 			sandbox_load_row(sb, table, y, x0, x1)
 		}
 	}
@@ -191,33 +65,7 @@ sandbox_step_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 	}
 }
 
-// ------------------------------------------------------------
-// LOAD
-// ------------------------------------------------------------
-
-/*
-Read three rows of cells into the numbers the passes below compare.
-
-The rows are indexed by world x plus one, so the cell before the row
-and the cell after it are real entries holding CELL_WALL rather than a
-bounds test in the inner loop. sandbox_make writes those two entries
-once and nothing ever writes them again.
-
-A cell that already moved this tick is a wall, and a wall never moves,
-so it needs no kind of its own. `wall` below is all ones for such a
-cell and nothing for every other one, which turns both of those rules
-into one bitwise operation apiece and leaves no branch in the loop.
-
-The result reports whether any cell of this row needs the hot pass.
-The loop has the material in hand anyway, so the answer is free, and
-it saves a second walk of the row for the rows that have no lifetime
-and no reaction in them.
-*/
 sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (hot: bool) {
-	// One cell either side of the span, because a cell looks at its
-	// neighbours. That one cell is also the whole margin the vector
-	// pass reads past its last lane, so these two clamps and
-	// SANDBOX_LANES have to be read together.
 	lo := max(x0 - 1, 0)
 	hi := min(x1 + 1, sb.width - 1)
 	r  := &sb.rows
@@ -238,16 +86,6 @@ sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) ->
 	return hot
 }
 
-/*
-One row of weights. Beyond the top and the bottom of the sandbox is a
-wall, the same as beyond its sides.
-
-Two of the three rows LOAD reads come through here, so this is where
-most of the pass is spent. sandbox_weights_span does the middle of the
-row 32 cells at a time; the cells before the first whole group and
-after the last one are the loop below, which is also the rule the wide
-one is read against.
-*/
 sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y, lo, hi: i32) {
 	if y < 0 || y >= sb.height {
 		for x in lo ..= hi do out[x + 1] = CELL_WALL
@@ -267,30 +105,10 @@ sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y,
 	}
 }
 
-// The weight of one cell of a row, with the rule that a cell which
-// already moved this tick is a wall. This is the rule weights_32 in
-// src/sandbox_step_asm.odin answers 32 cells at a time.
 sandbox_weight_of :: #force_inline proc(sb: ^Sandbox, table: Material_Table, i: int) -> u16 {
 	return table.weight[sb.cells[i]] | (u16(0) - u16(sb.moved[i]))
 }
 
-// ------------------------------------------------------------
-// HOT
-// ------------------------------------------------------------
-
-/*
-Everything that is not a move: a lifetime running out, a reaction with
-a neighbour, and fire spreading along fuel.
-
-A lifetime above zero and a work set that is not empty are the two
-comparisons that find the cells with something to do. On the shipped
-world that is most of the cells of a wet row and few of a dry one,
-because water, dirt, rock and sand all have a row in the reaction
-table.
-
-The result reports whether any cell changed, because a cell that
-changed makes what LOAD read out of date.
-*/
 sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (changed: bool) {
 	base := sandbox_index(sb, 0, y)
 	for x in x0 ..= x1 {
@@ -299,11 +117,6 @@ sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> 
 
 		if sb.lifetime[i] > 0 {
 			sb.lifetime[i] -= 1
-			// A cell counting down does not move and touches no
-			// neighbour, so nothing else would keep its chunk awake.
-			// Without this the countdown would only finish by chance,
-			// and fire would freeze in mid air instead of turning to
-			// smoke on schedule (docs/physics.md step 3, rule 4).
 			sandbox_mark(sb, x, y)
 			if sb.lifetime[i] == 0 {
 				sandbox_put(sb, table, i, Cell(table.decays_to[sb.cells[i]]))
@@ -323,40 +136,15 @@ sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> 
 
 		if .Burns in work && sandbox_spread_fire(sb, table, x, y) {
 			changed = true
-			// A flame beside fuel holds still, so the fire runs the
-			// length of a trail of oil instead of climbing away from
-			// it on the first tick. Lava burns what it touches too and
-			// is not a flame, so it keeps flowing.
 			if .Flame in work {
 				sb.moved[i] = true
 			}
-			// A flame that holds still beside fuel still has work next
-			// tick: the fuel may catch a tick later, and the flame's
-			// own lifetime is still running down.
 			sandbox_mark(sb, x, y)
 		}
 	}
 	return changed
 }
 
-/*
-React with one neighbour.
-
-One roll a cell a tick, and it is rolled against a side that has a
-partner on it. Rolling against a side with nothing on it would only
-make a certain reaction wait for luck it does not need: a flame and
-the water above it change places on the tick they meet, so a probe
-that lands on one of the three empty sides is the only chance the pair
-ever gets. See docs/physics.md, "The reaction table".
-
-The four sides are walked anyway, because whether ANY side could react
-decides whether this cell is worth a look next tick. Without that a
-cell falls asleep with a live partner beside it, and a pool of acid
-stops eating the rock it is still touching (docs/physics.md step 3,
-rule 4).
-
-The result reports whether this cell changed.
-*/
 sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 	sides := [4][2]i32{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 
@@ -369,9 +157,6 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 	for s, k in sides {
 		nx, ny := x + s[0], y + s[1]
 		if !sandbox_in_bounds(sb, nx, ny) do continue
-		// A neighbour that already changed this tick is not a safe
-		// partner: reacting with it now would overwrite what just
-		// wrote it there.
 		ni := sandbox_index(sb, nx, ny)
 		if sb.moved[ni] do continue
 		if table.reaction_at[int(material) * n + int(sb.cells[ni])] < 0 do continue
@@ -393,30 +178,6 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 	return true
 }
 
-// ------------------------------------------------------------
-// INTENT
-// ------------------------------------------------------------
-
-/*
-The one step each cell of the row wants to take, as an offset.
-
-sandbox_intent_row in sandbox_step_simd.odin does this a vector of
-cells at a time, and is what actually runs. This is the same rules a
-cell at a time: it is what that pass is read against, what a test
-holds it to, and what runs on the few cells at the end of a row that
-do not fill a vector.
-
-Nothing here writes a cell, so no answer depends on any other answer.
-The questions below are asked of every cell in the row, and the first
-one the cell is allowed to use and that holds decides where it goes.
-That list is the whole movement model of the game, and the numbers on
-it are the numbers sandbox_intent_row carries on the same ten
-questions.
-
-`near` is the side the cell tries first and `far` is the other one.
-Which is which comes from a hash of the place and the tick, so a cell
-gets the same side however the scan reaches it.
-*/
 sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 	r := &sb.rows
 	i := int(x) + 1
@@ -434,52 +195,34 @@ sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 	climbs := kind == .Riser
 
 	switch {
-	// A liquid with something heavier resting on it changes places
-	// with it. Without this rule the scan order alone decides which of
-	// the pair moves, and two liquids never layer.
-	case floats && sandbox_heavier(w, above): // 1
+	case floats && sandbox_heavier(w, above):
 		return 0, -1
 
-	case falls && sandbox_sinks(w, r.below[i]): // 2
+	case falls && sandbox_sinks(w, r.below[i]):
 		return 0, 1
-	case falls && sandbox_sinks(w, r.below[near]): // 3
+	case falls && sandbox_sinks(w, r.below[near]):
 		return i16(side), 1
-	case falls && sandbox_sinks(w, r.below[far]): // 4
+	case falls && sandbox_sinks(w, r.below[far]):
 		return i16(-side), 1
 
-	case climbs && sandbox_rises(w, r.above[i]): // 5
+	case climbs && sandbox_rises(w, r.above[i]):
 		return 0, -1
-	case climbs && sandbox_rises(w, r.above[near]): // 6
+	case climbs && sandbox_rises(w, r.above[near]):
 		return i16(side), -1
-	case climbs && sandbox_rises(w, r.above[far]): // 7
+	case climbs && sandbox_rises(w, r.above[far]):
 		return i16(-side), -1
 
-	case floats && sandbox_spreads(w, r.here[near], r.below[near], above, r.above[near]): // 8
+	case floats && sandbox_spreads(w, r.here[near], r.below[near], above, r.above[near]):
 		return i16(side), 0
-	case floats && sandbox_spreads(w, r.here[far], r.below[far], above, r.above[far]): // 9
+	case floats && sandbox_spreads(w, r.here[far], r.below[far], above, r.above[far]):
 		return i16(-side), 0
 
-	// A gas under a ceiling gathers along it rather than sitting in
-	// one column.
-	case climbs && r.here[near] == CELL_AIR: // 10
+	case climbs && r.here[near] == CELL_AIR:
 		return i16(side), 0
 	}
 	return 0, 0
 }
 
-// ------------------------------------------------------------
-// APPLY
-// ------------------------------------------------------------
-
-/*
-Move the cells that want to move.
-
-INTENT settled every rule, so this pass only has to find out whether
-the place a cell wants is still free. It can have been taken since:
-two cells of a row can want the same cell below them, and the one this
-pass reaches first gets it. The direction the pass walks the row flips
-with the tick, so neither end of the row wins for ever.
-*/
 sandbox_apply_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 	left_first := (sb.tick & 1) == 0
 	for k in 0 ..= x1 - x0 {
@@ -491,22 +234,8 @@ sandbox_apply_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 	}
 }
 
-/*
-Move one cell, and keep it going while the way stays clear.
-
-fall_speed is how many cells a material crosses in one tick, which is
-what makes water run and lava crawl. Only a straight move repeats: a
-diagonal is a step around an obstacle, and one of those a tick is
-enough. Nothing that climbs repeats either, because every gas and
-flame in the table crosses one cell a tick.
-*/
 sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {
 	if !sandbox_swap(sb, x, y, x + dx, y + dy) {
-		// The place this cell wanted was taken by another cell of the
-		// same row. The work is not done, so the cell stays dirty and
-		// tries again next tick. Without this a pool freezes with the
-		// holes it happened to hold on the one tick when every cell in
-		// it was refused, and never packs.
 		sandbox_mark(sb, x, y)
 		return
 	}
@@ -536,12 +265,6 @@ sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {
 	}
 }
 
-/*
-Change two cells over.
-
-Both are then walls for the rest of the tick, so every cell moves at
-most once and nothing else can enter the hole this one left.
-*/
 sandbox_swap :: proc(sb: ^Sandbox, sx, sy, dx, dy: i32) -> bool {
 	if !sandbox_in_bounds(sb, dx, dy) do return false
 	to := sandbox_index(sb, dx, dy)
@@ -552,8 +275,6 @@ sandbox_swap :: proc(sb: ^Sandbox, sx, sy, dx, dy: i32) -> bool {
 	sb.lifetime[from], sb.lifetime[to] = sb.lifetime[to], sb.lifetime[from]
 	sb.moved[from] = true
 	sb.moved[to] = true
-	// The swap does not go through sandbox_put, so it marks both sides
-	// itself. See sandbox_mark.
 	sandbox_mark(sb, sx, sy)
 	sandbox_mark(sb, dx, dy)
 	return true

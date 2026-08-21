@@ -5,60 +5,20 @@ import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
 
-/*
-A tile on disk is a PNG painted in material colors.
-
-The level format is an image, so any pixel editor is a tile editor and
-the in-game editor writes the same files. This is the same trade the
-biome map makes one level up: the map says which biome owns a region,
-and the tiles say what that biome is made of.
-
-A biome keeps one file per tile of its set, named after the edge
-colors it carries. The name is the constraint written down: every file
-that ends with the same digit on the same side has to agree along that
-side, and the editor keeps them agreeing.
-
-Air is color 0x00000000, so air reads and writes as a transparent
-pixel with no special case. Every other pixel must match a material
-color exactly. A near miss is a mistake, not a shade, so it stops the
-load.
-*/
-
 Tile_Load_Error :: enum u8 {
 	None,
 	File_Unreadable,
-	Wrong_Size,      // the image is not TILE_SIZE square
-	Unmatched_Color, // a pixel color matches no material
+	Wrong_Size,     
+	Unmatched_Color,
 }
 
-/*
-Where the problem is, so the author can find it.
-
-For Unmatched_Color, x and y are the bad pixel and color is what it
-holds. For Wrong_Size, x and y are the size the image turned out to
-be. Nothing else needs a second struct.
-*/
 Tile_Load_Result :: struct {
-	color: u32, // the unmatched color, 0xAARRGGBB
+	color: u32,
 	x:     i32,
 	y:     i32,
 	err:   Tile_Load_Error,
 }
 
-/*
-Read a square image into cells the caller owns.
-
-The tile set allocates every tile in one block, so the loader writes
-into a slice of that block instead of returning one of its own. This
-is the same rule generation follows.
-
-`size` is the side of the square the caller expects. It defaults to
-TILE_SIZE, so every existing call site that reads a tile still gets
-exactly the behaviour it always got. An image biome calls this with
-`size = cells_per_pixel` instead, because its one picture stands for a
-whole region, not a tile: same reader, same color match, same errors,
-a different square.
-*/
 load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size: i32 = TILE_SIZE) -> Tile_Load_Result {
 	assert(len(dst) == int(size) * int(size), "a tile buffer must hold size*size cells")
 
@@ -79,7 +39,6 @@ load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size
 		return {err = .Wrong_Size, x = img.width, y = img.height}
 	}
 
-	// LoadImageColors normalises any source format to RGBA8.
 	pixels := rl.LoadImageColors(img)
 	defer rl.UnloadImageColors(pixels)
 
@@ -107,7 +66,6 @@ save_tile_png :: proc(cells: []Cell, materials: Material_Table, path: string) ->
 		pixels[i] = rl_from_argb(materials.materials[c].color)
 	}
 
-	// The image borrows our buffer, so raylib must not free it.
 	img := rl.Image {
 		data    = raw_data(pixels),
 		width   = TILE_SIZE,
@@ -122,19 +80,6 @@ save_tile_png :: proc(cells: []Cell, materials: Material_Table, path: string) ->
 	return bool(rl.ExportImage(img, cpath))
 }
 
-/*
-Read every tile every biome names.
-
-A tile with no file on disk starts as a flat block of the fill
-material of the biome that owns it. A biome that gains a set then
-looks exactly as it did with a flat fill, and the author paints from
-there instead of from an empty screen. A flat set has no seam trouble
-either: every tile agrees with every other one, whatever its edges
-say.
-
-`create_missing` writes those new tiles out. Tests leave it off, so
-they never touch the working tree.
-*/
 load_tile_set :: proc(
 	biomes: Biome_Table,
 	materials: Material_Table,
@@ -143,7 +88,7 @@ load_tile_set :: proc(
 ) -> (
 	set: Tile_Set,
 	result: Tile_Load_Result,
-	bad_tile: Tile_Id, // which tile failed; TILE_NONE when none did
+	bad_tile: Tile_Id,
 ) {
 	set = make_tile_set(biome_tile_count(biomes), allocator)
 
@@ -177,19 +122,6 @@ load_tile_set :: proc(
 	return set, {}, TILE_NONE
 }
 
-/*
-Read every picture an image biome names.
-
-An image biome owns one whole picture, not a set of small tiles, so
-this is load_tile_set's job done once per biome instead of once per
-tile, and with no flat fallback: the picture is the region, so there
-is nothing sensible to draw until the file exists.
-
-Each picture gets its own allocation, because biomes do not all share
-one region size the way tiles share TILE_SIZE. b.variants is the
-index the loader assigned, so the picture lands at the same slot the
-generator will read it from.
-*/
 load_image_set :: proc(
 	biomes: Biome_Table,
 	materials: Material_Table,
@@ -197,13 +129,8 @@ load_image_set :: proc(
 ) -> (
 	images: [][]Cell,
 	result: Tile_Load_Result,
-	bad_biome: Biome_Id, // which biome failed; BIOME_EMPTY when none did
+	bad_biome: Biome_Id,
 ) {
-	// One slot per biome, indexed by biome id, and nil for every biome
-	// that draws no picture. A dense index over only the image biomes
-	// would save a few nil slice headers and cost a second meaning for
-	// a field that already has one, which is how a lookup gets read
-	// with the wrong table.
 	images = make([][]Cell, len(biomes.biomes), allocator)
 	size := biomes.cells_per_pixel
 
@@ -228,13 +155,6 @@ destroy_image_set :: proc(images: [][]Cell, allocator := context.allocator) {
 	delete(images, allocator)
 }
 
-/*
-Write the whole set of one biome.
-
-The editor saves a set, not a tile. A stroke in a seam reaches every
-tile that carries that edge color, so saving only the tile on screen
-would leave the rest of the set behind on disk.
-*/
 save_tile_set :: proc(
 	set: Tile_Set,
 	biomes: Biome_Table,
@@ -258,10 +178,6 @@ save_tile_set :: proc(
 	}
 	return written, "", true
 }
-
-// ------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------
 
 @(private = "file")
 load_png_test_tables :: proc(
@@ -299,8 +215,6 @@ test_tile_png_round_trip :: proc(t: ^testing.T) {
 	rock, _ := find_material_index(materials, "Rock")
 	gold, _ := find_material_index(materials, "Gold")
 
-	// Air is a transparent pixel, so the round trip proves alpha
-	// survives the file as well as the colors do.
 	tile_fill(set, 0, Cell(rock))
 	tile_set_cell(set, 0, 0, 0, Cell(air))
 	tile_set_cell(set, 0, 3, 9, Cell(gold))
@@ -390,12 +304,6 @@ test_tile_png_missing_file_is_an_error :: proc(t: ^testing.T) {
 	testing.expect(t, r.err == .File_Unreadable)
 }
 
-/*
-An image biome's picture must be exactly cells_per_pixel square, or
-the region it stands for would not be the size the generator thinks
-it is. Without this check a short picture would read past its own end
-into the picture that follows it in the block.
-*/
 @(test)
 test_load_image_set_refuses_the_wrong_size :: proc(t: ^testing.T) {
 	materials, mat_ok := load_materials("data/materials.txt")
@@ -436,7 +344,6 @@ test_load_tile_set_reads_every_authored_tile :: proc(t: ^testing.T) {
 	defer destroy_biome_table(biomes)
 	defer destroy_material_table(materials)
 
-	// create_missing is off, so this test never writes to the repo.
 	set, result, id := load_tile_set(biomes, materials, false)
 	testing.expectf(
 		t,
@@ -452,20 +359,11 @@ test_load_tile_set_reads_every_authored_tile :: proc(t: ^testing.T) {
 	testing.expect(t, set.count == biome_tile_count(biomes))
 	testing.expect(t, set.count > 0, "the shipped data must author at least one set")
 
-	// Every cell must name a real material, or the world would draw a
-	// color that is not in the table.
 	for c in set.cells {
 		testing.expectf(t, int(c) < len(materials.materials), "cell holds unknown material %d", c)
 	}
 }
 
-/*
-The shipped sets must agree with themselves.
-
-This is the gate the editor puts on a save, run against the files in
-the repository. A set that fails it would show a broken seam in the
-world wherever that edge color came up.
-*/
 @(test)
 test_the_shipped_sets_have_no_seam_conflict :: proc(t: ^testing.T) {
 	materials, biomes, ok := load_png_test_tables(t)
@@ -497,15 +395,6 @@ test_the_shipped_sets_have_no_seam_conflict :: proc(t: ^testing.T) {
 	testing.expect(t, sets > 0, "the shipped data must author at least one set")
 }
 
-/*
-A tiled biome is about half air.
-
-A set that is nearly solid gives a world with scratches in it, and a
-set that is nearly empty gives a hall with pillars. Neither is a cave
-system, and the difference is not visible in any one tile, so it is
-measured over the whole set. Draw one with bin/shot to see what a
-number here means.
-*/
 @(test)
 test_the_shipped_sets_are_about_half_air :: proc(t: ^testing.T) {
 	materials, biomes, ok := load_png_test_tables(t)
@@ -569,10 +458,6 @@ test_load_tile_set_fills_a_missing_set_with_the_biome_fill :: proc(t: ^testing.T
 	testing.expect(t, !os.exists("tile_absent_0000_0.png"), "create_missing off must write nothing")
 }
 
-/*
-A set saves and reloads unchanged, one file per tile, with the edge
-colors in the names.
-*/
 @(test)
 test_tile_set_round_trip :: proc(t: ^testing.T) {
 	materials, mat_ok := load_materials("data/materials.txt")
@@ -593,7 +478,6 @@ test_tile_set_round_trip :: proc(t: ^testing.T) {
 	set := make_tile_set(biome_tile_count(biomes))
 	defer destroy_tile_set(set)
 
-	// Something different in every tile, so a swapped file shows up.
 	gold, _ := find_material_index(materials, "Gold")
 	for k in 0 ..< wang_set_size(b) {
 		tile := b.tile_base + Tile_Id(k)

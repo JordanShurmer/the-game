@@ -5,26 +5,14 @@ import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
 
-/*
-The biome map on disk is a PNG. One pixel is one region.
-
-A PNG is the whole level layout, so any pixel editor can edit the
-world, and the in-game editor writes the same file. Transparent
-pixels are empty. Every other pixel must match a biome key color.
-
-Raylib does the PNG work. These procs need no window, so tests can
-call them.
-*/
-
 Biome_Map_Load_Error :: enum u8 {
 	None,
 	File_Unreadable,
-	Unmatched_Color, // a pixel color matches no biome in the table
+	Unmatched_Color,
 }
 
-// Report where the bad pixel is, so the author can find it.
 Biome_Map_Load_Result :: struct {
-	color: u32, // the unmatched color, 0xAARRGGBB
+	color: u32,
 	x:     i32,
 	y:     i32,
 	err:   Biome_Map_Load_Error,
@@ -51,7 +39,6 @@ load_biome_map_png :: proc(
 	}
 	defer rl.UnloadImage(img)
 
-	// LoadImageColors normalises any source format to RGBA8.
 	pixels := rl.LoadImageColors(img)
 	defer rl.UnloadImageColors(pixels)
 
@@ -60,7 +47,7 @@ load_biome_map_png :: proc(
 	for y in 0 ..< img.height {
 		for x in 0 ..< img.width {
 			c := pixels[int(y) * int(img.width) + int(x)]
-			if c.a == 0 do continue // transparent is empty
+			if c.a == 0 do continue
 
 			argb := argb_from_rl(c)
 			id, found := find_biome_by_color(table, argb)
@@ -87,7 +74,6 @@ save_biome_map_png :: proc(m: Biome_Map, table: Biome_Table, path: string) -> bo
 		pixels[i] = rl_from_argb(table.biomes[c].key_color)
 	}
 
-	// The image borrows our buffer, so raylib must not free it.
 	img := rl.Image {
 		data    = raw_data(pixels),
 		width   = m.width,
@@ -101,10 +87,6 @@ save_biome_map_png :: proc(m: Biome_Map, table: Biome_Table, path: string) -> bo
 
 	return bool(rl.ExportImage(img, cpath))
 }
-
-// ------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------
 
 @(test)
 test_biome_map_png_round_trip :: proc(t: ^testing.T) {
@@ -150,7 +132,6 @@ test_biome_map_png_unmatched_color_is_an_error :: proc(t: ^testing.T) {
 	testing.expect(t, err == .None)
 	defer destroy_biome_table(table)
 
-	// Paint one pixel a color no biome claims.
 	pixels := []rl.Color{{0, 0, 0, 0}, {1, 2, 3, 255}}
 	img := rl.Image {
 		data    = raw_data(pixels),

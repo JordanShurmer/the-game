@@ -2,17 +2,6 @@ package game
 
 import "core:testing"
 
-/*
-The biome map says which biome owns each region of the world.
-
-One map pixel is one region. The map is small: a 64x64 map covers
-32768x32768 world cells at the default 512 cells per pixel. It stays
-in cache, so the editor can check the whole map on every paint stroke.
-
-A cell holds a biome id, or BIOME_EMPTY where nothing is painted.
-Empty map pixels generate as the off-map biome.
-*/
-
 Biome_Map :: struct {
 	cells:  []Biome_Id,
 	width:  i32,
@@ -29,8 +18,6 @@ destroy_biome_map :: proc(m: Biome_Map, allocator := context.allocator) {
 	delete(m.cells, allocator)
 }
 
-// Reads outside the map return BIOME_EMPTY. The generator relies on
-// this, so it never needs its own bounds test.
 biome_map_at :: proc(m: Biome_Map, px, py: i32) -> Biome_Id {
 	if px < 0 || py < 0 || px >= m.width || py >= m.height do return BIOME_EMPTY
 	return m.cells[int(py) * int(m.width) + int(px)]
@@ -41,17 +28,6 @@ biome_map_set :: proc(m: Biome_Map, px, py: i32, id: Biome_Id) {
 	m.cells[int(py) * int(m.width) + int(px)] = id
 }
 
-/*
-Label each painted pixel with the index of the component it belongs
-to. Empty pixels get -1. Returns the number of components.
-
-Neighbours are the four edge-sharing pixels. Diagonal touch does not
-join two regions, because the world cells behind them only meet at a
-corner, and the player cannot walk through a corner.
-
-The editor uses the labels to tint stranded regions, and the save gate
-uses the count.
-*/
 biome_map_label_components :: proc(
 	m: Biome_Map,
 	labels: []i32,
@@ -109,21 +85,10 @@ biome_map_component_count :: proc(m: Biome_Map, allocator := context.temp_alloca
 	return biome_map_label_components(m, labels, allocator)
 }
 
-/*
-The save gate. A map may be saved when every painted region forms one
-connected component. An empty map has nothing to strand, so it passes.
-*/
 biome_map_is_connected :: proc(m: Biome_Map, allocator := context.temp_allocator) -> bool {
 	return biome_map_component_count(m, allocator) <= 1
 }
 
-// ------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------
-
-// build_test_map turns a picture into a map. '.' is empty, any other
-// byte is a painted biome id taken from the character itself. This
-// keeps the connectivity cases readable.
 @(private = "file")
 build_test_map :: proc(rows: []string, allocator := context.allocator) -> Biome_Map {
 	height := i32(len(rows))
@@ -146,7 +111,6 @@ test_biome_map_defaults_to_empty :: proc(t: ^testing.T) {
 	testing.expect(t, len(m.cells) == 12)
 	for c in m.cells do testing.expect(t, c == BIOME_EMPTY)
 
-	// Out of bounds reads are empty, not a crash.
 	testing.expect(t, biome_map_at(m, -1, 0) == BIOME_EMPTY)
 	testing.expect(t, biome_map_at(m, 0, -1) == BIOME_EMPTY)
 	testing.expect(t, biome_map_at(m, 4, 0) == BIOME_EMPTY)
@@ -154,7 +118,7 @@ test_biome_map_defaults_to_empty :: proc(t: ^testing.T) {
 
 	biome_map_set(m, 2, 1, 5)
 	testing.expect(t, biome_map_at(m, 2, 1) == 5)
-	biome_map_set(m, 9, 9, 7) // ignored, no crash
+	biome_map_set(m, 9, 9, 7)
 }
 
 @(test)
@@ -205,10 +169,8 @@ test_biome_map_labels_identify_components :: proc(t: ^testing.T) {
 	count := biome_map_label_components(m, labels)
 	testing.expect(t, count == 2)
 
-	// Empty pixels carry no label.
 	testing.expect(t, labels[1] == -1)
 
-	// Each column is one component, and the two differ.
 	testing.expect(t, labels[0] == labels[3], "left column is one component")
 	testing.expect(t, labels[2] == labels[5] && labels[5] == labels[8], "right column is one")
 	testing.expect(t, labels[0] != labels[2], "the columns are different components")

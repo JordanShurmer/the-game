@@ -5,78 +5,32 @@ import "core:os"
 import "core:testing"
 import rl "vendor:raylib"
 
-/*
-The game window.
-
-The world view is a texture the size of the window, but not always
-filled that far. One texel is `step` world cells, and one screen pixel
-is `1/zoom` of a texel; only one of step and zoom is ever above 1, so
-the app asks the generator for exactly `app_view_cells` texels and
-`rl.DrawTexturePro` blows the result up to the window. There is no
-chunk store yet, because nothing needs one. See docs/player.md, "A
-view the wizard is visible in", for the full ladder.
-*/
-
 WINDOW_W :: 1280
 WINDOW_H :: 720
 
-// The ends of the zoom ladder. 1280 and 720 divide evenly only by 1, 2
-// and 4, so zoom stops at 4: a non-integer scale in a pixel game leaves
-// an uneven grid. step has no such ceiling of its own, but 256 is far
-// past anything a shipped view needs and stops a stuck key from
-// growing it without bound.
 WORLD_VIEW_MAX_STEP :: 256
 WORLD_VIEW_MAX_ZOOM :: 4
 
-// A frame that runs long must still advance the wizard by whole ticks,
-// never a fraction of one, but a stall long enough to hit this cap is
-// not owed the rest of its backlog. See app_step_player.
 PLAYER_MAX_CATCHUP_STEPS :: 5
 
-// How far the wizard can drift from the centre of the screen before
-// the camera follows him. Big enough that a step or a hop does not
-// pan the world; small enough that he is never far from the middle of
-// it. See app_follow_player.
-PLAYER_CAMERA_DEAD_ZONE :: 32 // cells
-
-/*
-The window state.
-
-Everything the game knows lives in the Sim. The App adds what only a
-window needs: a camera, two buffers, a texture, and the wizard's
-picture. The MCP server drives the same Sim with none of that, so the
-two cannot drift apart.
-*/
+PLAYER_CAMERA_DEAD_ZONE :: 32
 App :: struct {
 	using sim: Sim,
 
-	// Camera. cam_x and cam_y are the world cell at the top-left texel.
 	cam_x: i32,
 	cam_y: i32,
-	step:  i32, // world cells per texel, 1 or more
-	zoom:  i32, // screen pixels per texel, 1, 2 or 4; see the ladder above
+	step:  i32,
+	zoom:  i32,
 
-	// The wizard's fixed-step accumulator. SetTargetFPS is a target,
-	// not a guarantee, so a frame that runs long or short must still
-	// advance him by whole PLAYER_TICK_HZ ticks. See app_step_player.
 	tick_accum: f64,
 
-	// The view buffers. cells holds material ids; pixels holds what
-	// the texture shows. Both are the size of the window, allocated
-	// once; only the first app_view_cells() rectangle of either is
-	// live at any zoom above 1.
 	cells:     []Cell,
 	pixels:    []rl.Color,
 	texture:   rl.Texture2D,
 
-	// The wizard's picture: one sheet and the texture it uploads to,
-	// loaded once for the life of the window because both need one to
-	// exist at all.
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
 
-	// A material id maps to a color through this table. It is small
-	// and read once per texel, so it stays hot.
 	color_lut: [256]rl.Color,
 
 	dirty: bool,
@@ -84,8 +38,6 @@ App :: struct {
 
 BACKGROUND :: rl.Color{18, 20, 26, 255}
 
-// The plasma beam: a wide dim sheath and a thin bright core, which is
-// what reads as hot at any zoom. See app_draw_beam.
 BEAM_GLOW :: rl.Color{110, 210, 255, 255}
 BEAM_CORE :: rl.Color{236, 250, 255, 255}
 
@@ -107,11 +59,6 @@ main :: proc() {
 	for !rl.WindowShouldClose() {
 		app_handle_input(&app)
 
-		// While play is following him, the sandbox is alive: sand
-		// falls and fire spreads with no camera move at all, so the
-		// view has to be redrawn every frame, not only when app.dirty
-		// says the camera moved. The editors pause this: they read the
-		// static generated world, and app.dirty already drives them.
 		playing := !app.editor.open && !app.tile_edit.open
 		if app.dirty || (playing && app.follow_player) {
 			app_regenerate(&app)
@@ -140,21 +87,9 @@ main :: proc() {
 	}
 }
 
-/*
-Load the data files, then set up what only the window needs.
-
-The load itself is sim_load, because the MCP server loads the same
-world the same way, and it is what spawns the wizard. Play opens
-centred on him, not on the world origin: docs/player.md's ladder
-starts at zoom 4, step 1, 320 by 180 cells on screen.
-*/
 app_load_data :: proc(app: ^App) -> bool {
 	if err := sim_load(&app.sim); err != .None do return false
 
-	// The play sandbox follows him from here on: docs/physics.md, "The
-	// wizard meets the sandbox". sim_load itself never turns this on,
-	// so the MCP server and every test that opens a sandbox by hand
-	// still get exactly the sandbox they asked for.
 	sim_play_begin(&app.sim)
 
 	for m, i in app.world.materials.materials {
@@ -187,16 +122,10 @@ app_init_view :: proc(app: ^App) {
 	}
 	app.texture = rl.LoadTextureFromImage(blank)
 
-	// Nearest neighbour, not the default bilinear filter: zoom draws
-	// one texel as a solid zoom by zoom block of screen pixels, and a
-	// smoothing filter would blur the seam between texels into a soft
-	// grey line instead of the crisp grid a pixel game wants.
 	rl.SetTextureFilter(app.texture, .POINT)
 
 	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
 	if result.err != .None {
-		// Not fatal: the world still loads and plays, just with no
-		// wizard drawn. app_draw_player checks for this same failure.
 		fmt.eprintfln("the sprite sheet could not load: %v", result.err)
 	}
 	app.sprite = sheet
@@ -222,31 +151,10 @@ app_destroy_view :: proc(app: ^App) {
 	delete(app.pixels)
 }
 
-// The visible extent of the world view, in texels: WINDOW_W/zoom by
-// WINDOW_H/zoom. The buffers stay allocated at the window's full size
-// regardless, so every site that once assumed the view was WINDOW_W by
-// WINDOW_H texels (true only at zoom 1) reads this instead.
 app_view_cells :: proc(app: ^App) -> (w, h: i32) {
 	return WINDOW_W / app.zoom, WINDOW_H / app.zoom
 }
 
-/*
-Generate what the window shows, then turn material ids into colors.
-
-This is the one generate path. The editor calls it after every paint
-stroke, and the game calls it after every camera move, and now after
-every physics tick too while play is following: the sandbox is what
-he actually collides with, and a view that only ever redrew the
-generator would show him standing on a picture again.
-
-Only the visible w by h texels are asked for and converted, not the
-whole WINDOW_W by WINDOW_H buffer: at zoom 4 that is 57600 texels
-converted instead of 921600. generate writes rows of exactly `w`, so
-the first w*h entries of app.cells are already the tightly packed w by
-h rectangle rl.UpdateTextureRec wants; there is nothing to repack.
-app_draw_sandbox below holds to the same w*h bound, so drawing the
-sandbox over the view costs no more than drawing the view itself did.
-*/
 app_regenerate :: proc(app: ^App) {
 	w, h := app_view_cells(app)
 	view := World_View {
@@ -266,17 +174,6 @@ app_regenerate :: proc(app: ^App) {
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
 }
 
-/*
-Overwrite the generated view with the running sandbox, wherever the
-two cover the same ground. This is the join made visible: the
-generator draws the picture, and the sandbox is what actually moves
-under the wizard's feet, so what the window shows has to be the
-second one wherever it exists.
-
-Bounded to the same w by h texels app_regenerate already asked for, at
-whatever step the view is sampled at: a texel that falls outside the
-sandbox rectangle is left as the generator drew it.
-*/
 @(private = "file")
 app_draw_sandbox :: proc(app: ^App, view: World_View) {
 	sb := &app.sandbox
@@ -296,8 +193,6 @@ app_draw_sandbox :: proc(app: ^App, view: World_View) {
 }
 
 app_handle_input :: proc(app: ^App) {
-	// The tile editor sits on top of the world editor, so it reads the
-	// keyboard first and nothing behind it moves while it is open.
 	if app.tile_edit.open {
 		tile_editor_handle_input(app)
 		return
@@ -317,13 +212,8 @@ app_handle_input :: proc(app: ^App) {
 	app_handle_play(app)
 }
 
-// WASD/arrows pan and wheel/-/= zoom: the free camera the world editor
-// opens onto, same as it worked before the wizard existed. Play, below,
-// hands the same keys to him instead and lets the camera follow.
 @(private = "file")
 app_handle_free_camera :: proc(app: ^App) {
-	// The speed follows the zoom, so the world moves at the same rate on
-	// screen whatever the step is.
 	pan := 8 * app.step
 	moved := false
 	if rl.IsKeyDown(.LEFT) || rl.IsKeyDown(.A) {app.cam_x -= pan;moved = true}
@@ -337,9 +227,6 @@ app_handle_free_camera :: proc(app: ^App) {
 	}
 }
 
-// -1 zooms in, +1 zooms out, 0 is neither. Read once and shared by the
-// editor's free camera and by play, so the two keys mean the same
-// thing in both places.
 @(private = "file")
 app_read_zoom_dir :: proc() -> i32 {
 	zoom_dir : i32 = 0
@@ -353,21 +240,9 @@ app_read_zoom_dir :: proc() -> i32 {
 	return zoom_dir
 }
 
-/*
-One rung of the ladder docs/player.md draws out:
-
-    ... 4     2     1     1     1      step
-        1     1     1     2     4      zoom
-      <- out                   in ->
-
-Zooming in shrinks step toward 1, then grows zoom toward 4. Zooming out
-walks the same path backward. Only one of the two is ever above 1 at a
-time, which is what the two separate `if`s below hold: each only ever
-touches the field that is not already stuck at its floor of 1.
-*/
 @(private = "file")
 app_zoom_step :: proc(app: ^App, dir: i32) -> bool {
-	if dir < 0 { // toward the wizard
+	if dir < 0 {
 		if app.step > 1 {
 			app.step /= 2
 			return true
@@ -376,7 +251,7 @@ app_zoom_step :: proc(app: ^App, dir: i32) -> bool {
 			app.zoom *= 2
 			return true
 		}
-	} else if dir > 0 { // away from him
+	} else if dir > 0 {
 		if app.zoom > 1 {
 			app.zoom /= 2
 			return true
@@ -389,9 +264,6 @@ app_zoom_step :: proc(app: ^App, dir: i32) -> bool {
 	return false
 }
 
-// Change the zoom about the middle of the window, so the view does not
-// jump: read the world cell under the centre before the change, then
-// put that same cell back under the centre after.
 @(private = "file")
 app_apply_zoom :: proc(app: ^App, dir: i32) {
 	old_w, old_h := app_view_cells(app)
@@ -406,14 +278,6 @@ app_apply_zoom :: proc(app: ^App, dir: i32) {
 	app.dirty = true
 }
 
-/*
-Where the cursor is, in world cells.
-
-This is the inverse of the one transform the whole view is drawn
-through. rl.DrawTexturePro blows app_view_cells texels up to the whole
-window, so a screen pixel is zoom/step of a world cell and the scale
-here is the same number app_draw_player and app_draw_beam scale by.
-*/
 @(private = "file")
 app_cursor_cell :: proc(app: ^App) -> (x, y: i32) {
 	m := rl.GetMousePosition()
@@ -421,12 +285,6 @@ app_cursor_cell :: proc(app: ^App) -> (x, y: i32) {
 	return app.cam_x + i32(m.x / scale), app.cam_y + i32(m.y / scale)
 }
 
-/*
-Play: A/D or LEFT/RIGHT walk, SHIFT runs, SPACE/W/UP jumps and, held in
-the air, flies, E or the left mouse button digs, and the cursor points
-the digger. Wheel and -/= still zoom; docs/player.md lists zoom as a
-control of its own, not one the editor owns alone.
-*/
 @(private = "file")
 app_handle_play :: proc(app: ^App) {
 	held: Player_Input
@@ -436,16 +294,8 @@ app_handle_play :: proc(app: ^App) {
 	if rl.IsKeyDown(.SPACE) || rl.IsKeyDown(.W) || rl.IsKeyDown(.UP) do held += {.Jump}
 	if rl.IsKeyDown(.E) || rl.IsMouseButtonDown(.LEFT) do held += {.Dig}
 
-	// The edge, not the level: player_step reads a press as a launch and
-	// a held key in the air, past its delay, as the jetpack. Collapsing
-	// the two into IsKeyDown alone would mean a held key always flies,
-	// and there would be no jump at all.
 	jump_pressed := rl.IsKeyPressed(.SPACE) || rl.IsKeyPressed(.W) || rl.IsKeyPressed(.UP)
 
-	// The beam comes out of the centre of his mass, so the aim is
-	// measured from there and not from his feet: measured from the
-	// feet, a cursor level with his chest would point the tool at the
-	// floor. player_centre is the one place that point is decided.
 	cursor_x, cursor_y := app_cursor_cell(app)
 	centre_x, centre_y := player_centre(app.player)
 	aim := player_aim_of(f32(cursor_x - centre_x), f32(cursor_y - centre_y))
@@ -458,18 +308,6 @@ app_handle_play :: proc(app: ^App) {
 	}
 }
 
-/*
-Run the wizard a whole number of PLAYER_TICK_HZ ticks for this frame's
-elapsed time, not a fraction of one. SetTargetFPS is a target, not a
-guarantee, and a slow frame must not slow him down.
-
-The catch-up is capped at PLAYER_MAX_CATCHUP_STEPS. A long stall (a
-breakpoint, a slow load) would otherwise queue a large backlog and
-either freeze the game paying it all off in one frame, or spread it
-across many later frames as a slow-motion catch-up nobody asked for.
-Past the cap the remainder is dropped instead: a hitch is the honest
-cost of a stall, not a debt the sim carries forward.
-*/
 @(private = "file")
 app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bool, aim: u8) {
 	tick_dt : f64 = 1.0 / f64(PLAYER_TICK_HZ)
@@ -479,13 +317,9 @@ app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bo
 	jp := jump_pressed
 	for app.tick_accum >= tick_dt && steps < PLAYER_MAX_CATCHUP_STEPS {
 		sim_step_player(&app.sim, held, jp, aim)
-		// Physics and the wizard advance together, one sandbox tick per
-		// player tick: docs/physics.md, "The window shows the physics".
-		// sim_run does this for the queue's own ticks; the window's
-		// direct path into sim_step_player has to do it itself.
 		sandbox_step(&app.sandbox, app.world.materials)
 		app.tick_accum -= tick_dt
-		jp = false // the press is one tick's edge, not every catch-up tick's
+		jp = false
 		steps += 1
 	}
 	if steps == PLAYER_MAX_CATCHUP_STEPS {
@@ -493,14 +327,6 @@ app_step_player :: proc(app: ^App, dt: f32, held: Player_Input, jump_pressed: bo
 	}
 }
 
-/*
-Keep the wizard inside a dead zone around the centre of the screen,
-rather than pinning him to it exactly. dirty is set only when cam_x or
-cam_y actually change, so a standing player does not regenerate the
-screen sixty times a second: his position does not move, so the target
-centre does not move, so the distance from it never crosses the dead
-zone in the first place.
-*/
 @(private = "file")
 app_follow_player :: proc(app: ^App) {
 	w, h := app_view_cells(app)
@@ -532,17 +358,9 @@ app_follow_player :: proc(app: ^App) {
 	}
 }
 
-/*
-Draw the wizard where the camera puts him: his frame's world origin,
-run through the same cam_x/cam_y/step/zoom the terrain draws through
-and scaled by zoom/step, so he tracks the same ground the terrain
-shows. facing flips the source rectangle's width rather than the
-picture, the same mirror sprite_pixel does for bin/shot, done here by
-the GPU instead of pixel by pixel.
-*/
 @(private = "file")
 app_draw_player :: proc(app: ^App) {
-	if app.sprite.pixels == nil do return // the sheet failed to load; see app_init_view
+	if app.sprite.pixels == nil do return
 
 	p := app.player
 	motion := player_motion(p)
@@ -568,28 +386,8 @@ app_draw_player :: proc(app: ^App) {
 	app_draw_beam(app)
 }
 
-/*
-The plasma beam, while he holds the button down.
-
-The cut itself is already on the screen: player_dig cleared those
-cells and app_draw_sandbox draws what the sandbox holds. What is
-missing without this is the tool. A hole that opens with nothing
-joining it to the man reads as the world breaking, not as him working,
-and the beam is what says which of the two it is.
-
-Two lines, not one. The sheath is the width of the kerf and nearly
-transparent, so it shows what the beam is about to take; the core is
-one cell wide and almost white, which is what reads as hot. Both are
-drawn through the same scale the terrain and the wizard are, so the
-beam lands on the cells it actually cut.
-*/
 @(private = "file")
 app_draw_beam :: proc(app: ^App) {
-	// The beam is a picture of a button being held, and no button is
-	// held while an editor is open: player_step is the only thing that
-	// writes p.digging, and the editors are the two places that do not
-	// call it. Without this the last beam of play hangs across the
-	// editor until the next tick of play clears it.
 	if app.editor.open || app.tile_edit.open do return
 
 	p := app.player
@@ -606,18 +404,12 @@ app_draw_beam :: proc(app: ^App) {
 	}
 
 	rl.DrawLineEx(from, to, f32(PLAYER_DIG_WIDTH) * scale, rl.Fade(BEAM_GLOW, 0.18))
-	// At least one screen pixel: zoomed all the way out, a core a
-	// fraction of a pixel wide would not be drawn at all.
 	rl.DrawLineEx(from, to, max(scale, 1), BEAM_CORE)
 }
 
 draw_hud :: proc(app: ^App) {
 	if app.editor.open || app.tile_edit.open do return
 
-	// The view is app_view_cells texels wide, not WINDOW_W: at zoom
-	// above 1 that is fewer texels than the window has pixels, and the
-	// centre computed from WINDOW_W would name the wrong cell and the
-	// wrong biome.
 	w, h := app_view_cells(app)
 	cx := app.cam_x + (w / 2) * app.step
 	cy := app.cam_y + (h / 2) * app.step
@@ -634,10 +426,6 @@ draw_hud :: proc(app: ^App) {
 		rl_from_argb(b.key_color),
 	)
 
-	// What the cell under the crosshair is made of. A tiled biome shows
-	// a different material every few cells, so the biome name alone no
-	// longer says what you are looking at. Naming the tile as well says
-	// which file to open to change it.
 	cell := world_cell_at(app.world, cx, cy)
 	source := "fill"
 	if b.tile_base != TILE_NONE {
@@ -658,9 +446,6 @@ draw_hud :: proc(app: ^App) {
 		rl_from_argb(app.world.materials.materials[cell].color | 0xFF000000),
 	)
 
-	// The wizard: where he stands, whether the ground is under him, and
-	// the jetpack tank, so a burn running dry does not come as a
-	// surprise.
 	p := app.player
 	ground := p.on_ground ? "on ground" : "airborne"
 	rl.DrawText(
@@ -673,10 +458,6 @@ draw_hud :: proc(app: ^App) {
 
 	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
 }
-
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
 
 @(test)
 test_app_view_cells_shrinks_with_zoom :: proc(t: ^testing.T) {
@@ -697,14 +478,6 @@ test_app_view_cells_shrinks_with_zoom :: proc(t: ^testing.T) {
 	)
 }
 
-/*
-Walks the ladder all the way in and all the way out, from every rung it
-could plausibly start on, and holds two invariants at every step: zoom
-is always 1, 2 or 4 (never 3, since 1280 and 720 divide evenly only by
-those), and step never falls under 1. A ladder that ever let both climb
-above 1 at once would also make app_view_cells and the step conversion
-disagree about how large a texel is.
-*/
 @(test)
 test_the_zoom_ladder_never_produces_zoom_3_or_a_step_below_1 :: proc(t: ^testing.T) {
 	starts := []struct{step, zoom: i32}{
@@ -732,18 +505,16 @@ test_the_zoom_ladder_never_produces_zoom_3_or_a_step_below_1 :: proc(t: ^testing
 		app.zoom = start.zoom
 
 		for _ in 0 ..< 20 {
-			app_zoom_step(&app, -1) // all the way in
+			app_zoom_step(&app, -1)
 			check(t, &app)
 		}
 		for _ in 0 ..< 20 {
-			app_zoom_step(&app, 1) // all the way back out
+			app_zoom_step(&app, 1)
 			check(t, &app)
 		}
 	}
 }
 
-// A rung that changes must actually change the view, or a key press
-// would read as pressed and do nothing.
 @(test)
 test_zooming_in_from_the_default_start_shrinks_the_view :: proc(t: ^testing.T) {
 	app: App
