@@ -5,13 +5,13 @@ import "core:testing"
 import rl "vendor:raylib"
 
 POT_MAX      :: 8      // pots in the air at once
-POT_GRAINS   :: 4      // grains of black powder the pot holds
+POT_GRAINS   :: 3      // grains of black powder the pot holds
 POT_SPEED    :: 190.0  // cells per second, along the aim
 POT_LOB      :: 42.0   // cells per second of lift, so it flies on an arc
 POT_GRAVITY  :: PLAYER_GRAVITY
 POT_MAX_FALL :: PLAYER_MAX_FALL
 POT_REST     :: 24     // ticks between throws
-POT_FUSE     :: 180    // ticks the fuse burns before it goes off in the air
+POT_FUSE     :: 90     // ticks the fuse burns before it goes off in the air
 
 POT_FLASH       :: 22   // ticks the bang stays in the light
 POT_FLASH_POWER :: 255
@@ -19,6 +19,12 @@ POT_FLASH_REACH :: 34
 POT_FLASH_FALL  :: Light_Fall{open = 220, open_diag = 204, dense = 112, dense_diag = 78}
 
 #assert(POT_FLASH_POWER >= LIGHT_ORB_POWER, "a bang must be the brightest thing in the world while it lasts")
+
+POT_FUSE_POWER :: 120  // the fuse's own light, while the pot is still flying
+POT_FUSE_REACH :: 12
+POT_FUSE_FALL  :: Light_Fall{open = 176, open_diag = 150, dense = 96, dense_diag = 64}
+
+#assert(POT_FUSE_POWER < LIGHT_ORB_POWER, "the fuse must not outshine the orb he carries")
 
 POT_R :: 2  // cells, the pot as it is drawn
 
@@ -28,6 +34,10 @@ POT_PEAK  :: 0.95
 POT_GLOW  :: rl.Color{255, 140, 40, 255}
 POT_CORE  :: rl.Color{255, 250, 230, 255}
 POT_BODY  :: rl.Color{48, 40, 32, 255}
+
+POT_FUSE_HALO  :: 3     // the spark drawn at the fuse, a small ember and not a bang
+POT_FUSE_BLAZE :: 1
+POT_FUSE_PEAK  :: 0.85
 
 pot_power :: proc(table: Material_Table) -> u8 {
 	e := i32(table.materials[int(table.powder)].explosive) * POT_GRAINS

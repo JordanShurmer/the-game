@@ -216,7 +216,7 @@ glyph       = G
 
 # ------------------------------------------------------------
 # The gallery materials. See docs/physics.md, "The materials".
-# Fifteen new materials, chosen room by room from the gallery.
+# Sixteen new materials, chosen room by room from the gallery, plus Soot.
 # ------------------------------------------------------------
 
 [Wood]

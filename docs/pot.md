@@ -54,14 +54,14 @@ procedure the wizard's own feet are tested against, so a pot meets the
 world exactly as he does. The first solid cell it finds stops it
 there; it does not tunnel a cell into the wall it hit.
 
-A pot that never finds a wall still has a limit: `POT_FUSE` (180)
-ticks, three seconds. Whichever ends the flight first — a wall or the
-fuse — the pot breaks.
+A pot that never finds a wall still has a limit: `POT_FUSE` (90)
+ticks, a second and a half. Whichever ends the flight first — a wall
+or the fuse — the pot breaks.
 
 ## Breaking is one call into the sandbox
 
 A pot's potency is not invented for the pot. It holds `POT_GRAINS`
-(4) grains of the same black powder the material table already
+(3) grains of the same black powder the material table already
 carries — `Gunpowder`'s `explosive` field — so
 
 ```odin
@@ -81,15 +81,36 @@ hit) or a cell that has fallen off the edge of the one that is open.
 Either way the pot simply dies; nothing explodes into a world that is
 not there to receive it.
 
+## The fuse lights the room it flies through
+
+Past the wizard's orb the world is pitch black, so a pot thrown into
+it used to vanish: nothing about a pot in flight put out any light at
+all. A pot of black powder is thrown with its fuse burning, so it now
+carries a small light of its own while it flies:
+
+```odin
+POT_FUSE_POWER :: 120  // the fuse's own light, while the pot is still flying
+POT_FUSE_REACH :: 12
+```
+
+`#assert(POT_FUSE_POWER < LIGHT_ORB_POWER, ...)` keeps the spark
+dimmer than the orb, so a thrown pot reads as its own small ember
+arcing through the cave without ever competing with the light he
+carries.
+
 ## The bang is a light with no body, the way a firefly is
 
 `light_step` and `light_throw` take a `Pot_Bag` exactly as they take a
 `Firefly_Swarm`: `light_forget_pots` clears the live box of every pot
 that lit one last tick, and `light_throw_pots` floods `l.live` from
-every pot that is currently flashing, at `pot_flash_power`, over
-`POT_FLASH_REACH` samples, with `POT_FLASH_FALL`. A pot that is only
-flying — fuse still burning, no flash yet — throws no light at all; it
-is a dark thing in the air until it goes off.
+every pot that is still alive — a flashing pot at `pot_flash_power`
+over `POT_FLASH_REACH` samples with `POT_FLASH_FALL`, and a pot that
+is only flying — fuse still burning, no flash yet — at the flat
+`POT_FUSE_POWER` over `POT_FUSE_REACH` with `POT_FUSE_FALL`. The
+forgetting side does not need to tell the two apart: it always clears
+`POT_FLASH_REACH`, the larger of the two boxes, because every clear in
+`light_throw` runs before every flood for the tick, so a box too large
+to need is simply safe, never stale.
 
 ```odin
 pot_flash_power :: proc(p: Pot) -> u8
@@ -111,13 +132,16 @@ whole of the flash.
 
 ## Looking at it
 
-A flying pot draws as a small dark disc with a warm spark above it for
-the fuse; a breaking one draws with `app_draw_glow`, the same
-halo-and-core shape the orb and the crystals use, sized by `POT_HALO`
-and `POT_BLAZE` and faded by `pot_flash_power`. `shot_draw_pots`
-mirrors `shot_draw_fireflies` for the no-window path: it draws only
-the flash, because a pot that has not gone off yet has no light to
-show a shot.
+A flying pot draws as a small dark disc with a warm spark at its
+fuse; the spark itself is `app_draw_glow` with a small halo
+(`POT_FUSE_HALO`, `POT_FUSE_BLAZE`, `POT_FUSE_PEAK`), so the pot reads
+as a moving ember rather than a flat dot. A breaking pot draws with
+the same `app_draw_glow`, sized by `POT_HALO` and `POT_BLAZE` and
+faded by `pot_flash_power`. `shot_draw_pots` mirrors
+`shot_draw_fireflies` for the no-window path, and now draws both: the
+fuse spark on a pot still flying and the flash on one that has gone
+off, so a shot taken with light shows a thrown pot before the bang as
+well as during it.
 
 `Window_Shot` reads `throw=<degrees>` (0 is right, 90 is down, the
 same convention `player_aim_of` uses) and `ticks=<n>`: after the
@@ -126,12 +150,19 @@ ordinary `walk` argument runs, a shot that asked for a throw holds
 the sim, so the picture can be taken however long after the throw the
 bang needs to be caught in the open.
 
+At `walk=-40 throw=20`, `POT_LOB` (42) is smaller than the downward
+part of that throw (`sin(20) * POT_SPEED` is about 65), so the pot
+never rises: it leaves his hand already falling and meets the floor a
+few ticks later. `ticks=3` catches it still in the air; `ticks=8`
+catches the bang, checked against `shots/throw.png` and
+`shots/bang.png` before these numbers were written down.
+
 ```sh
 make game
 xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game \
-  shot=shots/throw.png walk=-40 throw=20 ticks=10 frames=2
+  shot=shots/throw.png walk=-40 throw=20 ticks=3 frames=2
 xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game \
-  shot=shots/bang.png walk=-40 throw=20 ticks=34 frames=2
+  shot=shots/bang.png walk=-40 throw=20 ticks=8 frames=2
 ```
 
 ## The numbers
@@ -139,11 +170,13 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game \
 | Constant | Value | What it does |
 | --- | --- | --- |
 | `POT_MAX` | 8 | pots in the air at once |
-| `POT_GRAINS` | 4 | grains of black powder the pot holds |
+| `POT_GRAINS` | 3 | grains of black powder the pot holds |
 | `POT_SPEED` | 190.0 | cells per second, along the aim |
 | `POT_LOB` | 42.0 | cells per second of lift, so it flies on an arc |
 | `POT_REST` | 24 | ticks between throws |
-| `POT_FUSE` | 180 | ticks the fuse burns before it goes off in the air |
+| `POT_FUSE` | 90 | ticks the fuse burns before it goes off in the air |
+| `POT_FUSE_POWER` | 120 | the fuse's own light, while the pot is still flying |
+| `POT_FUSE_REACH` | 12 | samples the fuse floods outward |
 | `POT_FLASH` | 22 | ticks the bang stays in the light |
 | `POT_FLASH_POWER` | 255 | the bang's brightness the instant it goes off |
 | `POT_FLASH_REACH` | 34 | samples the flash floods outward |

@@ -280,9 +280,12 @@ shadow and a corridor channels the blast.
    fades over distance even through open air. Rock costs 9. Bedrock
    costs 256, which stops any blast in one cell. The energy is an
    `i32`, because a `u8` cannot hold the cost of bedrock.
-4. A cell the ray pays for becomes `Air`, or `Fire` when it lies in
-   the inner third of the radius. The inner third is what lights the
-   fuel in the room.
+4. A cell the ray pays for becomes `Air`, or, inside the inner third
+   of the radius, `Fire` on a roll under `EXPLODE_FIRE_ODDS` out of
+   255 and `Air` otherwise. The inner third is what lights the fuel in
+   the room; the roll is what keeps the fire a scatter of flame there
+   rather than a solid disc with a compass-drawn edge, which also
+   means far fewer fire cells are ever born to leave smoke behind.
 5. Each cell that is cleared crumbles its four neighbours: a
    neighbour whose `crumbles_to` is set becomes that material. Rock
    becomes gravel and rains down.
@@ -328,14 +331,22 @@ lift := energy * BLAST_LIFT / heft
 
 `lift` reads as sixteenths of the ray's remaining energy per unit of
 the cell's density: light matter under a strong ray lifts easily,
-heavy matter barely lifts at all. Four rungs, checked in this order:
+heavy matter barely lifts at all. The four rungs below are
+`blast_verdict`, a pure function of a material and the energy a ray
+still carries when it reaches it — nothing in it touches the sandbox,
+so a test can hold it to this note without running a blast at all.
+`sandbox_explode` switches on its result instead of computing the
+rungs inline, checked in this order:
 
 1. **`lift >= BLAST_SCATTER`, or the material is not `.Still`.** The
-   cell clears exactly as it did before density mattered — Air, or
-   Fire in the inner third — and its `crumbles_to` is thrown outward
-   along the ray, past the crater, the same way `sandbox_cut` throws
-   its cuttings. Powder, liquid and gas are never `.Still`, so loose
-   matter always takes this rung: it flies when it moves at all.
+   cell clears exactly as it did before density mattered — Air, or,
+   inside the inner third, Fire on the same roll step 4 above
+   describes — and its `crumbles_to` is thrown outward along the ray,
+   past the crater, the same way `sandbox_cut` throws its cuttings.
+   Powder, liquid and gas are never `.Still`, so loose matter always
+   takes this rung: it flies when it moves at all. A `.Still` material
+   light enough can take it too, on lift alone; it still clears, but
+   nothing is thrown if it has no `crumbles_to` to throw.
 2. **`lift >= BLAST_CRUMBLE` and `crumbles_to` is not the material
    itself.** The cell becomes its `crumbles_to` in place. Nothing is
    thrown; the sandbox drops it on the next tick, the way any powder
@@ -362,14 +373,22 @@ not land in a single file. `sandbox_throw` already refuses a `.Still`
 grain and a cell that is not air, so a blast inside solid rock quietly
 loses most of what it throws, and a blast in an open room sprays it.
 
-| Material | Density | Under a pot's blast |
+Point blank — a cell that touches the blast's own origin cell — is the
+most lift a material can ever be given, because lift only falls as a
+ray spends more energy reaching further out. So point blank is enough
+to say whether a material can ever scatter or crumble under a pot's
+blast at all, and `test_a_pot_grades_the_shipped_materials_as_the_note_says`
+checks exactly that: `blast_verdict` at `pot_power(table)` less the
+one cell's own cost, against the row each material sits in below.
+
+| Material | Density | Under a pot's blast, point blank |
 | --- | --- | --- |
-| `Gunpowder`, `Ash`, `Snow` | 0.4 – 1.7 | scatters: not `.Still`, always rung one |
-| `Dirt`, `Sand` | 1.4 – 1.6 | scatters: not `.Still`, always rung one |
-| `Rock` | 2.5 | scatters near the crater, crumbles to gravel further out, chips or chars at the rim |
-| `Coal`, `Wood`, `Ice` | 0.7 – 1.5 | crumble in place where lift reaches `BLAST_CRUMBLE`, else chip |
+| `Gunpowder`, `Ash`, `Snow`, `Dirt`, `Sand` | 0.4 – 1.7 | scatter: not `.Still`, always rung one |
+| `Wood`, `Ice` | 0.7 – 0.92 | scatter even so: too light for `.Still` to save them at the blast itself, though nothing is thrown, since neither has a `crumbles_to` |
+| `Rock` | 2.5 | crumbles to gravel at the blast itself; chips or chars further out; never scatters |
+| `Coal` | 1.5 | chips or chars: no `crumbles_to` to crumble into, and too dense to clear the way wood and ice do |
 | `Obsidian`, `Steel` | 2.6 – 7.8 | chip: `.Still` with nothing to crumble into |
-| `Gold` | 19.3 | so dense that lift rarely clears `BLAST_CHIP`; most of a blast just chars it |
+| `Gold` | 19.3 | so dense that even point blank a pot cannot chip it; every hit chars |
 | `Bedrock` | 3.0 | never reached: hardness alone stops the ray |
 
 ## Digging and breaking
@@ -817,6 +836,7 @@ two builds rather than running one after the other.
 | `PLAYER_DIG_RADIUS` | 5 | cells |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |
 | `EXPLODE_RAYS_PER_CELL` | 6 | rays per cell of radius above that |
+| `EXPLODE_FIRE_ODDS` | 150 | out of 255: how much of the inner blast catches |
 | `BLAST_LIFT` | 16 | sixteenths of energy per unit of density, in the lift formula |
 | `BLAST_SCATTER` | 24 | lift at which matter flies clear |
 | `BLAST_CRUMBLE` | 8 | lift at which matter breaks up and falls |

@@ -569,7 +569,7 @@ app_draw_pots :: proc(app: ^App) {
 		r := f32(POT_R) * scale
 
 		rl.DrawCircleV(rl.Vector2{x, y}, r, POT_BODY)
-		rl.DrawCircleV(rl.Vector2{x, y - r}, max(scale*0.5, 1), POT_GLOW)
+		app_draw_glow(app, p.x, p.y-f32(POT_R), POT_FUSE_HALO, POT_FUSE_BLAZE, POT_FUSE_PEAK, 1, POT_GLOW, POT_CORE)
 	}
 }
 
