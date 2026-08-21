@@ -6,27 +6,6 @@ import "core:math"
 import "core:strings"
 import "core:testing"
 
-/*
-The tools that the MCP client can call.
-
-They fall into three groups, which are the three things the game is
-made of:
-
-  the biome map   which biome owns which region of the world
-  the tile sets   what a biome is made of, tile by tile
-  the sandbox     what a rectangle of that world does next
-
-The first two are the editors. Every one of their tools calls the same
-procedure the mouse calls, so a model and a hand cannot paint
-different worlds. The third is the physics, and it is reached only
-through the input queue.
-
-Every tool answers in plain text. Text suits a model better than a
-deep JSON tree: the map, the queue, and the counters read in one
-block, and there is no schema to learn.
-*/
-
-// A map is capped so one answer cannot flood the client.
 MCP_MAX_MAP_CELLS :: 20000
 
 MCP_TOOLS_JSON :: `{"tools":[
@@ -211,10 +190,6 @@ mcp_call_tool :: proc(s: ^Sim, out: ^strings.Builder, id: json.Value, request: j
 	}
 }
 
-// ------------------------------------------------------------
-// Reading the state
-// ------------------------------------------------------------
-
 tool_world_status :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
 
@@ -314,10 +289,6 @@ tool_list_biomes :: proc(s: ^Sim) -> string {
 	return strings.to_string(b)
 }
 
-// ------------------------------------------------------------
-// The biome map editor
-// ------------------------------------------------------------
-
 tool_biome_map_view :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	m := s.world.biome_map
@@ -379,8 +350,6 @@ tool_biome_map_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) 
 	painted := 0
 
 	if rows, has_rows := json_rows_field(arguments, "rows"); has_rows {
-		// A picture. Each character names a biome by its glyph, and a
-		// space or a dot leaves the pixel alone.
 		for row, dy in rows {
 			for i in 0 ..< len(row) {
 				glyph := row[i]
@@ -442,10 +411,6 @@ tool_biome_map_save :: proc(s: ^Sim) -> (string, bool) {
 	return message, !ok
 }
 
-// ------------------------------------------------------------
-// The tile editor
-// ------------------------------------------------------------
-
 tool_tile_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	name := json_string_field(arguments, "biome", "")
 	idx, found := find_biome_index(s.world.biomes, name)
@@ -463,13 +428,6 @@ tool_tile_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	return strings.to_string(b), false
 }
 
-/*
-What the set is and how it holds together.
-
-A model that has never seen the editor learns the rule here: which
-tile is in hand, what the four edge colors mean, and which cells a
-stroke will carry into the rest of the set.
-*/
 @(private = "file")
 write_tile_set_lines :: proc(b: ^strings.Builder, s: ^Sim) {
 	e := &s.tile_edit
@@ -552,10 +510,9 @@ tool_tile_paint :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	y := i32(json_int_field(arguments, "y", 0))
 
 	painted := 0
-	shared := 0 // cells that landed in the rest of the set as well
+	shared := 0
 
 	if rows, has_rows := json_rows_field(arguments, "rows"); has_rows {
-		// A picture, in material glyphs. A space leaves a cell alone.
 		for row, dy in rows {
 			for i in 0 ..< len(row) {
 				glyph := row[i]
@@ -620,13 +577,7 @@ tool_tile_save :: proc(s: ^Sim) -> (string, bool) {
 	return message, !ok
 }
 
-// ------------------------------------------------------------
-// The sandbox
-// ------------------------------------------------------------
-
 tool_sandbox_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
-	// Every field defaults to what the sandbox already has, so a call
-	// with no arguments reloads the same rectangle from the world.
 	width := i32(clamp(json_int_field(arguments, "width", i64(s.sandbox.width)), 1, SANDBOX_MAX_WIDTH))
 	height := i32(clamp(json_int_field(arguments, "height", i64(s.sandbox.height)), 1, SANDBOX_MAX_HEIGHT))
 	seed := u64(json_int_field(arguments, "seed", 1))
@@ -635,7 +586,6 @@ tool_sandbox_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	origin_x := i32(json_int_field(arguments, "x", i64(s.sandbox.origin_x)))
 	origin_y := i32(json_int_field(arguments, "y", i64(s.sandbox.origin_y)))
 
-	// A biome name is easier to aim with than a world coordinate.
 	found_biome := ""
 	if name := json_string_field(arguments, "biome", ""); name != "" {
 		idx, found := find_biome_index(s.world.biomes, name)
@@ -696,10 +646,6 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		command.material = u16(index)
 	}
 
-	// explode and dig carry their power in the same u16 spawn carries a
-	// material index in: command_power (src/sim.odin) reads it back as a
-	// plain number. There is no default a blast or a dig tool should
-	// guess at, so both require it, the same way spawn requires a name.
 	if kind == .Explode || kind == .Dig {
 		if !json_has_field(arguments, "power") {
 			return fmt.tprintf("%s needs a power (0 to 255). Explode: energy per ray. Dig: hardness removed; rock is 8.", kind_name), true
@@ -720,8 +666,7 @@ tool_enqueue_input :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		}
 		command.buttons = held
 		command.pressed = edge
-		// A Move names no place in the world, so x carries the aim;
-		// src/input_queue.odin says so where the field is declared.
+		// x field carries aim for Move; must match input_queue.odin
 		command.x = i32(parse_player_aim(s, arguments))
 	}
 
@@ -811,8 +756,6 @@ observe_sandbox :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	rows := (height + sample - 1) / sample
 	if message, ok := check_map_size(columns, rows); !ok do return message, true
 
-	// Copy the region out at the sample rate, so one renderer draws the
-	// sandbox, the world, and a tile.
 	view := make([]Cell, int(columns) * int(rows), context.temp_allocator)
 	for r in 0 ..< rows {
 		for c in 0 ..< columns {
@@ -853,7 +796,6 @@ observe_world :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	if step > 1 do fmt.sbprintf(&b, ", one character per %d world cells", step)
 	strings.write_string(&b, "\n")
 
-	// Which biome the corners belong to, so a reader can place the view.
 	fmt.sbprintf(
 		&b, "top left is %s, bottom right is %s\n",
 		s.world.biomes.names[world_biome_at(s.world, ox, oy)],
@@ -893,18 +835,6 @@ tool_queue_peek :: proc(s: ^Sim, arguments: json.Object) -> string {
 	return strings.to_string(b)
 }
 
-// ------------------------------------------------------------
-// The player
-// ------------------------------------------------------------
-
-/*
-Where the wizard is, in a sentence a model can act on: his position,
-what holds him up, how fast he is moving, how much jetpack fuel is
-left, and whether the play sandbox is under him at all. "Standing on"
-reads the same Terrain sim_step_player builds, so what this reports is
-exactly what his feet are resting on, not a guess from the generator
-alone.
-*/
 tool_player_status :: proc(s: ^Sim) -> string {
 	p := s.player
 	t := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
@@ -930,18 +860,6 @@ tool_player_status :: proc(s: ^Sim) -> string {
 	return strings.to_string(b)
 }
 
-/*
-Drive the wizard for `ticks` ticks with `buttons` held, calling
-sim_step_player each tick: the same procedure the game window's fixed
-step calls and the Move command applies (docs/player.md, "one path for
-a hand and a model"). There is no second way to move him in here.
-
-The first call turns on following (sim_play_begin), so a model that
-has never touched sandbox_open still gets a wizard standing on running
-physics rather than a picture of it. Later calls pay almost nothing
-for calling it again: sim_follow_player only reopens the sandbox once
-he has actually left the square it already covers.
-*/
 tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	names, _ := json_rows_field(arguments, "buttons")
 	held, bad, buttons_ok := parse_player_buttons(names)
@@ -965,10 +883,6 @@ tool_player_move :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 	return strings.to_string(b), false
 }
 
-// ------------------------------------------------------------
-// Shared pieces
-// ------------------------------------------------------------
-
 parse_command_kind :: proc(name: string) -> (Command_Kind, bool) {
 	switch name {
 	case "noop":    return .Noop, true
@@ -982,18 +896,6 @@ parse_command_kind :: proc(name: string) -> (Command_Kind, bool) {
 	return .Noop, false
 }
 
-/*
-Where the digger points, as degrees in the JSON and a byte of turn in
-the command, for enqueue_input's "move" kind and for player_move.
-
-Degrees, and not the byte itself, because the byte is a detail of how
-Player and Input_Command are packed (src/player.odin, "Aim") and a
-caller should not have to know it. 0 is right and 90 is down, because
-y grows downward everywhere else in this server too.
-
-A caller that names no aim gets the way the wizard already faces,
-which is where the tool pointed before there was a cursor to point it.
-*/
 parse_player_aim :: proc(s: ^Sim, arguments: json.Object) -> u8 {
 	if !json_has_field(arguments, "aim") {
 		return s.player.facing < 0 ? PLAYER_AIM_LEFT : PLAYER_AIM_RIGHT
@@ -1002,13 +904,6 @@ parse_player_aim :: proc(s: ^Sim, arguments: json.Object) -> u8 {
 	return u8(i32(math.round(degrees / 360 * 256)) & 255)
 }
 
-/*
-The buttons a JSON array of strings names, for enqueue_input's "move"
-kind and for player_move. Both read the same names, so the reply from
-list of buttons and the argument that sets them never drift apart.
-An unknown name fails the whole call rather than being dropped, the
-same rule tile_paint and biome_map_paint use for an unknown glyph.
-*/
 parse_player_buttons :: proc(names: []string) -> (held: Player_Input, bad: string, ok: bool) {
 	for name in names {
 		switch name {
@@ -1032,14 +927,6 @@ check_map_size :: proc(columns, rows: i32) -> (string, bool) {
 	), false
 }
 
-/*
-One character per biome, for the map view and for painting a picture.
-
-The first letter of the name is the obvious choice. Two biomes can
-start with the same letter, so a clash falls back to the id. The
-result depends only on the table, so the glyph a view prints is the
-glyph a paint accepts.
-*/
 biome_glyph :: proc(s: ^Sim, id: Biome_Id) -> u8 {
 	names := s.world.biomes.names
 	if int(id) >= len(names) || len(names[id]) == 0 do return '?'
@@ -1047,7 +934,6 @@ biome_glyph :: proc(s: ^Sim, id: Biome_Id) -> u8 {
 	wanted := upper_byte(names[id][0])
 	for i in 0 ..< int(id) {
 		if len(names[i]) > 0 && upper_byte(names[i][0]) == wanted {
-			// Taken by an earlier biome, so use the id instead.
 			return int(id) < 10 ? byte('0') + byte(id) : '?'
 		}
 	}
@@ -1072,7 +958,6 @@ upper_byte :: proc(c: u8) -> u8 {
 	return c >= 'a' && c <= 'z' ? c - 32 : c
 }
 
-// The first map pixel a biome owns, for aiming the sandbox at it.
 biome_first_pixel :: proc(s: ^Sim, id: Biome_Id) -> (px: i32, py: i32, found: bool) {
 	m := s.world.biome_map
 	for y in i32(0) ..< m.height {
@@ -1083,12 +968,6 @@ biome_first_pixel :: proc(s: ^Sim, id: Biome_Id) -> (px: i32, py: i32, found: bo
 	return 0, 0, false
 }
 
-/*
-Pick one material for a block of sandbox cells.
-
-The first cell that is not air wins, so a thin stream stays visible
-when the map is sampled down.
-*/
 sample_sandbox :: proc(s: ^Sim, x, y, sample: i32) -> Cell {
 	if sample == 1 do return sandbox_cell(&s.sandbox, x, y)
 
@@ -1101,7 +980,6 @@ sample_sandbox :: proc(s: ^Sim, x, y, sample: i32) -> Cell {
 	return MATERIAL_AIR
 }
 
-// Two ruler lines carrying the tens and the units of the coordinate.
 write_column_ruler :: proc(b: ^strings.Builder, origin, columns, step: i32) {
 	strings.write_string(b, "     ")
 	for c in 0 ..< columns {
@@ -1116,12 +994,6 @@ write_column_ruler :: proc(b: ^strings.Builder, origin, columns, step: i32) {
 	strings.write_string(b, "\n")
 }
 
-/*
-Draw a rectangle of cells as characters, with a ruler and a legend.
-
-The sandbox, the generated world, and an open tile all reduce to a
-flat slice of cells, so one procedure draws all three.
-*/
 write_cell_map :: proc(
 	b: ^strings.Builder,
 	s: ^Sim,
@@ -1177,10 +1049,6 @@ write_census_line :: proc(b: ^strings.Builder, s: ^Sim) {
 	strings.write_string(b, "\n")
 }
 
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
-
 @(private = "file")
 tool_sim :: proc(t: ^testing.T) -> Sim {
 	s: Sim
@@ -1198,12 +1066,6 @@ arguments_of :: proc(t: ^testing.T, text: string) -> json.Object {
 	return object
 }
 
-/*
-The arguments that name one tile of a set.
-
-fmt reads a brace as the start of a verb, so a JSON literal cannot be
-built with tprintf. The pieces are joined instead.
-*/
 @(private = "file")
 select_arguments :: proc(t: ^testing.T, sig: Wang_Signature, variant: int) -> json.Object {
 	text := strings.concatenate(
@@ -1246,9 +1108,6 @@ test_tool_list_is_valid_json :: proc(t: ^testing.T) {
 
 @(test)
 test_tool_list_fits_on_one_line :: proc(t: ^testing.T) {
-	// The transport puts one message on one line. The tool list is
-	// written across several lines for a reader, so the writer must
-	// fold it back before it goes out.
 	listing := MCP_TOOLS_JSON
 	folded := strings.builder_make(context.temp_allocator)
 	for i in 0 ..< len(listing) {
@@ -1265,8 +1124,6 @@ test_tool_list_fits_on_one_line :: proc(t: ^testing.T) {
 
 @(test)
 test_biome_glyphs_round_trip :: proc(t: ^testing.T) {
-	// A view prints these and a paint reads them back, so two biomes
-	// may not share one.
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
@@ -1304,8 +1161,6 @@ test_biome_map_paint_takes_a_picture :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
-	// Built by hand, not with a format string: fmt reads a brace as a
-	// directive, so a JSON literal cannot go through tprintf.
 	glyph := [2]u8{biome_glyph(&s, Biome_Id(0)), biome_glyph(&s, Biome_Id(0))}
 	row := string(glyph[:])
 	rows := strings.concatenate(
@@ -1334,7 +1189,6 @@ test_biome_map_paint_rejects_what_it_cannot_read :: proc(t: ^testing.T) {
 
 @(test)
 test_biome_map_save_is_blocked_when_the_map_is_cut_in_two :: proc(t: ^testing.T) {
-	// The same gate the world editor applies, reached through a tool.
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
@@ -1370,7 +1224,6 @@ test_tile_open_refuses_a_flat_biome :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
-	// Sky fills flat, so it has no set to paint.
 	text, failed := tool_tile_open(&s, arguments_of(t, `{"biome":"Sky"}`))
 	testing.expect(t, failed, "a flat biome has no tiles")
 	testing.expect(t, strings.contains(text, "generator = wang"), "the reply must say how to give it some")
@@ -1386,16 +1239,12 @@ test_tile_open_select_paint_and_view :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(opened, "Coalmine"))
 	testing.expect(t, s.tile_edit.open)
 
-	// A tile is named by its edge colors, the same way its file is.
 	chosen, select_failed := tool_tile_select(&s, arguments_of(t, `{"edges":"1010"}`))
 	testing.expect(t, !select_failed)
 	testing.expect(t, strings.contains(chosen, "coalmine_1010_0.png"), "the reply must name the file")
 	testing.expect(t, wang_north(s.tile_edit.sig) == 1 && wang_east(s.tile_edit.sig) == 0)
 	testing.expect(t, wang_south(s.tile_edit.sig) == 1 && wang_west(s.tile_edit.sig) == 0)
 
-	// The middle of the tile, so the paint stays in this one. The first
-	// stroke may meet a cell that already holds the material it paints,
-	// so the count is read from the second one, which cannot.
 	tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"width":4,"height":4,"material":"Rock"}`))
 	text, paint_failed := tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"width":4,"height":4,"material":"Gold"}`))
 	testing.expect(t, !paint_failed)
@@ -1427,16 +1276,12 @@ test_tile_select_refuses_a_bad_name :: proc(t: ^testing.T) {
 	testing.expect(t, no_variant, "a variant nobody drew is a mistake")
 }
 
-/*
-A stroke in a border band is a stroke on the seam, so it lands in
-every tile that carries that edge color and nowhere else.
-*/
 @(test)
 test_a_seam_paint_reaches_every_tile_with_that_edge :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
-	tool_tile_select(&s, arguments_of(t, `{"edges":"0001"}`)) // west edge is color 1
+	tool_tile_select(&s, arguments_of(t, `{"edges":"0001"}`))
 
 	text, failed := tool_tile_paint(&s, arguments_of(t, `{"x":0,"y":32,"material":"Gold"}`))
 	testing.expect(t, !failed)
@@ -1459,23 +1304,15 @@ test_a_seam_paint_reaches_every_tile_with_that_edge :: proc(t: ^testing.T) {
 		}
 	}
 
-	// The set still agrees with itself, so the save gate stays open.
-	// The save itself is not called here, because it would write over
-	// the tiles in the repository.
 	testing.expect(t, tile_editor_can_save(&s))
 }
 
-/*
-A set painted somewhere else can disagree with itself. The save gate
-catches it and tile_repair mends it.
-*/
 @(test)
 test_the_save_gate_catches_a_broken_seam :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
 
-	// Reach past the editor, the way a pixel editor would.
 	b := tile_editor_biome(&s)
 	gold, _ := find_material_index(s.world.materials, "Gold")
 	tile_set_cell(s.world.tiles, wang_tile_id(b, wang_signature(1, 1, 1, 1), 0), 0, 32, Cell(gold))
@@ -1497,7 +1334,6 @@ test_tile_paint_takes_a_picture :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
 
-	// A space leaves a cell alone, so a picture can be a stencil.
 	tile := tile_editor_tile(&s)
 	before := tile_at(s.world.tiles, tile, 21, 20)
 	_, failed := tool_tile_paint(&s, arguments_of(t, `{"x":20,"y":20,"rows":["G G","GGG"]}`))
@@ -1512,15 +1348,11 @@ test_tile_paint_takes_a_picture :: proc(t: ^testing.T) {
 
 @(test)
 test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
-	// The point of the editors: paint once, and every region of that
-	// biome changes with it, right down into the physics.
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
 	tool_tile_open(&s, arguments_of(t, `{"biome":"Coalmine"}`))
 
-	// The sandbox reads several squares of the lattice, so every tile
-	// of the set has to hold the paint for every cell of it to.
 	b := tile_editor_biome(&s)
 	for sig in 0 ..< WANG_SIGNATURES {
 		for v in 0 ..< int(b.variants) {
@@ -1542,8 +1374,6 @@ test_a_tile_paint_reaches_the_world_and_the_sandbox :: proc(t: ^testing.T) {
 
 @(test)
 test_sandbox_open_keeps_what_it_is_not_told :: proc(t: ^testing.T) {
-	// A bare call reloads the same rectangle, which is how an edit
-	// reaches the physics.
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
@@ -1598,8 +1428,6 @@ test_tick_runs_the_queued_command :: proc(t: ^testing.T) {
 	s := tool_sim(t)
 	defer sim_unload(&s)
 
-	// Inside the Sky biome, which fills with Air, so the terrain behind
-	// does not hide the sand. Off the map would be Deep_Rock.
 	tool_sandbox_open(&s, arguments_of(t, `{"x":0,"y":-4000,"width":32,"height":24}`))
 	tool_enqueue_input(&s, arguments_of(t, `{"kind":"spawn","x":16,"y":0,"radius":1,"material":"Sand"}`))
 
@@ -1688,10 +1516,6 @@ test_lists_name_everything :: proc(t: ^testing.T) {
 
 @(test)
 test_a_slow_client_and_a_fast_client_agree :: proc(t: ^testing.T) {
-	// This is the point of the queue. One client sends every command
-	// before running any tick. The other sends a command, runs a tick,
-	// and sends the next. Both name the same execution ticks, so both
-	// sandboxes must match.
 	planned := tool_sim(t)
 	defer sim_unload(&planned)
 	sim_open_sandbox(&planned, 32, 24, 0, 0, 5, 0)
@@ -1722,10 +1546,6 @@ test_a_slow_client_and_a_fast_client_agree :: proc(t: ^testing.T) {
 	)
 }
 
-// ------------------------------------------------------------
-// explode, dig and move on the queue; the player tools
-// ------------------------------------------------------------
-
 @(test)
 test_enqueue_input_accepts_the_new_kinds :: proc(t: ^testing.T) {
 	s := tool_sim(t)
@@ -1755,7 +1575,7 @@ test_enqueue_input_accepts_the_new_kinds :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, !move_failed, move_text)
 
-	sim_run(&s, 5) // reach the default input delay of 2, and then some
+	sim_run(&s, 5)
 
 	sandbox_census(&s.sandbox, counts)
 	testing.expectf(
@@ -1796,12 +1616,6 @@ test_player_move_moves_the_wizard_and_player_status_reports_it :: proc(t: ^testi
 	testing.expect(t, strings.contains(after, "is following him"), "status must say the sandbox is following him now")
 }
 
-/*
-The aim reaches the wizard through the model's path too, and it is
-degrees here and a byte of turn there. Without this a model can hold
-the dig button and only ever cut the two ways it can walk, which is
-the tool the cursor replaced.
-*/
 @(test)
 test_player_move_points_the_digger_in_degrees :: proc(t: ^testing.T) {
 	s := tool_sim(t)
@@ -1811,13 +1625,10 @@ test_player_move_points_the_digger_in_degrees :: proc(t: ^testing.T) {
 	testing.expect(t, !failed, text)
 	testing.expectf(t, s.player.aim == PLAYER_AIM_DOWN, "90 degrees must read as straight down, got %d", s.player.aim)
 
-	// y grows downward, so 270 is up and not down.
 	_, up_failed := tool_player_move(&s, arguments_of(t, `{"buttons":["dig"],"ticks":1,"aim":270}`))
 	testing.expect(t, !up_failed, "an aim of 270 must be accepted")
 	testing.expectf(t, s.player.aim == PLAYER_AIM_UP, "270 degrees must read as straight up, got %d", s.player.aim)
 
-	// No aim at all keeps him pointing the way he faces, which is what
-	// the tool did before there was a cursor to point it.
 	s.player.facing = -1
 	_, none_failed := tool_player_move(&s, arguments_of(t, `{"buttons":[],"ticks":1}`))
 	testing.expect(t, !none_failed, "a move with no aim must be accepted")

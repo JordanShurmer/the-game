@@ -6,27 +6,19 @@ import "core:strconv"
 import "core:strings"
 import "core:testing"
 
-/*
-Load biomes from the simple text format in data/biomes.txt.
-
-Authoring mistakes are hard errors. A silent default here would show
-up much later as a wrong world, so the loader stops at the first bad
-line and reports where it is.
-*/
-
 Biome_Load_Error :: enum u8 {
 	None,
 	File_Unreadable,
-	Missing_Key,      // a biome has no color or no fill_0
-	Duplicate_Color,  // two biomes share one key color
-	Unknown_Material, // fill_0 names a material that does not exist
-	Unknown_Biome,    // biome_off_map names a biome that does not exist
-	Bad_Value,        // a value does not parse, or is out of range
+	Missing_Key,
+	Duplicate_Color,
+	Unknown_Material,
+	Unknown_Biome,
+	Bad_Value,
 	Too_Many_Biomes,
-	Tile_Mismatch,    // generator and the tiles key disagree
+	Tile_Mismatch,
 	Too_Many_Tiles,
-	Region_Mismatch,  // a region is not a whole number of tiles
-	Image_Mismatch,   // generator and the image key disagree
+	Region_Mismatch,
+	Image_Mismatch,
 }
 
 @(private = "file")
@@ -60,9 +52,6 @@ load_biomes :: proc(
 	prefixes    := make([dynamic]string, allocator)
 	image_paths := make([dynamic]string, allocator)
 
-	// The map image path, the names, the tile prefixes, and the image
-	// paths all outlive this proc, so they are cloned. Release them if
-	// the load fails part way through.
 	map_image_path: string
 	ok := false
 	defer if !ok {
@@ -80,14 +69,8 @@ load_biomes :: proc(
 	table.world_seed      = 1
 	table.off_map_biome   = BIOME_EMPTY
 
-	// biome_off_map may name a biome that appears further down the
-	// file, so it is resolved after the whole file is read. The slice
-	// points into `data`, which is alive until this proc returns.
 	off_map_name: string
 
-	// Tile ids are handed out in file order and stay dense, so the tile
-	// set is one packed block with no holes in it. Image indexes are
-	// handed out the same way, one per image biome.
 	next_tile := 0
 
 	in_map_section := false
@@ -99,14 +82,6 @@ load_biomes :: proc(
 	current_line:   int
 	seen:           bit_set[Required_Key]
 
-	/*
-	flush appends the biome being read. It runs at each new section and
-	once more at the end of the file.
-
-	The whole section is in hand by then, so this is where the keys are
-	checked against each other and where the biome takes its block of
-	tile ids.
-	*/
 	flush :: proc(
 		biomes: ^[dynamic]Biome,
 		names: ^[dynamic]string,
@@ -129,15 +104,9 @@ load_biomes :: proc(
 		if REQUIRED - seen != {} {
 			return .Missing_Key, current_line
 		}
-		// A wang generator needs tiles to draw, and tiles nothing draws
-		// are dead authoring. Either mistake shows up as a wrong world
-		// much later, so it stops the load here.
 		if (biome.generator == .Wang) != (current_prefix != "") {
 			return .Tile_Mismatch, current_line
 		}
-		// Same shape, one level down: an image generator needs its one
-		// picture, and a picture named on a biome that will not draw it
-		// is dead authoring.
 		if (biome.generator == .Image) != (current_image != "") {
 			return .Image_Mismatch, current_line
 		}
@@ -173,7 +142,6 @@ load_biomes :: proc(
 		trimmed := strings.trim_space(raw_line)
 		if len(trimmed) == 0 || trimmed[0] == '#' do continue
 
-		// New section
 		if trimmed[0] == '[' && trimmed[len(trimmed) - 1] == ']' {
 			if has_current {
 				if e, l := flush(&biomes, &names, &prefixes, &image_paths, &next_tile, current, current_name, current_prefix, current_image, seen, current_line, allocator); e != .None {
@@ -186,9 +154,6 @@ load_biomes :: proc(
 				has_current    = false
 			} else {
 				in_map_section = false
-				// A fresh biome owns no tiles and draws one of each
-				// signature. The zero value of Tile_Id is a real tile id,
-				// so tile_base must be set, not left blank.
 				current        = Biome{tile_base = TILE_NONE, variants = 1}
 				current_name   = section
 				current_prefix = ""
@@ -200,7 +165,6 @@ load_biomes :: proc(
 			continue
 		}
 
-		// key = value
 		eq := strings.index_byte(trimmed, '=')
 		if eq < 0 do continue
 
@@ -217,9 +181,6 @@ load_biomes :: proc(
 			case "cells_per_pixel":
 				v, vok := strconv.parse_i64(value)
 				if !vok || v <= 0 do return {}, .Bad_Value, line_index
-				// A region has to be a whole number of tiles across, or a
-				// biome border would cut a tile in half and the lattice
-				// would show a seam nobody drew.
 				if v % TILE_SIZE != 0 do return {}, .Region_Mismatch, line_index
 				table.cells_per_pixel = i32(v)
 			case "origin_pixel":
@@ -263,8 +224,6 @@ load_biomes :: proc(
 			case:           return {}, .Bad_Value, line_index
 			}
 		case "tiles":
-			// The value is the start of every file name in the set, not
-			// one file. wang_tile_path finishes each name.
 			if value == "" do return {}, .Bad_Value, line_index
 			current_prefix = value
 		case "variants":
@@ -272,10 +231,6 @@ load_biomes :: proc(
 			if !vok || v < 1 || v > WANG_MAX_VARIANTS do return {}, .Bad_Value, line_index
 			current.variants = u8(v)
 		case "image":
-			// The one picture this biome draws. Like tiles above, the
-			// value is only checked against the generator here; whether
-			// the file exists and is the right size is for the loader
-			// that reads the picture itself.
 			if value == "" do return {}, .Bad_Value, line_index
 			current_image = value
 		}
@@ -319,12 +274,6 @@ destroy_biome_table :: proc(table: Biome_Table, allocator := context.allocator) 
 	delete(table.image_paths, allocator)
 }
 
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
-
-// load_test_tables loads the real data files. Tests use the shipped
-// data so a bad edit to the data breaks the build.
 @(private = "file")
 load_test_tables :: proc(t: ^testing.T) -> (materials: Material_Table, biomes: Biome_Table, ok: bool) {
 	mat_ok: bool
@@ -375,7 +324,6 @@ test_load_biomes :: proc(t: ^testing.T) {
 	testing.expect(t, dirt_found)
 	testing.expect(t, int(biomes.biomes[idx].fill_0) == dirt, "a new Coalmine tile starts as Dirt")
 
-	// A wang biome carries a block of tile ids, and those ids name files.
 	b := biomes.biomes[idx]
 	testing.expect(t, b.tile_base != TILE_NONE, "Coalmine must own a set")
 	testing.expect(t, b.variants >= 1)
@@ -399,11 +347,6 @@ test_load_biomes :: proc(t: ^testing.T) {
 	testing.expect(t, int(biomes.off_map_biome) == off, "off-map biome resolves by name")
 }
 
-/*
-Tile ids are dense and the sets do not overlap. The tile set packs its
-cells by id, so an overlap would make two biomes share a tile by
-accident, and a gap would waste a block nobody can reach.
-*/
 @(test)
 test_biome_tile_ids_are_dense_and_do_not_overlap :: proc(t: ^testing.T) {
 	materials, biomes, ok := load_test_tables(t)

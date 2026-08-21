@@ -5,74 +5,19 @@ import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
 
-/*
-A picture of the world, with no window in it.
-
-The game window is the only other thing that draws the world, and it
-draws it this way: ask the generator for the rectangle, then turn
-material ids into colors through one table. A shot does the same, so
-what a shot shows is what a player sees. It needs no window, no
-display, and no graphics driver, which is what makes it the way to
-look at the world from a terminal or from a test.
-
-Use it to judge what an edit did. A tile set is 32 pictures and a
-biome is a lattice of them; neither reads as a cave system until it is
-drawn at size, so draw it and look.
-
-The wizard draws the same way. He is optional and carried on Shot
-itself, not a second argument to world_shot: the proc still takes
-exactly one World, one Shot and one path, and everything about whether
-and how to draw him lives inside the Shot the caller already builds.
-
-The sandbox follows the same rule, for the same reason. `ticks=` on
-`bin/shot` (docs/physics.md, "Looking at it") needs to draw what the
-physics did, not what the generator would still say is there, and
-`world_shot` learns this without a second code path: when shot.sandbox
-is set, the fill loop below reads sandbox_cell instead of calling
-generate. The caller (cmd/shot/main.odin) is the one that opens the
-sandbox, runs the ticks, and points shot.sandbox at it; world_shot
-itself only ever reads, never steps.
-
-Three compositing choices are worth saying outright, because a picture
-does not explain its own rules:
-
-  - He is point-sampled at whatever step the terrain is sampled at, for
-    the same reason the terrain is: at step above 1 he can shrink to a
-    few pixels, and that is an honest picture of what a pulled-back
-    view can show of anything this small, not a bug to average away.
-  - At scale above 1 he is drawn scale times over, the same as every
-    texel of terrain, so he does not go soft next to a world that
-    stays crisp.
-  - He is drawn under the grid, not over it: shot_draw_grid runs after
-    he is baked into the pixels, so grid=1 still shows the lattice over
-    the whole picture, him included, the way it already shows over
-    every material.
-*/
-
-// A shot has to fit in memory and in a reader. This is far past what
-// any view needs and still stops a typo from asking for a gigabyte.
 SHOT_MAX_PIXELS :: 8192 * 8192
 
 Shot :: struct {
 	view:    World_View,
-	scale:   i32,  // image pixels along one edge of a texel; 1 or more
-	grid:    bool, // draw the tile lattice and the region borders
-	player:  Maybe(Player), // draw him here, from `sprite`, if set
-	sprite:  Sprite_Sheet,  // the wizard sheet; read only when player is set
-	sandbox: ^Sandbox, // read cells from here instead of the generator, if set
+	scale:   i32,
+	grid:    bool,
+	player:  Maybe(Player),
+	sprite:  Sprite_Sheet,
+	sandbox: ^Sandbox,
 }
 
-// The lattice, and the borders between regions. Both are drawn over
-// the world rather than into it, so they never hide a whole cell.
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
 SHOT_REGION_LINE :: rl.Color{255, 210, 90, 130}
-
-/*
-Draw a rectangle of the world into a PNG file.
-
-Air is a transparent material. The window shows the background behind
-it, so a shot paints it over the same background and the two agree.
-*/
 world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.scale < 1 || shot.view.w <= 0 || shot.view.h <= 0 do return false
 
@@ -83,8 +28,6 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	cells := make([]Cell, int(shot.view.w) * int(shot.view.h))
 	defer delete(cells)
 	if shot.sandbox != nil {
-		// The physics already ran; read what it left rather than
-		// asking the generator, which knows nothing of a tick.
 		sb := shot.sandbox
 		for ty in 0 ..< shot.view.h {
 			wy := shot.view.y + ty * shot.view.step
@@ -97,16 +40,11 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 		generate(world, shot.view, cells)
 	}
 
-	// One color per material, composited once instead of per pixel.
 	lut: [256]rl.Color
 	for m, i in world.materials.materials {
 		lut[i] = blend_over(rl_from_argb(m.color), BACKGROUND)
 	}
 
-	// Where the player's frame falls in world cells, and which frame of
-	// which row, worked out once rather than per texel. Point-sampled
-	// below at whatever step the terrain itself is sampled at; see the
-	// header comment for why that is the honest choice above step 1.
 	player, has_player := shot.player.?
 	origin_x, origin_y: i32
 	motion: Player_Motion
@@ -147,11 +85,8 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 		}
 	}
 
-	// Drawn last, over the player as well as the terrain, so grid=1
-	// shows the lattice over the whole picture rather than under him.
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
 
-	// The image borrows our buffer, so raylib must not free it.
 	img := rl.Image {
 		data    = raw_data(pixels),
 		width   = width,
@@ -165,27 +100,13 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	return bool(rl.ExportImage(img, cpath))
 }
 
-// Why shot_open_sandbox refused to open. See docs/physics.md, "Looking
-// at it": ticks=N needs the exact rectangle the shot asks for to be a
-// sandbox, and a sandbox has rules a picture alone does not.
 Shot_Sandbox_Error :: enum u8 {
 	None,
-	Too_Large,   // the rectangle does not fit SANDBOX_MAX_WIDTH/HEIGHT
-	Wrong_Step,  // step is not 1: a sandbox is one cell per cell
-	Open_Failed, // sim_open_sandbox itself refused
+	Too_Large,
+	Wrong_Step,
+	Open_Failed,
 }
 
-/*
-Open a sandbox on exactly the rectangle a shot asks for.
-
-This is the whole of what `ticks=` needs beyond world_shot itself and
-a call to sim_run, pulled out of cmd/shot/main.odin so odin test src
-can drive it directly rather than only through the command line tool.
-The caller still runs the ticks (sim_run) and any ignite or explode
-command (sim_apply) itself, in that order, and then points
-Shot.sandbox at s.sandbox before calling world_shot: this proc only
-ever opens.
-*/
 shot_open_sandbox :: proc(s: ^Sim, view: World_View) -> Shot_Sandbox_Error {
 	if view.step != 1 do return .Wrong_Step
 	if view.w > SANDBOX_MAX_WIDTH || view.h > SANDBOX_MAX_HEIGHT do return .Too_Large
@@ -193,13 +114,6 @@ shot_open_sandbox :: proc(s: ^Sim, view: World_View) -> Shot_Sandbox_Error {
 	return .None
 }
 
-/*
-The world cell a shot of one region starts at.
-
-A biome name is easier to aim with than a coordinate, and the first
-region the map gives that biome is as good as any other, because the
-set draws through all of them.
-*/
 shot_biome_origin :: proc(world: World, biome: Biome_Id) -> (x: i32, y: i32, found: bool) {
 	m := world.biome_map
 	cpp := world.biomes.cells_per_pixel
@@ -215,16 +129,6 @@ shot_biome_origin :: proc(world: World, biome: Biome_Id) -> (x: i32, y: i32, fou
 	return 0, 0, false
 }
 
-/*
-Alpha-composite fg over bg. The result always carries full alpha: a
-shot is a flat picture, and nothing behind it is ever drawn afterward.
-
-One proc, used three ways: air over the window background, the wizard
-over whatever terrain is already at his texel, and a grid line over
-the whole picture once that terrain and that wizard are both baked in.
-Three call sites for the same blend is what makes it worth pulling out
-rather than writing the formula a third time slightly differently.
-*/
 @(private = "file")
 blend_over :: proc(fg, bg: rl.Color) -> rl.Color {
 	if fg.a == 255 do return fg
@@ -244,14 +148,6 @@ Shot_Line :: enum u8 {
 	Region,
 }
 
-/*
-Whether a border falls on the texel at this world coordinate.
-
-A region border is also a tile border, because a region is a whole
-number of tiles, so the region wins where they meet. Above step 1 a
-border can fall between two samples, and the texel that carries it is
-the first one past it.
-*/
 @(private = "file")
 shot_line_at :: proc(world: World, w: i32, step: i32) -> Shot_Line {
 	cpp := world.biomes.cells_per_pixel
@@ -287,10 +183,6 @@ shot_draw_grid :: proc(world: World, shot: Shot, pixels: []rl.Color, width, heig
 	}
 }
 
-// ------------------------------------------------------------
-// Tests
-// ------------------------------------------------------------
-
 @(test)
 test_a_shot_holds_the_world_the_generator_makes :: proc(t: ^testing.T) {
 	s: Sim
@@ -313,9 +205,6 @@ test_a_shot_holds_the_world_the_generator_makes :: proc(t: ^testing.T) {
 	defer os.remove(path)
 	testing.expect(t, world_shot(s.world, shot, path), "the shot must be written")
 
-	// Read it back and compare it with the generator. A shot that does
-	// not agree with the world is worse than no shot: it would send an
-	// author to fix a cave that is not there.
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	img := rl.LoadImage(cpath)
 	defer rl.UnloadImage(img)
@@ -330,7 +219,6 @@ test_a_shot_holds_the_world_the_generator_makes :: proc(t: ^testing.T) {
 			cell := world_cell_at(s.world, x + tx, y + ty)
 			want := rl_from_argb(s.world.materials.materials[cell].color)
 
-			// Every pixel of the block a texel covers holds that texel.
 			for sy in i32(0) ..< 2 {
 				for sx in i32(0) ..< 2 {
 					got := colors[int(ty * 2 + sy) * 48 + int(tx * 2 + sx)]
@@ -371,10 +259,6 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 	testing.expect(t, !os.exists(path), "a refused shot must write nothing")
 }
 
-// A spawned wizard for a test to draw, standing rather than mid-fall:
-// player_spawn already checked the ground under his feet, and a shot
-// draws one instant with no physics tick to discover on_ground for
-// itself the way player_step would on the game's first tick.
 @(private = "file")
 shot_test_player :: proc(t: ^testing.T, world: World) -> (p: Player, ok: bool) {
 	x, y, found := world_find_spawn(world)
@@ -395,9 +279,6 @@ test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^t
 	player, ok := shot_test_player(t, s.world)
 	if !ok do return
 
-	// Centred on the frame itself, not just on his feet, so the shot
-	// actually holds the picture of him and not just the air above
-	// where he stands.
 	ox, oy := sprite_frame_origin(player)
 	view := World_View{x = ox - 4, y = oy - 4, w = SPRITE_FRAME_W + 8, h = SPRITE_FRAME_H + 8, step = 1}
 
@@ -427,15 +308,6 @@ test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^t
 	testing.expect(t, differs, "drawing the player must change the picture")
 }
 
-/*
-Finds one opaque pixel of the idle frame inside the body box, then
-checks that world_shot puts the wizard's ink at the exact world cell
-sprite_frame_origin and sprite_pixel say it belongs at, rather than
-trusting the two procs and the compositing loop to agree by
-construction. No pixel is hard-coded: the drawing is procedural and
-authored data can change under this test, so the pixel to look for is
-found the same way world_shot would find it.
-*/
 @(test)
 test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^testing.T) {
 	s: Sim
@@ -449,7 +321,7 @@ test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^tes
 	player, ok := shot_test_player(t, s.world)
 	if !ok do return
 
-	motion := player_motion(player) // .Idle: on_ground is true and vx is 0
+	motion := player_motion(player)
 	column := sprite_frame(motion, player.anim)
 
 	ink_x, ink_y := i32(-1), i32(-1)
@@ -526,13 +398,6 @@ test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: pro
 	)
 }
 
-/*
-The point of `ticks=`: a shot taken after the physics ran must not be
-the same picture as a shot taken before it. Sand is painted at the top
-of an Air-filled rectangle so gravity gives a scene that certainly
-moves, the same shape test_a_shot_with_the_player_differs_from_the_same_shot_without_him
-uses for the player.
-*/
 @(test)
 test_a_shot_with_ticks_differs_from_the_same_shot_without_them :: proc(t: ^testing.T) {
 	s: Sim
@@ -542,9 +407,6 @@ test_a_shot_with_ticks_differs_from_the_same_shot_without_them :: proc(t: ^testi
 	sand, sand_found := find_material_index(s.world.materials, "Sand")
 	if !testing.expect(t, sand_found, "Sand must exist") do return
 
-	// Inside the Sky biome, which fills with Air, so nothing behind the
-	// sandbox hides the fall (the same coordinate test_tick_runs_the_
-	// queued_command in mcp_tools.odin already trusts for this).
 	view := World_View{x = 0, y = -4000, w = 40, h = 40, step = 1}
 
 	err := shot_open_sandbox(&s, view)

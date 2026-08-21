@@ -2,99 +2,53 @@ package game
 
 import "core:testing"
 
-/*
-Input queue.
-
-The design comes from old school network code. A command never
-changes the world at the moment it arrives. Every command gets an
-execution tick and waits in a ring of tick slots. At the start of
-each tick the simulation takes one slot and applies the commands in
-a fixed order.
-
-Old lockstep engines used this to keep every machine in step. The
-same structure gives the same benefits here:
-
-  - Latency does not change the result. A slow client and a fast
-    client build the same world when the commands carry the same
-    execution ticks.
-  - The order is stable. Commands run sorted by source and by
-    sequence number, so arrival order does not matter.
-  - The run repeats. A seed and a command list rebuild the world
-    exactly, which makes a replay and a test cheap.
-
-The input delay is the second half of the idea. A command is not
-placed on the next tick but a few ticks ahead. The gap gives every
-sender time to deliver before the tick runs. A large delay hides
-more latency and costs more response time.
-*/
-
-INPUT_SLOT_COUNT :: 64 // ring length in ticks; must be a power of two
+INPUT_SLOT_COUNT :: 64
 INPUT_SLOT_MASK  :: u64(INPUT_SLOT_COUNT - 1)
-INPUT_PER_SLOT   :: 16 // commands that one tick can hold
-INPUT_SOURCES    :: 8  // senders that can share one world
+INPUT_PER_SLOT   :: 16
+INPUT_SOURCES    :: 8
 INPUT_DELAY_MAX  :: 32
 
 #assert(INPUT_SLOT_COUNT & (INPUT_SLOT_COUNT - 1) == 0)
 
 Command_Kind :: enum u8 {
-	Noop,    // holds a tick without a change; useful to keep a stream alive
-	Spawn,   // fill a disc with a material
-	Erase,   // clear a disc back to air
-	Ignite,  // set light material in a disc alight
-	Explode, // cast rays from a point; `material` carries the power
-	Dig,     // remove soft material in a disc; `material` carries the power
-	Move,    // one tick of the wizard's input; see buttons, pressed and x below
+	Noop,
+	Spawn,
+	Erase,
+	Ignite,
+	Explode,
+	Dig,
+	Move,
 }
 
-/*
-Fields are ordered so the struct has no interior padding.
-
-buttons and pressed live in what used to be two spare pad bytes at the
-tail, unread by every command but Move: docs/player.md names this the
-rung that lets a model walk the wizard the way a hand does, and the
-struct was already shaped to hold it without growing. buttons is what
-Player_Input.player_step calls `held`; pressed is the edge, for the
-jump check, not a plain bool, because Input_Command has no room for a
-field that only Move would ever set alongside a byte that already
-covers it.
-
-Move carries the aim in `x`, a byte of turn in a field it has no other
-use for: a Move names no place in the world, and the aim has to reach
-player_step through the queue unchanged or a replayed dig cuts a
-different tunnel than the one that was played.
-*/
 Input_Command :: struct {
-	tick:     u64, // execution tick, set by the queue
-	seq:      u32, // per source counter, set by the queue
-	x:        i32,     // Move: the aim, a byte of turn; see above
+	tick:     u64,
+	seq:      u32,
+	x:        i32,
 	y:        i32,
 	radius:   u16,
-	material: u16,     // index into the material table
+	material: u16,
 	kind:     Command_Kind,
-	source:   u8,      // which sender issued the command
-	buttons:  Player_Input, // Move: what is held this tick
-	pressed:  Player_Input, // Move: what went down this tick, for the jump edge
+	source:   u8,
+	buttons:  Player_Input,
+	pressed:  Player_Input,
 }
 
-// Two commands per 64-byte cache line; keep it that way.
 #assert(size_of(Input_Command) == 32)
 
 Enqueue_Status :: enum u8 {
 	Accepted,
-	Late,       // the tick had passed, so the command moved to the next tick
-	Slot_Full,  // the target tick already holds INPUT_PER_SLOT commands
-	Too_Far,    // the target tick lies beyond the ring
-	Bad_Source, // the source number is out of range
+	Late,
+	Slot_Full,
+	Too_Far,
+	Bad_Source,
 }
 
 Input_Queue :: struct {
 	slots:    [INPUT_SLOT_COUNT][INPUT_PER_SLOT]Input_Command,
 	counts:   [INPUT_SLOT_COUNT]u8,
 	next_seq: [INPUT_SOURCES]u32,
-	delay:    u8, // ticks between arrival and execution
+	delay:    u8,
 
-	// Counters for the caller. Old engines showed the same numbers
-	// to explain a stutter.
 	accepted: u64,
 	late:     u64,
 	rejected: u64,
@@ -106,16 +60,6 @@ input_queue_init :: proc(q: ^Input_Queue, delay: u8) {
 	q.delay = delay > INPUT_DELAY_MAX ? INPUT_DELAY_MAX : delay
 }
 
-/*
-Put a command in the queue.
-
-`now` is the next tick that the simulation runs. A negative
-`at_tick` asks for the default, which is `now + delay`. A caller
-that must match another machine sends the exact tick instead.
-
-The result holds the command with the execution tick and the
-sequence number that the queue assigned.
-*/
 input_queue_push :: proc(q: ^Input_Queue, now: u64, command: Input_Command, at_tick: i64 = -1) -> (out: Input_Command, status: Enqueue_Status) {
 	out = command
 	status = .Accepted
@@ -129,10 +73,6 @@ input_queue_push :: proc(q: ^Input_Queue, now: u64, command: Input_Command, at_t
 	if at_tick >= 0 {
 		target = u64(at_tick)
 		if target < now {
-			// The tick has gone. A lockstep engine would drop this or
-			// roll back. This queue moves the command to the next tick
-			// and counts it, so a slow sender still has an effect and
-			// still sees that it was slow.
 			target = now
 			status = .Late
 		}
@@ -161,15 +101,6 @@ input_queue_push :: proc(q: ^Input_Queue, now: u64, command: Input_Command, at_t
 	return out, status
 }
 
-/*
-Take the commands of one tick.
-
-The result is sorted by source and then by sequence number. This
-order does not depend on arrival order, so two machines with the
-same commands build the same world.
-
-`out` must hold at least INPUT_PER_SLOT commands.
-*/
 input_queue_drain :: proc(q: ^Input_Queue, tick: u64, out: []Input_Command) -> int {
 	slot := int(tick & INPUT_SLOT_MASK)
 	count := int(q.counts[slot])
@@ -178,8 +109,6 @@ input_queue_drain :: proc(q: ^Input_Queue, tick: u64, out: []Input_Command) -> i
 
 	copy(out[:count], q.slots[slot][:count])
 
-	// An insertion sort suits a list this short and keeps the order
-	// of equal entries.
 	for i in 1 ..< count {
 		command := out[i]
 		j := i - 1
@@ -199,26 +128,19 @@ input_command_after :: proc(a, b: Input_Command) -> bool {
 	return a.seq > b.seq
 }
 
-// Commands that wait for a tick.
 input_queue_depth :: proc(q: ^Input_Queue) -> (pending: int) {
 	for count in q.counts do pending += int(count)
 	return pending
 }
 
-// Commands that wait for one named tick.
 input_queue_depth_at :: proc(q: ^Input_Queue, tick: u64) -> int {
 	return int(q.counts[int(tick & INPUT_SLOT_MASK)])
 }
 
-// Read the commands that wait for one tick without removing them.
 input_queue_peek :: proc(q: ^Input_Queue, tick: u64) -> []Input_Command {
 	slot := int(tick & INPUT_SLOT_MASK)
 	return q.slots[slot][:q.counts[slot]]
 }
-
-// ------------------------------------------------------------
-// Tests (run with: odin test src  from repo root)
-// ------------------------------------------------------------
 
 @(private = "file")
 spawn_command :: proc(source: u8, x, y: i32) -> Input_Command {
@@ -252,8 +174,6 @@ test_drain_only_takes_the_named_tick :: proc(t: ^testing.T) {
 
 @(test)
 test_drain_order_ignores_arrival_order :: proc(t: ^testing.T) {
-	// Two senders interleave. The drain must sort them the same way
-	// whatever order the commands arrived in.
 	forward: Input_Queue
 	reverse: Input_Queue
 	input_queue_init(&forward, 0)
@@ -333,8 +253,6 @@ test_bad_source_is_rejected :: proc(t: ^testing.T) {
 
 @(test)
 test_ring_reuses_a_slot_after_the_drain :: proc(t: ^testing.T) {
-	// Tick 0 and tick INPUT_SLOT_COUNT share a slot. The drain of the
-	// first must leave nothing behind for the second.
 	q: Input_Queue
 	input_queue_init(&q, 0)
 	buffer: [INPUT_PER_SLOT]Input_Command

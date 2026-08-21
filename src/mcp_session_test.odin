@@ -4,14 +4,6 @@ import "core:encoding/json"
 import "core:strings"
 import "core:testing"
 
-/*
-End to end tests for the MCP server.
-
-These tests drive `mcp_handle`, which is the same entry point that
-the transport uses. They check the messages that a client would
-receive, not the pieces behind them.
-*/
-
 @(private = "file")
 Session :: struct {
 	sim: Sim,
@@ -31,7 +23,6 @@ session_stop :: proc(session: ^Session) {
 	sim_unload(&session.sim)
 }
 
-// Send one message and return the raw reply, which may be empty.
 @(private = "file")
 send :: proc(session: ^Session, message: string) -> string {
 	out := strings.builder_make(context.temp_allocator)
@@ -39,7 +30,6 @@ send :: proc(session: ^Session, message: string) -> string {
 	return strings.to_string(out)
 }
 
-// Send one message and read the reply as JSON.
 @(private = "file")
 send_json :: proc(t: ^testing.T, session: ^Session, message: string) -> json.Object {
 	reply := send(session, message)
@@ -53,7 +43,6 @@ send_json :: proc(t: ^testing.T, session: ^Session, message: string) -> json.Obj
 	return object
 }
 
-// Read the text that a tool call produced.
 @(private = "file")
 tool_text :: proc(t: ^testing.T, reply: json.Object) -> (text: string, is_error: bool) {
 	result, has_result := json_object_field(reply, "result")
@@ -127,9 +116,6 @@ test_session_never_answers_a_notification :: proc(t: ^testing.T) {
 
 @(test)
 test_every_reply_is_one_line :: proc(t: ^testing.T) {
-	// The transport reads one message per line, so a reply that holds
-	// a newline would break the stream. The map is the real risk: it
-	// is full of newlines before the escape runs.
 	session := session_start(t)
 	defer session_stop(&session)
 
@@ -191,27 +177,21 @@ test_session_plays_a_full_turn :: proc(t: ^testing.T) {
 
 	send(&session, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 
-	// Open on the Sky biome, which fills with Air, so the terrain
-	// behind does not hide the sand.
 	call(t, &session, 1, `{"name":"sandbox_open","arguments":{"x":0,"y":-4000,"width":32,"height":20}}`)
 
-	// A command waits for its tick.
 	queued, queue_failed := call(t, &session, 2,
 		`{"name":"enqueue_input","arguments":{"kind":"spawn","x":16,"y":0,"radius":2,"material":"Sand"}}`)
 	testing.expect(t, !queue_failed)
 	testing.expect(t, strings.contains(queued, "runs on tick 2"))
 
-	// The world must not change before that tick.
 	early, _ := call(t, &session, 3, `{"name":"tick","arguments":{"count":1}}`)
 	testing.expect(t, strings.contains(early, "applied 0 commands"))
 	testing.expect(t, !strings.contains(early, "Sand"), "no sand before the command runs")
 
-	// The tick arrives and the command runs.
 	late, _ := call(t, &session, 4, `{"name":"tick","arguments":{"count":10}}`)
 	testing.expect(t, strings.contains(late, "applied 1 commands"))
 	testing.expect(t, strings.contains(late, "Sand"))
 
-	// The map shows the result.
 	map_text, map_failed := call(t, &session, 5, `{"name":"observe","arguments":{}}`)
 	testing.expect(t, !map_failed)
 	testing.expect(t, strings.contains(map_text, "s=Sand"), "the sand must appear on the map")
@@ -219,9 +199,6 @@ test_session_plays_a_full_turn :: proc(t: ^testing.T) {
 
 @(test)
 test_session_reports_a_tool_fault_as_a_result :: proc(t: ^testing.T) {
-	// A fault inside a tool is not a protocol fault. The client must
-	// still get a result, with isError set, so the model can read the
-	// reason and correct itself.
 	session := session_start(t)
 	defer session_stop(&session)
 
@@ -237,9 +214,6 @@ test_session_reports_a_tool_fault_as_a_result :: proc(t: ^testing.T) {
 
 @(test)
 test_session_repeats_a_run_from_a_seed :: proc(t: ^testing.T) {
-	// The promise of the queue: the same seed and the same commands
-	// give the same world. A client can check the checksum to be sure
-	// that a replay matched.
 	play :: proc(t: ^testing.T) -> string {
 		session := session_start(t)
 		defer session_stop(&session)
@@ -262,9 +236,6 @@ test_session_repeats_a_run_from_a_seed :: proc(t: ^testing.T) {
 
 @(test)
 test_session_fire_burns_the_oil_away :: proc(t: ^testing.T) {
-	// A whole chain of rules, driven only through the protocol:
-	// oil falls, an ignite command sets it alight, the fire runs
-	// through the pool, and smoke rises from what is left.
 	session := session_start(t)
 	defer session_stop(&session)
 
@@ -275,11 +246,6 @@ test_session_fire_burns_the_oil_away :: proc(t: ^testing.T) {
 	before, _ := call(t, &session, 4, `{"name":"world_status","arguments":{}}`)
 	testing.expect(t, strings.contains(before, "Oil"), "the oil must be in the world")
 
-	// The ignite covers the whole pool, and the ground the collapse
-	// threw a grain of oil across as well. A liquid packs into one
-	// body now instead of holding the holes it fell with, so a grain
-	// left clear of that body stays clear, and fire cannot cross the
-	// gap to it.
 	call(t, &session, 5, `{"name":"enqueue_input","arguments":{"kind":"ignite","x":20,"y":15,"radius":12}}`)
 	call(t, &session, 6, `{"name":"tick","arguments":{"count":400}}`)
 
