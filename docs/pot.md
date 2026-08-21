@@ -38,6 +38,17 @@ is the whole cost of throwing, in the way a fixed digger has no charge
 to run out: it says how fast the wizard can work, not how much powder
 he is carrying.
 
+`POT_REST` is 40 ticks, two thirds of a second. That number carries
+weight a real game would spread across ammunition, reload, and cost:
+here the rest is the only knob at all, so it alone has to say that a
+pot is a little clay thing he carries a few of, not a beam he can hold
+down. A crater from one throw is dozens of cells across; at the old
+24 ticks he could open two and a half of those a second, which reads
+as a weapon with an ammunition count of infinity. At 40 he opens at
+most one and a half a second, and the gap between them is long enough
+to see the last crater settle before the next one lands — long enough,
+looking at it, that a throw feels spent rather than free.
+
 ## The flight is stepped so a fast tick cannot skip a floor
 
 `pot_step` runs the bag once a tick. A pot that is not yet flashing
@@ -173,7 +184,7 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game \
 | `POT_GRAINS` | 3 | grains of black powder the pot holds |
 | `POT_SPEED` | 190.0 | cells per second, along the aim |
 | `POT_LOB` | 42.0 | cells per second of lift, so it flies on an arc |
-| `POT_REST` | 24 | ticks between throws |
+| `POT_REST` | 40 | ticks between throws |
 | `POT_FUSE` | 90 | ticks the fuse burns before it goes off in the air |
 | `POT_FUSE_POWER` | 120 | the fuse's own light, while the pot is still flying |
 | `POT_FUSE_REACH` | 12 | samples the fuse floods outward |

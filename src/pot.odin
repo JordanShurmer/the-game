@@ -10,7 +10,7 @@ POT_SPEED    :: 190.0  // cells per second, along the aim
 POT_LOB      :: 42.0   // cells per second of lift, so it flies on an arc
 POT_GRAVITY  :: PLAYER_GRAVITY
 POT_MAX_FALL :: PLAYER_MAX_FALL
-POT_REST     :: 24     // ticks between throws
+POT_REST     :: 40     // ticks between throws
 POT_FUSE     :: 90     // ticks the fuse burns before it goes off in the air
 
 POT_FLASH       :: 22   // ticks the bang stays in the light
@@ -28,8 +28,8 @@ POT_FUSE_FALL  :: Light_Fall{open = 176, open_diag = 150, dense = 96, dense_diag
 
 POT_R :: 2  // cells, the pot as it is drawn
 
-POT_HALO  :: 16
-POT_BLAZE :: 4
+POT_HALO  :: 28
+POT_BLAZE :: 6
 POT_PEAK  :: 0.95
 POT_GLOW  :: rl.Color{255, 140, 40, 255}
 POT_CORE  :: rl.Color{255, 250, 230, 255}
@@ -253,6 +253,10 @@ test_the_rest_between_throws_holds :: proc(t: ^testing.T) {
 	pt, ok := pot_test_setup(t)
 	if !ok do return
 	defer pot_test_destroy(&pt)
+
+	rock, found := find_material_index(pt.table, "Rock")
+	if !testing.expect(t, found, "Rock must exist") do return
+	pot_fill_box(&pt.sb, 40, 0, 45, 127, Cell(rock))
 
 	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
 	p := Player{x = 20, y = 20, facing = 1, aim = PLAYER_AIM_RIGHT}

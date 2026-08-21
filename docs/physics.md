@@ -391,6 +391,49 @@ one cell's own cost, against the row each material sits in below.
 | `Gold` | 19.3 | so dense that even point blank a pot cannot chip it; every hit chars |
 | `Bedrock` | 3.0 | never reached: hardness alone stops the ray |
 
+### Looking at the ladder
+
+Room 13 of the gallery ("Digging," world (0,-2176)) is eight vertical
+strips of material, softest to hardest: dirt, sand, coal, wood, rock,
+obsidian, steel, bedrock. It was built to show what the digger can
+cut. It shows what a blast grades even better, because one picture
+holds every rung at once.
+
+```sh
+odin build cmd/shot -out:/tmp/s -o:speed
+/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 out=shots/r3_strips.png
+/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 ticks=2 \
+       explode=64,-2112,36,36 out=shots/r3_strips_wood.png
+/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 ticks=2 \
+       explode=101,-2112,36,36 out=shots/r3_strips_steel.png
+```
+
+The first blast sits on the wood and rock border. **Scatter** is the
+crater it opens in the wood: the strip clears to Fire and Air right up
+to the strip's own hardness-bought edge, the same rung a crater in
+dirt or sand would show, because Wood is light enough to hit rung one
+on lift alone even while `.Still`. **Crumble** is the rock beside it:
+where the blast still has lift enough to break a face but not to clear
+it, Rock turns to the lighter, warmer grey of gravel in place, a scoop
+bitten out of the strip rather than a hole through it. **Char** is the
+black flecks laced through both, on the rock side more than the wood:
+soot sitting on whatever the ray could not afford to move at all.
+(One further step for a careful look: a soot fleck that lands beside a
+cell the same blast clears crumbles again on the spot, into the pale
+ash soot itself decays to — the ordinary "a cleared cell crumbles its
+neighbours" rule did not stop applying just because rung four wrote
+the neighbour.)
+
+The second blast sits in the middle of the steel, well past where the
+first blast's energy could ever reach. **Chip** is what is left to see
+there: perhaps a dozen dark specks — a few cells rolled under
+`BLAST_CHIP_ODDS` and went to Air, char took the rest — on a face that
+otherwise stands exactly as it was painted, because Steel has nothing
+to crumble into and nowhere near the lift to scatter.
+
+A reader who runs this recipe sees all four rungs inside two minutes.
+A reader who does not has to build the scene by hand.
+
 ## Digging and breaking
 
 ```odin
