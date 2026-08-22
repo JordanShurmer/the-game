@@ -1,0 +1,121 @@
+// Obsidian.
+//
+// Volcanic glass: what lava leaves when water quenches it too fast for
+// any crystal to grow. It has almost no diffuse colour at all — glass
+// does not scatter light inside itself, it either bounces light off the
+// surface or lets it straight through. So, like a metal, nearly
+// everything the eye reads here is a reflection. Unlike a metal, that
+// reflection carries no tint: obsidian's F0 is a tiny, flat grey, which
+// is why it looks nearly black straight on and swings, hard, into a
+// near-perfect mirror at a glancing angle. That fresnel swing is the
+// whole material.
+//
+// The other half of the read is the fracture. Glass does not chip or
+// grain, it breaks in broad, smooth, curved shells — conchoidal
+// fracture — so the relief here comes from a scatter of shell centres
+// (`m_cells`) with a smooth dome shaded around each one, never from a
+// ridged or noisy bump field. Between the shells the face stays glassy
+// smooth.
+//
+// A very tight, hard specular sits on top of that — a small hot point,
+// not a broad sheen — and deep in the body, where the glass runs thin
+// enough to pass light, a faint warm brown-red glow shows through.
+//
+// Dead still: no `seconds` anywhere.
+
+// Glass does not roll into a soft shoulder; it breaks at a sharp edge.
+#define M_ROLL 3.0
+
+const vec3 OBS_F0 = vec3(0.050, 0.050, 0.052);   // almost nothing, straight on
+const vec3 OBS_WHITE = vec3(1.0, 0.99, 0.98);    // the mirror it becomes at grazing angle
+
+const float OBS_SHELL = 0.145;    // scale of the conchoidal shells, about 7 cells across
+const float OBS_SHELL2 = 0.048;   // a second, larger family, about 21 cells
+const float OBS_RELIEF = 1.55;    // how deep a shell dome reads
+const float OBS_ROUGH = 0.028;    // a very tight, hard, glassy speculum
+const float OBS_FRESNEL_POWER = 4.2;
+
+const vec3 OBS_GLOW = vec3(0.62, 0.20, 0.10);   // warm brown-red, the body lit from within
+
+// One conchoidal shell: the smooth dome of a curved fracture, built from
+// the distance to the nearest of a scatter of shell centres. `m_cells`
+// hands back that distance already normalised so a dome is just a
+// smoothed fall-off from 0 at the centre.
+float obs_shell(vec2 p, float scale)
+{
+    vec3 c = m_cells(p*scale);
+    // A smooth dome: high at the centre of a shell, curving away toward
+    // its rim, never flat, never faceted.
+    return 1.0 - smoothstep(0.0, 0.62, c.x);
+}
+
+// The height field: two families of shells laid over each other, one
+// coarse and one fine, so a big conchoidal scar carries a smaller one
+// nested in it the way real fracture does. No grain, no ridge noise —
+// glass has none.
+float obs_height(vec2 c)
+{
+    float big = obs_shell(c, OBS_SHELL2);
+    float small = obs_shell(c, OBS_SHELL);
+    return big*0.85 + small*0.55;
+}
+
+// The bevel of the vein with the shells laid over it as a bump.
+vec3 obs_face(Surf s)
+{
+    float e = 0.85;
+    float h  = obs_height(s.cell);
+    float hx = obs_height(s.cell + vec2(e, 0.0));
+    float hy = obs_height(s.cell + vec2(0.0, e));
+
+    vec2 slope = vec2(h - hx, h - hy)*OBS_RELIEF;
+    return normalize(vec3(s.n.xy + slope, s.n.z));
+}
+
+// A GGX-shaped lobe, tight enough to read as a hard, small hot point
+// rather than a broad sheen.
+float obs_spec(vec3 n, vec3 h, float rough)
+{
+    float a = rough*rough;
+    float ndh = max(dot(n, h), 0.0);
+    float d = ndh*ndh*(a*a - 1.0) + 1.0;
+    return (a*a)/(3.14159265*d*d);
+}
+
+vec3 shade(Surf s)
+{
+    vec3 n = obs_face(s);
+    vec3 h = normalize(s.l + M_VIEW);
+    float ndv = max(dot(n, M_VIEW), 0.0);
+    float ndl = max(dot(n, s.l), 0.0);
+
+    // The fresnel swing: almost nothing head on, a near-perfect,
+    // uncoloured mirror at a glancing angle. This carries the material.
+    vec3 fresnel = OBS_F0 + (OBS_WHITE - OBS_F0)*pow(1.0 - max(dot(h, M_VIEW), 0.0), 5.0);
+    float rim = pow(1.0 - ndv, OBS_FRESNEL_POWER);
+    vec3 mirror = mix(OBS_F0, OBS_WHITE, rim);
+
+    // The lamp, reflected as a tight, hard hot point.
+    float lobe = obs_spec(n, h, OBS_ROUGH);
+    float shadow = ndl/(ndl*0.6 + 0.4);
+    vec3 lamp = fresnel*lobe*shadow*0.85;
+
+    // The room, reflected: bright toward the light, almost black away
+    // from it, because a mirror shows whatever it is turned toward.
+    float toward = dot(n, s.l)*0.5 + 0.5;
+    float sky = mix(0.35, 1.0, s.ao);
+    vec3 env = mirror*mix(0.02, 0.62, pow(toward, 1.6))*sky;
+
+    // The rolled edge of a fractured lump goes wide and pale, the way a
+    // shard of glass catches the light along its broken lip.
+    vec3 edgeGlow = OBS_WHITE*pow(1.0 - ndv, 3.0)*0.30*s.edge;
+
+    // Deep inside the body, thin obsidian passes a little light: a
+    // faint warm brown-red glow, strongest where the glass is buried
+    // and the surface faces the viewer square on (thickest path out).
+    float inner = s.bury*(1.0 - rim)*0.5;
+    vec3 glow = OBS_GLOW*inner*0.22;
+
+    vec3 col = lamp + env + edgeGlow + glow;
+    return m_dress(col, s);
+}

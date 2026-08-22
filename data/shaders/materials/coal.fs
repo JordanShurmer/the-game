@@ -57,7 +57,7 @@ float coal_cleat(vec2 c, float angle, float spacing, float width,
 
     float wobble = (m_noise(vec2(along*0.22, seed)) - 0.5)*jitter;
     float g = abs(fract((across + wobble)/spacing + 0.5) - 0.5)*spacing;
-    float line = 1.0 - smoothstep(0.0, width, g);
+    float line = 1.0 - smoothstep(width*0.35, width, g);
 
     float gate = smoothstep(0.5 - broken*0.5, 0.5 + broken*0.5,
                              m_fbm(vec2(along, across)*0.09 + seed*7.0, 2));
@@ -83,9 +83,9 @@ vec3 shade(Surf s)
     // fainter butt cleat running near-perpendicular to it, choppier
     // because it tends to stop dead against the first.
     float angle1 = 0.40;
-    float c1 = coal_cleat(s.cell, angle1, 5.5, 0.95, 0.9, 0.15, 1.3);
-    float c2 = coal_cleat(s.cell, angle1 + 1.55, 3.4, 0.65, 0.6, 0.75, 5.7)*0.75;
-    float crack = clamp((c1 + c2)*1.3, 0.0, 1.0);
+    float c1 = coal_cleat(s.cell, angle1, 5.5, 0.55, 0.9, 0.15, 1.3);
+    float c2 = coal_cleat(s.cell, angle1 + 1.55, 3.6, 0.34, 0.6, 0.70, 5.7)*0.85;
+    float crack = clamp(c1 + c2, 0.0, 1.0);
 
     // Which kind of facet this one is: most faces are dead sooty matte,
     // a middle band carries a dull sheen, and only the rare best-turned
