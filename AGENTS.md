@@ -62,6 +62,25 @@ all: `light=1` with no `player` follows the middle of the view
 instead of the origin, so a shot can judge a light source far from
 where he starts. See `docs/alchemy.md`, "Looking at it".
 
+## Look at one material
+
+Every material may bring a shader, `data/shaders/materials/<name>.fs`,
+which is what makes a cell of gold read as metal and a cell of rock read
+as stone. A shader is judged by a picture, and a four-cell vein in an
+unlit cave is not one, so the game has a bench that fills the whole view
+with one material in the shapes a shader has to answer for:
+
+```sh
+make game
+xvfb-run -a -s "-screen 0 1280x720x24" \
+    ./bin/the-game look=Gold shot=shots/gold.png frames=25
+```
+
+Shader files are read at load, so nothing needs building between one
+picture and the next. Read `docs/material_shaders.md` before writing one:
+it holds the contract, the helpers, and what makes a material read as
+itself.
+
 ## Iterate on the world
 
 1. Change the tiles or the code.
@@ -108,6 +127,7 @@ of the whole world.
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
 | `cmd/bench/` | what a tick costs, on a real region |
+| `data/shaders/materials/` | one shader a material, and the prelude they share |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
 | `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, and the gallery seeders |
