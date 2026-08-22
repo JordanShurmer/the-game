@@ -106,6 +106,7 @@ main :: proc() {
 		app_draw_fireflies(&app)
 		app_draw_pots(&app)
 		app_draw_bangs(&app)
+		app_draw_sparks(&app)
 		app_draw_player(&app)
 		draw_hud(&app)
 		editor_draw(&app)
@@ -585,6 +586,23 @@ app_draw_bangs :: proc(app: ^App) {
 		app_draw_glow(
 			app, f32(sb.origin_x + b.x), f32(sb.origin_y + b.y),
 			BANG_HALO, BANG_BLAZE, BANG_PEAK, glow, BANG_GLOW, BANG_CORE,
+		)
+	}
+}
+
+// Every sparkle the mix throws off, whatever reaction made it.
+@(private = "file")
+app_draw_sparks :: proc(app: ^App) {
+	if !app_lighting(app) do return
+
+	table := app.world.materials
+	sb := &app.sandbox
+	for sp in sb.sparks.sparks {
+		if sp.life <= 0 do continue
+		glow := f32(spark_power(table, sp)) / 255
+		app_draw_glow(
+			app, f32(sb.origin_x + sp.x), f32(sb.origin_y + sp.y),
+			SPARKLE_HALO, SPARKLE_BLAZE, SPARKLE_PEAK, glow, SPARKLE_GLOW, SPARKLE_CORE,
 		)
 	}
 }
