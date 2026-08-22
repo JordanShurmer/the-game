@@ -37,6 +37,9 @@ App :: struct {
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
 
+	drudge_sprite:         Sprite_Sheet,
+	drudge_sprite_texture: rl.Texture2D,
+
 	color_lut: [256]rl.Color,
 
 	dirty: bool,
@@ -104,7 +107,9 @@ main :: proc() {
 		app_draw_water(&app, w, h)
 		app_draw_crystals(&app)
 		app_draw_fireflies(&app)
-		app_draw_pots(&app)
+		app_draw_drudges(&app)
+		app_draw_pots(&app, &app.pots)
+		app_draw_pots(&app, &app.drudge_pots)
 		app_draw_bangs(&app)
 		app_draw_sparks(&app)
 		app_draw_player(&app)
@@ -238,9 +243,29 @@ app_init_view :: proc(app: ^App) {
 		app.sprite_texture = rl.LoadTextureFromImage(img)
 		rl.SetTextureFilter(app.sprite_texture, .POINT)
 	}
+
+	drudge_sheet, drudge_result := load_drudge_sprite_sheet()
+	if drudge_result.err != .None {
+		fmt.eprintfln("the drudge sprite sheet could not load: %v", drudge_result.err)
+	}
+	app.drudge_sprite = drudge_sheet
+
+	if drudge_sheet.pixels != nil {
+		img := rl.Image {
+			data    = raw_data(drudge_sheet.pixels),
+			width   = drudge_sheet.width,
+			height  = drudge_sheet.height,
+			mipmaps = 1,
+			format  = .UNCOMPRESSED_R8G8B8A8,
+		}
+		app.drudge_sprite_texture = rl.LoadTextureFromImage(img)
+		rl.SetTextureFilter(app.drudge_sprite_texture, .POINT)
+	}
 }
 
 app_destroy_view :: proc(app: ^App) {
+	rl.UnloadTexture(app.drudge_sprite_texture)
+	destroy_sprite_sheet(app.drudge_sprite)
 	rl.UnloadTexture(app.sprite_texture)
 	destroy_sprite_sheet(app.sprite)
 	water_unload(&app.water)
@@ -551,13 +576,57 @@ app_draw_fireflies :: proc(app: ^App) {
 	}
 }
 
+// The drudge sheet drawn exactly the way `app_draw_player` draws the
+// wizard's own: pick a row from his state, a column from his own
+// animation clock, and blit the frame, mirrored to his facing. See
+// docs/drudge.md, "Looking at him".
 @(private = "file")
-app_draw_pots :: proc(app: ^App) {
+app_draw_drudges :: proc(app: ^App) {
+	if app.drudge_sprite.pixels == nil do return
+
+	scale := f32(app.zoom) / f32(app.step)
+
+	for i in 0 ..< int(app.drudges.count) {
+		d := app.drudges.drudges[i]
+		facing := drudge_facing(d, app.player)
+		motion := drudge_motion(d)
+		column := drudge_sprite_frame(motion, d.anim)
+
+		src := rl.Rectangle {
+			x      = f32(column * DRUDGE_SPRITE_FRAME_W),
+			y      = f32(int(motion) * DRUDGE_SPRITE_FRAME_H),
+			width  = f32(DRUDGE_SPRITE_FRAME_W) * f32(facing),
+			height = f32(DRUDGE_SPRITE_FRAME_H),
+		}
+
+		origin_x, origin_y := drudge_sprite_frame_origin(d)
+		dst := rl.Rectangle {
+			x      = f32(origin_x - app.cam_x) * scale,
+			y      = f32(origin_y - app.cam_y) * scale,
+			width  = f32(DRUDGE_SPRITE_FRAME_W) * scale,
+			height = f32(DRUDGE_SPRITE_FRAME_H) * scale,
+		}
+
+		rl.DrawTexturePro(app.drudge_sprite_texture, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
+
+		if app_lighting(app) {
+			lx, ly := drudge_lamp_at(d, facing)
+			app_draw_glow(
+				app, lx, ly,
+				DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK, 1,
+				drudge_lamp_glow(app.world.materials), LIGHT_CORE,
+			)
+		}
+	}
+}
+
+@(private = "file")
+app_draw_pots :: proc(app: ^App, bag: ^Pot_Bag) {
 	if !app_lighting(app) do return
 
 	scale := f32(app.zoom) / f32(app.step)
-	for i in 0 ..< int(app.pots.count) {
-		p := app.pots.pots[i]
+	for i in 0 ..< int(bag.count) {
+		p := bag.pots[i]
 		if !p.live do continue
 
 		x := (p.x - f32(app.cam_x)) * scale

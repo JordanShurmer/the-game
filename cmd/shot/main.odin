@@ -63,6 +63,13 @@ main :: proc() {
 	sheet: game.Sprite_Sheet
 	defer game.destroy_sprite_sheet(sheet)
 
+	drudge_sheet, drudge_result := game.load_drudge_sprite_sheet()
+	if drudge_result.err != .None {
+		fmt.eprintfln("the drudge sprite sheet could not load: %v", drudge_result.err)
+		os.exit(1)
+	}
+	defer game.destroy_sprite_sheet(drudge_sheet)
+
 	player: game.Player
 	if options.player {
 		result: game.Sprite_Load_Result
@@ -174,6 +181,10 @@ main :: proc() {
 		shot.player = player
 		shot.sprite = sheet
 	}
+	shot.drudges = &sim.drudges
+	shot.drudge_pots = &sim.drudge_pots
+	shot.drudge_sprite = drudge_sheet
+
 	if options.light {
 		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
 		// With no wizard in the frame there is no orb to follow, so the light
@@ -185,9 +196,10 @@ main :: proc() {
 			lit_y = options.y + options.h * options.step / 2
 		}
 		game.light_follow(&sim.light, lit_x, lit_y)
-		game.light_step(&sim.light, terrain, player, &sim.flies)
+		game.light_step(&sim.light, terrain, player, &sim.flies, &sim.pots, &sim.drudge_pots, &sim.drudges)
 		shot.light = &sim.light
 		shot.flies = &sim.flies
+		shot.pots = &sim.pots
 	}
 
 	if !game.world_shot(sim.world, shot, options.out) {

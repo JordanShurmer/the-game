@@ -16,8 +16,11 @@ Shot :: struct {
 	sprite:  Sprite_Sheet,
 	sandbox: ^Sandbox,
 	light:   ^Light,
-	flies:   ^Firefly_Swarm,
-	pots:    ^Pot_Bag,
+	flies:        ^Firefly_Swarm,
+	pots:         ^Pot_Bag,
+	drudges:      ^Drudge_Bag,
+	drudge_pots:  ^Pot_Bag,
+	drudge_sprite: Sprite_Sheet,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -102,7 +105,9 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 	if shot.light != nil {
 		shot_draw_crystals(shot, pixels, width, height)
 		shot_draw_fireflies(shot, pixels, width, height)
-		shot_draw_pots(world, shot, pixels, width, height)
+		shot_draw_drudges(world, shot, pixels, width, height)
+		shot_draw_pots(world, shot, pixels, width, height, shot.pots)
+		shot_draw_pots(world, shot, pixels, width, height, shot.drudge_pots)
 		shot_draw_bangs(world, shot, pixels, width, height)
 		shot_draw_sparks(world, shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
@@ -220,12 +225,52 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 	}
 }
 
+// The drudge sheet, plotted cell by cell the way the player sprite is
+// blitted inline in `world_shot` itself — except a drudge is drawn in this
+// later pass, alongside the pots and the bangs, because there can be more
+// than one of him and `world_shot`'s own per-row loop only ever carries one
+// player's frame. `bin/shot` must show him: this is the tool the repo
+// judges everything by. See docs/drudge.md, "Looking at him".
 @(private = "file")
-shot_draw_pots :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
-	if shot.pots == nil do return
+shot_draw_drudges :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.drudges == nil || shot.drudge_sprite.pixels == nil do return
 
-	for i in 0 ..< int(shot.pots.count) {
-		p := shot.pots.pots[i]
+	player, has_player := shot.player.?
+
+	for i in 0 ..< int(shot.drudges.count) {
+		d := shot.drudges.drudges[i]
+		facing := has_player ? drudge_facing(d, player) : d.dir
+		motion := drudge_motion(d)
+		column := drudge_sprite_frame(motion, d.anim)
+
+		origin_x, origin_y := drudge_sprite_frame_origin(d)
+		for fy in i32(0) ..< DRUDGE_SPRITE_FRAME_H {
+			wy := origin_y + fy
+			ty := floor_div(wy-shot.view.y, shot.view.step)
+			for fx in i32(0) ..< DRUDGE_SPRITE_FRAME_W {
+				c := drudge_sprite_pixel(shot.drudge_sprite, motion, column, facing, fx, fy)
+				if c.a == 0 do continue
+				wx := origin_x + fx
+				tx := floor_div(wx-shot.view.x, shot.view.step)
+				shot_plot(shot, pixels, width, height, tx, ty, c)
+			}
+		}
+
+		lx, ly := drudge_lamp_at(d, facing)
+		shot_draw_glow(
+			shot, pixels, width, height, lx, ly,
+			DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK,
+			drudge_lamp_glow(world.materials), LIGHT_CORE,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_pots :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32, bag: ^Pot_Bag) {
+	if bag == nil do return
+
+	for i in 0 ..< int(bag.count) {
+		p := bag.pots[i]
 		if !p.live do continue
 
 		shot_draw_glow(

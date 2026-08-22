@@ -30,8 +30,10 @@ Sim :: struct {
 	sandbox:   Sandbox,
 	queue:     Input_Queue,
 	light:     Light,
-	flies:     Firefly_Swarm,
-	pots:      Pot_Bag,
+	flies:      Firefly_Swarm,
+	pots:       Pot_Bag,
+	drudges:    Drudge_Bag,
+	drudge_pots: Pot_Bag,
 
 	follow_player: bool,
 
@@ -112,6 +114,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		world_add_pond(&s.world, pond)
 	}
 	s.flies = firefly_gather(s.world)
+	s.drudges = drudge_place(s.world, i32(s.player.x), i32(s.player.y))
 
 	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
 	s.loaded = true
@@ -204,7 +207,10 @@ sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8
 	if .Throw in held do pot_throw(&s.pots, s.player)
 	pot_step(&s.pots, terrain, s.world.materials)
 
-	light_step(&s.light, terrain, s.player, &s.flies, &s.pots)
+	drudge_step(&s.drudges, &s.drudge_pots, terrain, s.player)
+	pot_step(&s.drudge_pots, terrain, s.world.materials)
+
+	light_step(&s.light, terrain, s.player, &s.flies, &s.pots, &s.drudge_pots, &s.drudges)
 }
 
 sim_play_begin :: proc(s: ^Sim) {

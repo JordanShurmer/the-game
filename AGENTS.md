@@ -110,7 +110,7 @@ of the whole world.
 | `cmd/bench/` | what a tick costs, on a real region |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain install, the tile seeder, the wizard seeder, and the gallery seeders |
+| `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, and the gallery seeders |
 
 ## The player
 
@@ -156,6 +156,38 @@ Two rules there are easy to break and hard to see:
 ```sh
 tools/seed_wizard.py           # redraw data/sprites/wizard.png
 tools/seed_wizard.py --check   # hold the file to the rules
+```
+
+## The drudge
+
+`docs/drudge.md` is the design note: how he is built, the numbers he
+moves by, and what this phase leaves out. Read it before changing
+`src/drudge.odin` or `src/drudge_sprite.odin`.
+
+He has his own sheet, drawn by his own seeder, and it keeps the same
+two rules the wizard's own does, plus one more:
+
+- **The drawing and the collision box are two numbers that must
+  agree.** `tools/seed_drudge.py` holds his body box, `src/drudge_sprite.odin`
+  asserts it matches `src/drudge.odin`, and `--check` holds the sheet
+  to it.
+- **So do the drawing and the lamp.** `tools/seed_drudge.py` paints
+  the lamp at a fixed point, and `src/drudge.odin`'s `drudge_lamp_at`
+  says where the light leaves it and in what colour.
+  `test_the_drudge_lamp_light_starts_where_the_sheet_draws_the_lamp`
+  (`src/light.odin`) reads the sheet at the point the constants compute
+  and fails if a redrawn drudge moves the lamp out from under his own
+  light.
+- **He must spawn underground, not merely on solid ground near the
+  wizard.** The first ground `drudge_place` finds that answers every
+  other rule can still be the shore beside the pond, so `drudge_has_ceiling`
+  additionally demands solid rock within `DRUDGE_SPAWN_CEILING` cells
+  above his head. `test_the_shipped_world_places_a_drudge_underground`
+  holds the shipped drudge to it.
+
+```sh
+tools/seed_drudge.py           # redraw data/sprites/drudge.png
+tools/seed_drudge.py --check   # hold the file to the rules
 ```
 
 A pixel editor works on a tile too, but then the save gate may report

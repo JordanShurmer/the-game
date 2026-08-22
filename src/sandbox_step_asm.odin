@@ -228,6 +228,26 @@ test_the_weight_lut_holds_every_material :: proc(t: ^testing.T) {
 	}
 }
 
+// A guard rail. Nothing stops a future feature from adding one row too many
+// to data/materials.txt and quietly switching off the hand-written AVX2
+// weight lookup for the whole sandbox — that happened once already, when a
+// drudge's lamp got its own material row and pushed the table to 33. This
+// test names the ceiling directly, so the next such change fails loudly
+// here instead of silently in a benchmark nobody was watching.
+@(test)
+test_the_shipped_materials_still_fit_the_wide_lookup :: proc(t: ^testing.T) {
+	table, table_ok := load_materials("data/materials.txt")
+	testing.expect(t, table_ok, "materials must load")
+	defer destroy_material_table(table)
+
+	testing.expectf(
+		t, len(table.materials) <= SANDBOX_WIDE_IDS,
+		"the shipped table must fit the wide lookup's %d ids, and it holds %d",
+		SANDBOX_WIDE_IDS, len(table.materials),
+	)
+	testing.expect(t, table.lut_ok, "the shipped table must set lut_ok")
+}
+
 @(test)
 test_a_long_material_table_stands_the_wide_pass_down :: proc(t: ^testing.T) {
 	table, table_ok := load_materials("data/materials.txt")
