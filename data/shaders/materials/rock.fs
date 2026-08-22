@@ -36,16 +36,20 @@ const float ROCK_PLANE  = 0.145; // fracture planes, about 7 cells
 const float ROCK_CHIP   = 0.052; // the chipping between planes, about 19 cells
 const float ROCK_GRAIN  = 0.90;  // the granular face, about 1 cell
 const float ROCK_RELIEF = 2.35;  // how deep the bump reads
-const float ROCK_STRATA = 0.085; // spacing of the bedding, tilted
+const float ROCK_STRATA = 0.062; // spacing of the bedding, tilted
+
+float rock_strata(vec2 c);
 
 // The height field: broad fracture planes, a chip of fbm knocked over
-// them, and a fine grain so the face never goes smooth.
+// them, a fine grain so the face never goes smooth, and the bedding cut
+// in as a shallow groove.
 float rock_height(vec2 c)
 {
     float planes = m_ridge(c*ROCK_PLANE, 3);
     float chip   = m_fbm(c*ROCK_CHIP, 4);
     float grain  = m_noise(c*ROCK_GRAIN)*0.5 + m_noise(c*ROCK_GRAIN*2.3)*0.25;
-    return planes*0.85 + chip*1.05 + grain*0.30;
+    float seam   = rock_strata(c);
+    return planes*0.85 + chip*1.05 + grain*0.30 - seam*0.16;
 }
 
 // The bump normal: the g-buffer bevel with the broken face laid over it.
@@ -60,16 +64,19 @@ vec3 rock_normal(Surf s)
     return normalize(vec3(s.n.xy + slope, s.n.z));
 }
 
-// Faint bedding, tilted a little, fixed in world space so it stays put
-// on the wall as the camera moves past it.
+// Bedding: thin dark seams between courses of stone, tilted a little and
+// fixed in world space so a wall reads as cut, layered rock rather than
+// a slab of noise. A smooth wave washes out under the fracture texture;
+// a seam at each layer boundary reads through it.
 float rock_strata(vec2 c)
 {
-    float band = (c.x*0.18 + c.y)*ROCK_STRATA*6.2831853;
-    float w = sin(band) + sin(band*2.03 + 1.7)*0.35;
-    // a little of the chip noise breaks the lines up so they read as bedding
-    // worn by fracture, not as a printed stripe.
-    w += (m_noise(c*ROCK_CHIP*3.0) - 0.5)*0.6;
-    return w*0.5 + 0.5;
+    float band = (c.x*0.18 + c.y)*ROCK_STRATA;
+    // nudge the boundary by the chip noise, so the seam wavers gently
+    // instead of ruling a perfectly straight line.
+    band += (m_noise(c*ROCK_CHIP*2.2) - 0.5)*0.16;
+    float t = fract(band);
+    float d = min(t, 1.0 - t);
+    return 1.0 - smoothstep(0.0, 0.05, d);
 }
 
 // Grains of paler quartz and darker iron scattered through the body, one
@@ -97,8 +104,8 @@ vec3 shade(Surf s)
     // The body colour: base stone, specked with grain, banded with
     // bedding, and dimmed in the crevices ao already found for us.
     vec3 albedo = rock_speckle(s.cell);
-    float strata = rock_strata(s.cell);
-    albedo = mix(albedo*0.82, albedo*1.12, strata);
+    float seam = rock_strata(s.cell);
+    albedo *= mix(1.0, 0.85, seam);
 
     // Damp stone runs cooler and a little darker; it gathers low, deep
     // inside a body, away from the open air.

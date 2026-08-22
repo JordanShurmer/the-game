@@ -89,9 +89,9 @@ vec3 shade(Surf s)
 
     // A weak, wide sheen where a fresh fracture face happens to catch the
     // lamp square-on — not a wet gleam, just a hint the break is new.
-    float gloss = mix(8.0, 13.0, m_hash(chip_id + 9.1));
+    float gloss = mix(7.0, 11.0, m_hash(chip_id + 9.1));
     float sheen = m_spec(s, gloss)*(1.0 - crack);
-    lit += vec3(0.9, 0.92, 0.95)*sheen*0.14;
+    lit += vec3(0.9, 0.92, 0.95)*sheen*0.10;
 
     // Open sky picks out the crest of the heap; a shut-in crevice sinks.
     lit *= mix(0.58, 1.0, s.ao);
