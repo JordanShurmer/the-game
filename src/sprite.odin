@@ -41,8 +41,16 @@ Sprite_Load_Result :: struct {
 	err:    Sprite_Load_Error,
 }
 
+// The wizard's own sheet size is the default, so every existing caller reads
+// unchanged. A sibling sheet with a different frame size and grid — the
+// drudge's own, drawn by tools/seed_drudge.py — passes its own numbers
+// instead of duplicating this whole procedure for one different check.
 load_sprite_sheet :: proc(
 	path: string,
+	frame_w := i32(SPRITE_FRAME_W),
+	frame_h := i32(SPRITE_FRAME_H),
+	columns := i32(SPRITE_COLUMNS),
+	rows := i32(SPRITE_ROWS),
 	allocator := context.allocator,
 ) -> (
 	sheet: Sprite_Sheet,
@@ -59,8 +67,8 @@ load_sprite_sheet :: proc(
 	}
 	defer rl.UnloadImage(img)
 
-	want_w := i32(SPRITE_FRAME_W * SPRITE_COLUMNS)
-	want_h := i32(SPRITE_FRAME_H * SPRITE_ROWS)
+	want_w := frame_w * columns
+	want_h := frame_h * rows
 	if img.width != want_w || img.height != want_h {
 		return {}, {err = .Wrong_Size, width = img.width, height = img.height}
 	}

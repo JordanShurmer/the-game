@@ -40,6 +40,21 @@ drudge_lamp_glow :: proc(table: Material_Table) -> rl.Color {
 	return rl_from_argb(table.materials[int(table.fire)].color)
 }
 
+// Where the lamp itself sits, in world cells, offset from his own feet the
+// way `light_orb_at` offsets from the wizard's own. `tools/seed_drudge.py`
+// draws the lamp at the matching point in the sheet, and
+// `test_the_drudge_lamp_light_starts_where_the_sheet_draws_the_lamp`
+// (`src/light.odin`) reads the sheet at the point these three numbers
+// compute and fails if a redrawn drudge moves the lamp out from under his
+// own light — the same guarantee the wizard's own orb keeps with his.
+DRUDGE_LAMP_MIRROR :: -0.5
+DRUDGE_LAMP_DX     :: 9.2
+DRUDGE_LAMP_DY     :: -5.0
+
+drudge_lamp_at :: proc(d: Drudge, facing: i8) -> (x, y: f32) {
+	return d.x + DRUDGE_LAMP_MIRROR + f32(facing) * DRUDGE_LAMP_DX, d.y + DRUDGE_LAMP_DY
+}
+
 DRUDGE_THROW_INTERVAL :: 240   // ticks between throws, 4 seconds at PLAYER_TICK_HZ
 #assert(DRUDGE_THROW_INTERVAL == 4 * PLAYER_TICK_HZ)
 
@@ -53,17 +68,48 @@ DRUDGE_SPAWN_MIN_DIST :: 50   // cells: close enough to find, far enough not to 
 DRUDGE_SPAWN_MAX_DIST :: 2000 // cells: bounds the search
 DRUDGE_SPAWN_STEP     :: 2    // cells between one candidate column and the next
 
-DRUDGE_BODY      :: rl.Color{60, 48, 40, 255}
-DRUDGE_BODY_DARK :: rl.Color{34, 26, 22, 255}
+// How close solid rock must sit above the top of his body box for a column
+// to count as underground. Twice his own body height: close enough that a
+// column under open sky can never pass (the sky runs on far past this),
+// loose enough that a low-roofed cave passage still passes without the
+// search having to hunt for a spot directly under a thick ceiling.
+DRUDGE_SPAWN_CEILING :: 2 * DRUDGE_BODY_H
+
+// THIS ENUM IS A CONTRACT: src/drudge_sprite.odin reads it to match
+// drudge.png's rows. See docs/drudge.md, "Looking at him", for why these
+// three and no more: he walks, he stands, and he throws, and nothing else.
+Drudge_Motion :: enum u8 {
+	Idle,
+	Walk,
+	Throw,
+}
+
+// How long the throw pose holds after he releases. Cut short against
+// DRUDGE_THROW_INTERVAL (240 ticks): this only needs to cover the moment a
+// player's eye catches the arm swing, not the four-second wait after it.
+DRUDGE_THROW_ANIM_TICKS :: 12
+
+// Idle whenever nothing has moved him yet — a freshly placed drudge, or one
+// `bin/shot` draws without asking for any ticks to run. He never truly
+// stands once patrol ticks are running (see "Patrol never stops" above),
+// so this is not a fourth behaviour, only the one honest way to draw a
+// drudge nobody has stepped.
+drudge_motion :: proc(d: Drudge) -> Drudge_Motion {
+	if d.throw_cooldown > DRUDGE_THROW_INTERVAL - DRUDGE_THROW_ANIM_TICKS do return .Throw
+	if d.walked == 0 do return .Idle
+	return .Walk
+}
 
 // A drudge is a position, a fall speed, how far he has walked this leg,
 // which way he is walking, whether he is on the ground, how many ticks he
-// still remembers seeing the player, and how many ticks until he may throw
-// again. See docs/drudge.md, "He is a fixed bag, like the pots he throws".
+// still remembers seeing the player, how many ticks until he may throw
+// again, and an animation clock the way the wizard's own `Player.anim` is.
+// See docs/drudge.md, "He is a fixed bag, like the pots he throws".
 Drudge :: struct {
 	x, y:           f32,
 	vy:             f32,
 	walked:         f32,
+	anim:           f32,
 	dir:            i8,
 	on_ground:      bool,
 	sight:          u8,
@@ -71,7 +117,7 @@ Drudge :: struct {
 	lx, ly:         i32,
 	lamp_lit:       bool,
 }
-#assert(size_of(Drudge) == 32)
+#assert(size_of(Drudge) == 36)
 
 Drudge_Bag :: struct {
 	drudges: [DRUDGE_MAX]Drudge,
@@ -162,10 +208,33 @@ drudge_sees_player :: proc(t: Terrain, d: Drudge, player: Player) -> bool {
 	return terrain_line_clear(t, f32(dcx), f32(dcy), f32(pcx), f32(pcy))
 }
 
-// A candidate column: the first solid, unembedded ground under it, if any,
-// and whether that ground is in the biome region the wizard himself spawned
-// in. Searched top-down from the surface the way `world_find_ground_near`
-// finds the wizard's own footing.
+// Solid rock somewhere close above his head. This is the whole test for
+// "underground": open sky above a column runs on for hundreds of cells
+// before it ever hits ground, so a column with rock within
+// DRUDGE_SPAWN_CEILING of the top of his own body box cannot be standing
+// under the open air the wizard's own spawn sits beside. It does not have
+// to be the roof of the room he stands in — a low outcrop counts, and
+// should: a lump of rock close over a spot in an open cave is still a cave.
+@(private = "file")
+drudge_has_ceiling :: proc(t: Terrain, x, y: i32) -> bool {
+	x0, x1 := drudge_x_bounds(f32(x))
+	y0, _ := drudge_y_bounds(f32(y))
+	for dy in i32(1) ..= DRUDGE_SPAWN_CEILING {
+		cy := y0 - dy
+		for cx in x0 ..< x1 {
+			if player_solid_at(t, cx, cy) do return true
+		}
+	}
+	return false
+}
+
+// A candidate column: the first solid, unembedded, underground ground under
+// it, if any, and whether that ground is in the biome region the wizard
+// himself spawned in. Searched top-down from the surface the way
+// `world_find_ground_near` finds the wizard's own footing — except a shelf
+// out in the open sky is skipped even if it is solid ground in the right
+// biome, because the ceiling test below rejects it, and the search simply
+// carries on downward past it toward the first spot that is actually a cave.
 @(private = "file")
 drudge_ground_at_column :: proc(t: Terrain, x, y: i32, home: Biome_Id) -> (found_y: i32, ok: bool) {
 	for dy in i32(0) ..< SPAWN_SEARCH_RANGE {
@@ -173,6 +242,7 @@ drudge_ground_at_column :: proc(t: Terrain, x, y: i32, home: Biome_Id) -> (found
 		if world_biome_at(t.world, x, fy) != home do continue
 		if !drudge_body_clear(t, f32(x), f32(fy)) do continue
 		if !drudge_on_ground(t, f32(x), f32(fy)) do continue
+		if !drudge_has_ceiling(t, x, fy) do continue
 		return fy, true
 	}
 	return 0, false
@@ -264,6 +334,7 @@ drudge_step :: proc(bag: ^Drudge_Bag, pots: ^Pot_Bag, t: Terrain, player: Player
 	for i in 0 ..< int(bag.count) {
 		d := &bag.drudges[i]
 
+		d.anim += dt
 		d.vy = min(d.vy+PLAYER_GRAVITY*dt, PLAYER_MAX_FALL)
 		drudge_fall(d, t, dt)
 
@@ -645,5 +716,29 @@ test_the_shipped_world_places_a_drudge_the_player_can_reach :: proc(t: ^testing.
 		t, arrived,
 		"the wizard must be able to walk from his own spawn to the drudge; he got stuck at %v,%v, %v cells short",
 		s.player.x, s.player.y, abs(s.player.x-d.x),
+	)
+}
+
+// The test that stops him drifting back onto the surface, beside the pond.
+// Every other guarantee `drudge_place` already made — solid ground, the
+// wizard's own biome region, the minimum distance, reachability — says
+// nothing about whether he is under the sky or under the rock, and a world
+// where the nearest ground happens to be the shore would pass every one of
+// them while standing him in the one calm, pretty place in the game. See
+// docs/drudge.md, "Where he stands".
+@(test)
+test_the_shipped_world_places_a_drudge_underground :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	if !testing.expect(t, s.drudges.count == 1, "the shipped world must place exactly one drudge") do return
+
+	d := s.drudges.drudges[0]
+	terrain := Terrain{world = s.world}
+	testing.expectf(
+		t, drudge_has_ceiling(terrain, i32(d.x), i32(d.y)),
+		"he must have solid rock within %d cells above his head, or he is standing under the open sky",
+		DRUDGE_SPAWN_CEILING,
 	)
 }

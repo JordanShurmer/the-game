@@ -16,10 +16,11 @@ Shot :: struct {
 	sprite:  Sprite_Sheet,
 	sandbox: ^Sandbox,
 	light:   ^Light,
-	flies:       ^Firefly_Swarm,
-	pots:        ^Pot_Bag,
-	drudges:     ^Drudge_Bag,
-	drudge_pots: ^Pot_Bag,
+	flies:        ^Firefly_Swarm,
+	pots:         ^Pot_Bag,
+	drudges:      ^Drudge_Bag,
+	drudge_pots:  ^Pot_Bag,
+	drudge_sprite: Sprite_Sheet,
 }
 
 SHOT_TILE_LINE :: rl.Color{255, 255, 255, 45}
@@ -223,41 +224,40 @@ shot_draw_fireflies :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) 
 	}
 }
 
+// The drudge sheet, plotted cell by cell the way the player sprite is
+// blitted inline in `world_shot` itself — except a drudge is drawn in this
+// later pass, alongside the pots and the bangs, because there can be more
+// than one of him and `world_shot`'s own per-row loop only ever carries one
+// player's frame. `bin/shot` must show him: this is the tool the repo
+// judges everything by. See docs/drudge.md, "Looking at him".
 @(private = "file")
 shot_draw_drudges :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
-	if shot.drudges == nil do return
+	if shot.drudges == nil || shot.drudge_sprite.pixels == nil do return
 
 	player, has_player := shot.player.?
 
 	for i in 0 ..< int(shot.drudges.count) {
 		d := shot.drudges.drudges[i]
 		facing := has_player ? drudge_facing(d, player) : d.dir
+		motion := drudge_motion(d)
+		column := drudge_sprite_frame(motion, d.anim)
 
-		x0 := i32(math.floor(d.x - DRUDGE_BODY_W*0.5))
-		y1 := i32(math.floor(d.y))
-		y0 := y1 - DRUDGE_BODY_H
-		head_h := i32(math.floor(f32(DRUDGE_BODY_H) * 0.35))
-		head_w := i32(math.floor(f32(DRUDGE_BODY_W) * 0.6))
-		lean := i32(math.floor(f32(DRUDGE_BODY_W) * 0.2 * f32(facing)))
-
-		plot_box :: proc(shot: Shot, pixels: []rl.Color, width, height, x0, y0, x1, y1: i32, color: rl.Color) {
-			for wy in y0 ..< y1 {
-				ty := floor_div(wy-shot.view.y, shot.view.step)
-				for wx in x0 ..< x1 {
-					tx := floor_div(wx-shot.view.x, shot.view.step)
-					shot_plot(shot, pixels, width, height, tx, ty, color)
-				}
+		origin_x, origin_y := drudge_sprite_frame_origin(d)
+		for fy in i32(0) ..< DRUDGE_SPRITE_FRAME_H {
+			wy := origin_y + fy
+			ty := floor_div(wy-shot.view.y, shot.view.step)
+			for fx in i32(0) ..< DRUDGE_SPRITE_FRAME_W {
+				c := drudge_sprite_pixel(shot.drudge_sprite, motion, column, facing, fx, fy)
+				if c.a == 0 do continue
+				wx := origin_x + fx
+				tx := floor_div(wx-shot.view.x, shot.view.step)
+				shot_plot(shot, pixels, width, height, tx, ty, c)
 			}
 		}
 
-		plot_box(shot, pixels, width, height, x0, y0+head_h, x0+DRUDGE_BODY_W, y1, DRUDGE_BODY)
-
-		hx0 := i32(math.floor(d.x)) - head_w/2 + lean
-		plot_box(shot, pixels, width, height, hx0, y0, hx0+head_w, y0+head_h, DRUDGE_BODY_DARK)
-
-		lx, ly := drudge_centre(d)
+		lx, ly := drudge_lamp_at(d, facing)
 		shot_draw_glow(
-			shot, pixels, width, height, f32(lx), f32(ly),
+			shot, pixels, width, height, lx, ly,
 			DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK,
 			drudge_lamp_glow(world.materials), LIGHT_CORE,
 		)

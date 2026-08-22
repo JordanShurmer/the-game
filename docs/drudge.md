@@ -11,10 +11,12 @@ moves by, and what this phase leaves out.
 
 ## He is a fixed bag, like the pots he throws
 
-`src/drudge.odin` holds him. A `Drudge` is twenty bytes — a position,
-a fall speed, how far he has walked this leg, which way he is walking,
-whether he is on the ground, how many ticks he still remembers seeing
-you, and how many ticks until he may throw again — and a `Drudge_Bag`
+`src/drudge.odin` holds him. A `Drudge` is thirty-six bytes — a
+position, a fall speed, how far he has walked this leg, an animation
+clock (the same role `Player.anim` plays for the wizard), which way he
+is walking, whether he is on the ground, how many ticks he still
+remembers seeing you, and how many ticks until he may throw again —
+and a `Drudge_Bag`
 holds up to `DRUDGE_MAX` (4) of them in a fixed array, the same shape
 `Pot_Bag` and `Firefly_Swarm` use. Only one is placed this phase; the
 rest of the room is there because a second and third drudge cost
@@ -223,19 +225,102 @@ is worse than no field.
 
 ## Looking at him
 
-He draws as two stacked rectangles in `DRUDGE_BODY` and
-`DRUDGE_BODY_DARK` — a plain dark silhouette, mirrored by which way he
-is walking or facing, the same lower rung of the ladder the pot itself
-draws on: a disc and a glow, not an animated sheet. A whole sprite
-sheet earns its cost when there is more than one animation to tell
-apart; a drudge this phase only ever walks or stands and throws, and a
-silhouette says both. `tools/seed_wizard.py` is not touched and no
-sibling seeder is added.
+He was a miner, and the coal took the rest of him: short and stooped
+from years bent to the seam, a small bowed head, coal blacks and soot
+greys, and a lit lamp held out in front of him low — the one warm
+thing on him, and his tell in the dark. That silhouette is nothing
+like the wizard's own: the wizard is tall, upright, and blue, under a
+tall hat and a robe to the ground; the drudge is short, hunched
+forward, and colourless except for the one lamp he carries. Two
+stacked rectangles said "a dark shape" but not "a miner," and reading
+him at a glance as a person distinct from the wizard is worth a real
+sheet.
 
-`app_draw_pots` and `shot_draw_pots` are now given the bag to draw
-rather than always reading the wizard's own, so the same procedure
-draws `pots` once and `drudge_pots` once — a pot in flight looks
-identical either way, which is the point.
+`tools/seed_drudge.py` draws `data/sprites/drudge.png`, the wizard's
+own pattern held to a second figure: `--check` holds the file on disk
+to the rules, `--seed N` asks another hand to draw it, and he is built
+from parts — a stooped torso, a bowed head, two legs, a throwing arm,
+and a lamp arm — driven by per-frame numbers, not from one picture.
+
+**Three rows, because that is everything he does.** `docs/drudge.md`
+already says he never runs, jumps, flies, or dies; a sheet with a run
+row or a death row would hold frames nothing in the game ever plays,
+the same ponytail cut the wizard's own six rows already make.
+
+  - `idle` (3 frames). He never truly stops patrolling once a tick
+    runs him — "Patrol never stops" above is exact — but the moment
+    before the first tick, and whatever `bin/shot` draws for him
+    without being asked to run any ticks, is a real, drawn state, not
+    a placeholder.
+  - `walk` (6 frames). His patrol, back and forth.
+  - `throw` (3 frames), not a loop: a windup, the release, and a
+    follow-through, the same way the wizard's own `rise` and `fall`
+    rows are three drawn moments rather than a cycle.
+
+`drudge_motion` (`src/drudge.odin`) picks the row from his own state —
+`.Throw` for a short window after `throw_cooldown` shows he has just
+released a pot, `.Idle` while nothing has moved him (`walked == 0`),
+`.Walk` otherwise — and `drudge_sprite_frame` (`src/drudge_sprite.odin`)
+picks the column from an animation clock on `Drudge` itself, the same
+role `Player.anim` already plays for the wizard.
+
+**The body box and the drawing are two numbers that must agree, the
+same way they do for the wizard.** `tools/seed_drudge.py` holds a
+10x12 body box at `BODY_X, BODY_Y, BODY_W, BODY_H` inside a 22x26
+frame — wide enough for the lamp held out and the throwing arm swung
+back, tall enough for his bowed head above and a little stance below —
+and `src/drudge_sprite.odin` asserts `DRUDGE_SPRITE_BODY_W ==
+DRUDGE_BODY_W` and the same for the height, the way `src/sprite.odin`
+does for the wizard. `--check` holds the sheet to it: his feet must
+land on the bottom of the box, within `FOOT_SLACK`, or he floats.
+
+**So do the drawing and the lamp.** `tools/seed_drudge.py` paints the
+lamp at a fixed point relative to his own shoulder, and
+`src/drudge.odin`'s `drudge_lamp_at` says where the light leaves him
+and in what colour — the same split the wizard's own orb keeps between
+the sheet and `light_orb_at`. `test_the_drudge_lamp_light_starts_where_the_sheet_draws_the_lamp`
+(`src/light.odin`) reads the sheet at the point `drudge_lamp_at`
+computes and fails if a redrawn drudge moves the lamp out from under
+his own light. The lamp's ink itself is drawn in the two colours the
+game already paints that light: `Fire`'s own RGB for the glow, and
+`LIGHT_CORE` for its bright core, the same pairing `tools/seed_wizard.py`
+uses for the orb.
+
+**To redraw him:** edit `tools/seed_drudge.py` and run it with no
+arguments; run it with `--check` before committing. If the body box or
+the lamp's point move, update `DRUDGE_BODY_W`/`DRUDGE_BODY_H`
+(`src/drudge.odin`) or `DRUDGE_LAMP_DX`/`DRUDGE_LAMP_DY` to match, or
+the asserts and the light test will say so.
+
+`app_draw_drudges` and `shot_draw_drudges` load and blit the sheet the
+same way `app_draw_player` and `world_shot` do the wizard's own,
+picking his row and column from `drudge_motion` and
+`drudge_sprite_frame` and mirroring him to `drudge_facing`. The lamp
+glow circle he has always carried is unchanged — the sheet draws the
+lamp object, the glow draws its light — except that it, too, now
+starts from `drudge_lamp_at` rather than his body's own centre.
+
+`app_draw_pots` and `shot_draw_pots` are given the bag to draw rather
+than always reading the wizard's own, so the same procedure draws
+`pots` once and `drudge_pots` once — a pot in flight looks identical
+either way, which is the point.
+
+### Why a sibling loader, not a wider `src/sprite.odin`
+
+`load_sprite_sheet` (`src/sprite.odin`) now takes the frame size and
+grid as parameters, defaulted to the wizard's own numbers: that one
+change is genuinely shared, since both sheets are read back from the
+same PNG shape, and every existing caller is untouched by it. Past
+that, `src/drudge_sprite.odin` is its own small file, not a widened
+`src/sprite.odin`, because past the loader the two sheets share
+nothing but the shape of the question: a different frame size, a
+different row count, and a different motion enum with different names
+and different meanings (`Drudge_Motion` has no `Run` or `Jet`, and
+`Player_Motion` has no `Throw`). Threading a wizard-or-drudge switch
+through `sprite_pixel`, `sprite_frame`, and every draw call that reads
+them would have cost this file's whole size again in every one of
+those procedures, for two sheets only two files (`Drudge` and this
+one) ever ask a question of.
 
 ## Where he stands
 
@@ -243,9 +328,9 @@ identical either way, which is the point.
 column, `DRUDGE_SPAWN_STEP` (2 cells) at a time, alternating left and
 right, from `DRUDGE_SPAWN_MIN_DIST` (50 cells) out to
 `DRUDGE_SPAWN_MAX_DIST` (2000 cells). A column only counts if it holds
-solid, unembedded ground, and — this is the part that matters — if
-that ground sits in the very biome region the wizard's own spawn sits
-in. The drudge is placed at the first column that answers both.
+solid, unembedded ground, is in the very biome region the wizard's own
+spawn sits in, and — the newest of the four — is underground. The
+drudge is placed at the first column that answers all of them.
 
 That second test replaced a version of this phase that placed him a
 fixed `220` cells to the right of the spawn and dropped him straight
@@ -261,6 +346,31 @@ reaches, and `test_the_shipped_world_places_a_drudge_the_player_can_reach`
 now proves it by walking the wizard there with `sim_step_player`, the
 way a player really would, rather than trusting a distance check to
 stand in for reachability.
+
+**The fourth test is that he is underground.** The first three checks
+above pass just as happily on solid ground beside the pond as they do
+in a mine shaft — solid, unembedded, in the wizard's own region, all
+true of the shore too — and in the shipped world the nearest ground
+answering them was exactly that shore: the one calm, pretty place in
+the game, and not where a miner belongs. `drudge_has_ceiling`
+(`src/drudge.odin`) is the simplest test that rules it out: solid rock
+somewhere within `DRUDGE_SPAWN_CEILING` (24 cells, twice his own body
+height) above the top of his body box. Open sky runs on for hundreds
+of cells before it ever meets ground, so no column under it can pass;
+a low outcrop over an otherwise open cave counts, and should — it does
+not have to be the roof of the room he ends up standing in, only proof
+that rock, not sky, sits over this spot. `drudge_ground_at_column`
+already scanned downward through every column looking for the first
+solid footing; adding the ceiling test to what it accepts is enough on
+its own to make it search further down, and further out, past any
+shelf that is solid ground in the right biome but still open to the
+sky above — no separate downward or outward search was needed.
+`test_the_shipped_world_places_a_drudge_underground` proves the
+shipped drudge himself passes it, and
+`test_the_shipped_world_places_a_drudge_the_player_can_reach` still
+passes unchanged, because the ceiling test only narrows which ground
+counts; it adds no way to land him somewhere his three other
+guarantees would not already have allowed.
 
 ## The numbers
 
@@ -284,6 +394,10 @@ stand in for reachability.
 | `DRUDGE_SPAWN_MIN_DIST` | 50 | cells, the nearest the placement scan may land him |
 | `DRUDGE_SPAWN_MAX_DIST` | 2000 | cells, bounds the placement scan |
 | `DRUDGE_SPAWN_STEP` | 2 | cells between one candidate column and the next |
+| `DRUDGE_SPAWN_CEILING` | 24 | cells: solid rock must be within this far above his head, or the column is not underground |
+| `DRUDGE_LAMP_MIRROR` | -0.5 | cells, where the lamp point is measured from |
+| `DRUDGE_LAMP_DX` | 9.2 | cells, how far the lamp sits ahead of him, toward the way he faces |
+| `DRUDGE_LAMP_DY` | -5.0 | cells, how far above his feet the lamp sits |
 
 Gravity and terminal fall are not repeated here: they are
 `PLAYER_GRAVITY` and `PLAYER_MAX_FALL`, the same numbers a pot falls
@@ -300,7 +414,9 @@ by, because a drudge falls exactly as either one does.
   reads it, because neither one can be hurt yet.
 - **No climb, no jump, no flight.** A one-cell lip the wizard steps
   over without slowing is a wall to a drudge, and he turns at it.
-- **No sprite sheet.** He is two rectangles, not twenty-four frames.
+- **No run, no jump row, no death row on the sheet either.** He has
+  three animations because he only ever does three things; a fourth
+  row would be frames nothing in the game plays.
 - **No sound, and no line of dialogue.** He notices the player only in
   the ways the numbers above say he does; nothing about that is acted
   or spoken yet.

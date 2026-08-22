@@ -77,6 +77,9 @@ of, watch the world change, then save.
   is absent.
 - `data/tiles/` holds the tile sets, one PNG per tile.
 - `data/sprites/wizard.png` holds the player, one row per animation.
+- `data/sprites/drudge.png` holds the drudge, one row per animation —
+  fewer rows than the wizard's own, since he only walks, stands, and
+  throws.
 
 ### Wang tiles
 
@@ -161,9 +164,11 @@ back and forth, and never gives up the walk to chase him. Seen, the
 drudge turns to face him and lobs a pot of his own every four seconds,
 gentler and slower than the wizard's throw; unseen for half a second,
 the drudge forgets him and returns to patrol. Neither one can be hurt
-yet: this phase is only about being seen or staying hidden. `docs/drudge.md`
-says how he is built, the numbers he moves by, and what this phase
-leaves out.
+yet: this phase is only about being seen or staying hidden. He was a
+miner once, and reads as one: stooped, coal-dark, and lit by the one
+lamp he carries, drawn from `data/sprites/drudge.png` the same way the
+wizard is drawn from his own sheet. `docs/drudge.md` says how he is
+built, the numbers he moves by, and what this phase leaves out.
 
 The world he walks into is dark. The orb on his staff is nearly the only
 light in it, and every 21 cells a small crystal of light falls out of
@@ -231,7 +236,7 @@ cmd/shot/  the world as a PNG
 cmd/bench/ what a tick of the sandbox costs
 data/      the materials, the biomes, the biome map, the tiles, the sprites, the shaders
 docs/      the design notes and the toolchain
-tools/     the toolchain install, the tile seeder, and the wizard seeder
+tools/     the toolchain install, the tile seeder, and the wizard and drudge seeders
 ```
 
 The game is made of three parts. The biome map says which biome owns
@@ -270,6 +275,7 @@ he leaves it and comes back.
 | `src/firefly.odin` | The swarm that hangs over a pond and lights it |
 | `src/pot.odin` | The pot of black powder: the throw, the flight, and the break |
 | `src/drudge.odin` | The drudge: a patrol who lobs a pot when he sees him |
+| `src/drudge_sprite.odin` | The drudge's own sheet, and which frame of it to draw |
 | `src/bang.odin` | The explosion as a light: what the world remembers of one |
 | `src/pond.odin` | The pond dug into the world beside the spawn |
 | `src/water.odin` | The depth map of the water, and the shader over it |

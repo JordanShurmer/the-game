@@ -341,7 +341,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_throw_flies(l, t, flies)
 	light_throw_pots(l, t, pots)
 	light_throw_pots(l, t, enemy_pots)
-	light_throw_drudges(l, t, drudges)
+	light_throw_drudges(l, t, drudges, p)
 	light_throw_bangs(l, t)
 }
 
@@ -392,14 +392,21 @@ light_forget_drudges :: proc(l: ^Light, drudges: ^Drudge_Bag) {
 	}
 }
 
+// The light leaves the lamp where the sheet draws it (`drudge_lamp_at`),
+// not from his body's own centre, the same way the wizard's own light
+// leaves the orb on his staff and not the middle of his robe. See
+// docs/drudge.md, "Sight: seeing him before he sees you", and
+// `test_the_drudge_lamp_light_starts_where_the_sheet_draws_the_lamp` below.
 @(private = "file")
-light_throw_drudges :: proc(l: ^Light, t: Terrain, drudges: ^Drudge_Bag) {
+light_throw_drudges :: proc(l: ^Light, t: Terrain, drudges: ^Drudge_Bag, player: Player) {
 	if drudges == nil do return
 
 	table := t.world.materials
 	for i in 0 ..< int(drudges.count) {
 		d := &drudges.drudges[i]
-		x, y := drudge_centre(d^)
+		facing := drudge_facing(d^, player)
+		fx, fy := drudge_lamp_at(d^, facing)
+		x, y := i32(math.floor(fx)), i32(math.floor(fy))
 
 		lx := light_slot(x - l.origin_x)
 		ly := light_slot(y - l.origin_y)
@@ -685,6 +692,37 @@ test_the_orb_light_starts_where_the_sheet_draws_the_orb :: proc(t: ^testing.T) {
 		testing.expectf(
 			t, orb || core,
 			"facing %d puts the light at frame (%d,%d), where the sheet draws %v and not the orb",
+			facing, fx, fy, got,
+		)
+	}
+}
+
+@(test)
+test_the_drudge_lamp_light_starts_where_the_sheet_draws_the_lamp :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	sheet, result := load_drudge_sprite_sheet()
+	if !testing.expectf(t, result.err == .None, "the shipped drudge sheet must load, got %v", result.err) do return
+	defer destroy_sprite_sheet(sheet)
+
+	lamp := drudge_lamp_glow(table)
+
+	for facing in ([]i8{1, -1}) {
+		d := Drudge{x = 100, y = 100, dir = facing, on_ground = true}
+		lx, ly := drudge_lamp_at(d, facing)
+		frame_x, frame_y := drudge_sprite_frame_origin(d)
+
+		fx := i32(math.floor(lx)) - frame_x
+		fy := i32(math.floor(ly)) - frame_y
+		got := drudge_sprite_pixel(sheet, .Idle, 0, facing, fx, fy)
+
+		glow := got.r == lamp.r && got.g == lamp.g && got.b == lamp.b
+		core := got.r == LIGHT_CORE.r && got.g == LIGHT_CORE.g && got.b == LIGHT_CORE.b
+		testing.expectf(
+			t, glow || core,
+			"facing %d puts the light at frame (%d,%d), where the sheet draws %v and not the lamp",
 			facing, fx, fy, got,
 		)
 	}

@@ -37,6 +37,9 @@ App :: struct {
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
 
+	drudge_sprite:         Sprite_Sheet,
+	drudge_sprite_texture: rl.Texture2D,
+
 	color_lut: [256]rl.Color,
 
 	dirty: bool,
@@ -239,9 +242,29 @@ app_init_view :: proc(app: ^App) {
 		app.sprite_texture = rl.LoadTextureFromImage(img)
 		rl.SetTextureFilter(app.sprite_texture, .POINT)
 	}
+
+	drudge_sheet, drudge_result := load_drudge_sprite_sheet()
+	if drudge_result.err != .None {
+		fmt.eprintfln("the drudge sprite sheet could not load: %v", drudge_result.err)
+	}
+	app.drudge_sprite = drudge_sheet
+
+	if drudge_sheet.pixels != nil {
+		img := rl.Image {
+			data    = raw_data(drudge_sheet.pixels),
+			width   = drudge_sheet.width,
+			height  = drudge_sheet.height,
+			mipmaps = 1,
+			format  = .UNCOMPRESSED_R8G8B8A8,
+		}
+		app.drudge_sprite_texture = rl.LoadTextureFromImage(img)
+		rl.SetTextureFilter(app.drudge_sprite_texture, .POINT)
+	}
 }
 
 app_destroy_view :: proc(app: ^App) {
+	rl.UnloadTexture(app.drudge_sprite_texture)
+	destroy_sprite_sheet(app.drudge_sprite)
 	rl.UnloadTexture(app.sprite_texture)
 	destroy_sprite_sheet(app.sprite)
 	water_unload(&app.water)
@@ -552,44 +575,43 @@ app_draw_fireflies :: proc(app: ^App) {
 	}
 }
 
-// Two stacked rectangles, a torso and a head, the head leaning toward
-// whichever way he is walking or facing. See docs/drudge.md, "Looking at
-// him".
+// The drudge sheet drawn exactly the way `app_draw_player` draws the
+// wizard's own: pick a row from his state, a column from his own
+// animation clock, and blit the frame, mirrored to his facing. See
+// docs/drudge.md, "Looking at him".
 @(private = "file")
 app_draw_drudges :: proc(app: ^App) {
+	if app.drudge_sprite.pixels == nil do return
+
 	scale := f32(app.zoom) / f32(app.step)
 
 	for i in 0 ..< int(app.drudges.count) {
 		d := app.drudges.drudges[i]
 		facing := drudge_facing(d, app.player)
+		motion := drudge_motion(d)
+		column := drudge_sprite_frame(motion, d.anim)
 
-		x0 := d.x - DRUDGE_BODY_W*0.5
-		y1 := d.y
-		y0 := y1 - DRUDGE_BODY_H
-		head_h := f32(DRUDGE_BODY_H) * 0.35
-		head_w := f32(DRUDGE_BODY_W) * 0.6
-		lean := f32(DRUDGE_BODY_W) * 0.2 * f32(facing)
-
-		torso := rl.Rectangle {
-			x = (x0 - f32(app.cam_x)) * scale,
-			y = (y0 + head_h - f32(app.cam_y)) * scale,
-			width  = f32(DRUDGE_BODY_W) * scale,
-			height = (f32(DRUDGE_BODY_H) - head_h) * scale,
-		}
-		head := rl.Rectangle {
-			x = (d.x - head_w*0.5 + lean - f32(app.cam_x)) * scale,
-			y = (y0 - f32(app.cam_y)) * scale,
-			width  = head_w * scale,
-			height = head_h * scale,
+		src := rl.Rectangle {
+			x      = f32(column * DRUDGE_SPRITE_FRAME_W),
+			y      = f32(int(motion) * DRUDGE_SPRITE_FRAME_H),
+			width  = f32(DRUDGE_SPRITE_FRAME_W) * f32(facing),
+			height = f32(DRUDGE_SPRITE_FRAME_H),
 		}
 
-		rl.DrawRectangleRec(torso, DRUDGE_BODY)
-		rl.DrawRectangleRec(head, DRUDGE_BODY_DARK)
+		origin_x, origin_y := drudge_sprite_frame_origin(d)
+		dst := rl.Rectangle {
+			x      = f32(origin_x - app.cam_x) * scale,
+			y      = f32(origin_y - app.cam_y) * scale,
+			width  = f32(DRUDGE_SPRITE_FRAME_W) * scale,
+			height = f32(DRUDGE_SPRITE_FRAME_H) * scale,
+		}
+
+		rl.DrawTexturePro(app.drudge_sprite_texture, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
 
 		if app_lighting(app) {
-			lx, ly := drudge_centre(d)
+			lx, ly := drudge_lamp_at(d, facing)
 			app_draw_glow(
-				app, f32(lx), f32(ly),
+				app, lx, ly,
 				DRUDGE_LAMP_HALO, DRUDGE_LAMP_BLAZE, DRUDGE_LAMP_PEAK, 1,
 				drudge_lamp_glow(app.world.materials), LIGHT_CORE,
 			)
