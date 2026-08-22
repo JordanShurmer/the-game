@@ -185,6 +185,14 @@ its own and no physical interaction at all, so nothing in the sandbox
 can touch one and one can touch nothing. `docs/lighting.md`, "Every
 light is a material", is the list and the rules it keeps.
 
+What the world is made of is `data/materials.txt`, and 48 rows of it
+are the whole chemistry: salt goes into water and heat brings it back,
+nitre and brimstone and coal make black powder in two steps,
+quicksilver takes gold up and fire gives it back, and a spell turns
+plain rock into a stone that answers water with light.
+`docs/alchemy.md` is the note, and the alchemy gallery is fourteen
+rooms of it running.
+
 A short walk to his left there is a pond. Its water is drawn by a
 shader — a rippling surface, depths that go dark and cold, and a net of
 caustics sliding over the bottom — and a swarm of fireflies hangs over
@@ -277,6 +285,7 @@ he leaves it and comes back.
 | `src/drudge.odin` | The drudge: a patrol who lobs a pot when he sees him |
 | `src/drudge_sprite.odin` | The drudge's own sheet, and which frame of it to draw |
 | `src/bang.odin` | The explosion as a light: what the world remembers of one |
+| `src/alchemy_test.odin` | The second alchemy, measured in the sandbox it runs in |
 | `src/pond.odin` | The pond dug into the world beside the spawn |
 | `src/water.odin` | The depth map of the water, and the shader over it |
 

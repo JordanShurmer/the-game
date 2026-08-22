@@ -124,9 +124,14 @@ the sparkle a poison throws off meeting water. Read it before changing
 `src/sparkle.odin`, and note the third rule below. `docs/water.md` is
 the note for the pond and the water shader; read it before changing
 `src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
-`docs/alchemy.md` is the note for the poison, the water, and the
-neutral liquid the two leave; read it before changing
-`data/materials.txt`'s `[Reactions]` section or `src/sparkle.odin`.
+`docs/alchemy.md` is the note for the whole alchemy: the poison, the
+water and the neutral liquid the two leave, and then the salts, the
+metals and the two magics that came after. Read it before changing
+`data/materials.txt`'s `[Reactions]` section, `src/sparkle.odin` or
+`src/alchemy_test.odin`. **A new material and a new reaction need no
+code**: thirteen materials were added to that file at once and not a
+line of Odin came with them. Add the row, add the test that measures it
+in the sandbox, and add the gallery room that shows it.
 
 **Everything is a material, explosions and light included.** How
 bright a thing burns (`luminosity`), how hard it pushes (`force`), how
