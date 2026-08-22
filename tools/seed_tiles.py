@@ -79,6 +79,47 @@ Give it `generator = wang` and a `tiles` prefix in data/biomes.txt, add
 a line to STYLES below if the default palette is wrong for it, then run
 this. The set starts as flat fill until something draws it, so a biome
 with no entry here still works; it just looks like nothing.
+
+THREE TILES ARE A BUILT ROOM, NOT NOISE
+
+`ROOMS` below names three of the Coalmine set's 32 tiles, one for each
+count of open sides that a room can make sense of, and only their
+second variant, so the first is still plain cave and a player meets
+the room sometimes and not always:
+
+  - coalmine_1111_1, the Cistern: all four edges open, so four tunnels
+    reach a wide chamber. A steel-lined basin of Water is sunk into
+    the floor under where the north tunnel comes in, so falling in is
+    how a player arrives. Two Wood planks cross the chamber at
+    different heights, with a gap over the basin to fall through, and
+    a seam of Gold wanders the ceiling rock.
+  - coalmine_0101_1, the Magazine: east and west open, so it is a hall
+    a player walks through. A beam on four Wood pillars carries the
+    ceiling; the floor holds a Steel trough of Oil and three heaps of
+    Coal, and one corner is walled off in Wood around a cache of Tnt.
+    Dry, and dangerous.
+  - coalmine_1010_1, the Well: north and south open, so it is a shaft
+    a player drops through. Wood scaffold ledges stagger down
+    alternating walls. At the bottom a clear Rock ledge stands on one
+    side; a Steel-rimmed pit of Lava with an Obsidian lip sits on the
+    other, so the hazard can be walked around, never fallen through
+    blind.
+
+A room draws its own open/solid grid and a material overlay, so a
+feature can be any material rather than only rock and air. `seed_set`
+calls the room instead of `carve_interior` for a tile `ROOMS` names,
+then stamps the shared bands over both exactly as it does for a cave
+tile. The overlay goes on last, and only where `band_of` is None: a
+room may not write a single cell of a band, because every tile that
+carries that band's colour shares it, and a feature only one of them
+agreed to would show as a seam. `room_carve` sets the grid freely,
+bands included, because `stamp` overwrites every band cell after a
+room runs regardless of what the room left there.
+
+The one thing a room must never do is stand something solid across a
+mouth's own tunnel: `ROOM_MOUTH_LO`/`ROOM_MOUTH_HI` mark the column or
+row a mouth needs kept clear, wider than the mouth itself for margin,
+and every room keeps its pillars, walls and caches outside it.
 """
 
 import argparse
@@ -844,6 +885,156 @@ def to_materials(grid, base, rock, ore, ore_rate, rng, wall=WALL):
     return pix
 
 
+# ------------------------------------------------------------------ the rooms
+
+ROOM_MOUTH_LO, ROOM_MOUTH_HI = MOUTH_LO - 10, MOUTH_HI + 10
+
+
+def room_blank(fill=SOLID):
+    return [[fill] * TILE for _ in range(TILE)]
+
+
+def room_carve(grid, x0, x1, y0, y1, value):
+    """Set a rectangle of the open/solid grid. Band cells are safe to
+    touch here: `stamp` overwrites every one of them once the room has
+    run, whatever this left there."""
+    for y in range(max(0, y0), min(TILE, y1)):
+        row = grid[y]
+        for x in range(max(0, x0), min(TILE, x1)):
+            row[x] = value
+
+
+def room_paint(overlay, x0, x1, y0, y1, color):
+    """Set a rectangle of the material overlay. Unlike `room_carve`,
+    this must skip every band cell: the overlay is stamped after the
+    bands are, so a cell it wrote there would stick, and it belongs to
+    every tile that carries that band's colour, not just this one."""
+    for y in range(max(0, y0), min(TILE, y1)):
+        for x in range(max(0, x0), min(TILE, x1)):
+            if band_of(x, y) is None:
+                overlay[(x, y)] = color
+
+
+def room_cistern(rng, colors):
+    """coalmine_1111_1: the Cistern. See the module docstring."""
+    grid = room_blank(SOLID)
+    overlay = {}
+
+    CX0, CX1 = 100, 420
+    CY0, CY1 = 170, 410
+    room_carve(grid, CX0, CX1, CY0, CY1, OPEN)                          # the chamber
+    room_carve(grid, 200, 312, 0, CY0, OPEN)                            # north shaft
+    room_carve(grid, ROOM_MOUTH_LO, ROOM_MOUTH_HI, CY1, TILE, OPEN)     # south shaft
+    room_carve(grid, 0, CX0, ROOM_MOUTH_LO, ROOM_MOUTH_HI, OPEN)        # west tunnel
+    room_carve(grid, CX1, TILE, ROOM_MOUTH_LO, ROOM_MOUTH_HI, OPEN)     # east tunnel
+
+    # the basin: a steel rim sunk into the floor, water inside, right
+    # under the north shaft, so falling in is how a player arrives
+    room_carve(grid, 150, 320, 335, 405, OPEN)
+    room_paint(overlay, 150, 320, 335, 405, colors["Steel"])
+    room_paint(overlay, 158, 312, 343, 400, colors["Water"])
+
+    # two wood planks at different heights, with a gap over the basin
+    room_carve(grid, 110, 190, 260, 270, SOLID)
+    room_paint(overlay, 110, 190, 260, 270, colors["Wood"])
+    room_carve(grid, 330, 412, 260, 270, SOLID)
+    room_paint(overlay, 330, 412, 260, 270, colors["Wood"])
+    room_carve(grid, 320, 410, 330, 340, SOLID)
+    room_paint(overlay, 320, 410, 330, 340, colors["Wood"])
+
+    # a seam of gold wandering the ceiling rock; it may only mark cells
+    # the grid already holds as rock, or it would cross the open shaft
+    for x in range(130, 392):
+        cy = 150 + int(10 * math.sin(x * 0.045))
+        for y in range(cy - 3, cy + 3):
+            if grid[y][x] == SOLID and band_of(x, y) is None:
+                overlay[(x, y)] = colors["Gold"]
+
+    return grid, overlay
+
+
+def room_magazine(rng, colors):
+    """coalmine_0101_1: the Magazine. See the module docstring.
+
+    Everything built keeps to x=100..412, well clear of the 64 cells
+    either mouth reaches in from its own edge, so neither doorway is
+    ever blocked by what stands inside."""
+    grid = room_blank(SOLID)
+    overlay = {}
+
+    FY0, FY1 = 200, 320
+    room_carve(grid, 0, TILE, FY0, FY1, OPEN)   # the hall; both mouths open into it directly
+
+    room_carve(grid, 100, 412, FY0, FY0 + 16, SOLID)
+    room_paint(overlay, 100, 412, FY0, FY0 + 16, colors["Wood"])
+    for px in (148, 214, 280, 346):
+        room_carve(grid, px, px + 18, FY0, FY1, SOLID)
+        room_paint(overlay, px, px + 18, FY0, FY1, colors["Wood"])
+
+    # a steel trough of oil, in the gap before the first pillar
+    room_carve(grid, 104, 144, FY1 - 14, FY1, OPEN)
+    room_paint(overlay, 100, 148, FY1 - 18, FY1, colors["Steel"])
+    room_paint(overlay, 106, 142, FY1 - 14, FY1, colors["Oil"])
+
+    # a coal heap in each middle gap
+    for cx, w in ((190, 20), (256, 20), (322, 20)):
+        for x in range(cx - w, cx + w):
+            h = int(w * math.sqrt(max(0.0, 1 - ((x - cx) / w) ** 2)))
+            room_paint(overlay, x, x + 1, FY1 - h, FY1, colors["Coal"])
+
+    # the tnt cache, walled off behind wood, in the last gap
+    room_carve(grid, 370, 406, FY0 + 16, FY1, OPEN)
+    room_paint(overlay, 370, 406, FY0 + 16, FY1, colors["Tnt"])
+    room_carve(grid, 364, 370, FY0 + 16, FY1, SOLID)
+    room_paint(overlay, 364, 370, FY0 + 16, FY1, colors["Wood"])
+    room_carve(grid, 406, 412, FY0 + 16, FY1, SOLID)
+    room_paint(overlay, 406, 412, FY0 + 16, FY1, colors["Wood"])
+
+    return grid, overlay
+
+
+def room_well(rng, colors):
+    """coalmine_1010_1: the Well. See the module docstring."""
+    grid = room_blank(SOLID)
+    overlay = {}
+
+    SX0, SX1 = 125, 385                        # the shaft
+    MC0, MC1 = ROOM_MOUTH_LO, ROOM_MOUTH_HI     # the mouth column: kept clear top to bottom
+    room_carve(grid, SX0, SX1, 0, TILE, OPEN)
+
+    # scaffold ledges, alternating walls, staggered down
+    for y, side in ((90, "W"), (170, "E"), (250, "W"), (330, "E")):
+        if side == "W":
+            room_carve(grid, SX0, MC0, y, y + 16, SOLID)
+            room_paint(overlay, SX0, MC0, y, y + 16, colors["Wood"])
+        else:
+            room_carve(grid, MC1, SX1, y, y + 16, SOLID)
+            room_paint(overlay, MC1, SX1, y, y + 16, colors["Wood"])
+
+    # the bottom: a clear rock ledge to stand on, west of the mouth
+    # column; the column itself, and the lava east of it, are never
+    # floored, so the well keeps going straight down through the
+    # middle and the hazard cannot be missed
+    FLOOR = 440
+    room_carve(grid, SX0, MC0, FLOOR, FLOOR + 20, SOLID)
+    room_paint(overlay, SX0, MC0, FLOOR, FLOOR + 20, colors["Rock"])
+
+    room_paint(overlay, MC1, SX1 + 9, FLOOR - 18, FLOOR + 54, colors["Steel"])
+    room_paint(overlay, MC1 + 8, SX1, FLOOR - 10, FLOOR + 50, colors["Lava"])
+    room_paint(overlay, MC1, SX1 + 9, FLOOR - 18, FLOOR - 10, colors["Obsidian"])
+
+    return grid, overlay
+
+
+# Keyed by biome name, signature and variant: only the Coalmine set has
+# rooms so far, and only their second variant carries one.
+ROOMS = {
+    ("Coalmine", (1, 1, 1, 1), 1): room_cistern,
+    ("Coalmine", (0, 1, 0, 1), 1): room_magazine,
+    ("Coalmine", (1, 0, 1, 0), 1): room_well,
+}
+
+
 # ------------------------------------------------------------------- the sets
 
 
@@ -899,10 +1090,17 @@ def seed_set(name, biome, colors, seed=None):
         for v in range(biome["variants"]):
             rng = random.Random(seed * 31 + value * 977 + v * 104729)
 
-            grid = carve_interior(sig, rng, fields, corner_field, cut)
+            room = ROOMS.get((name, sig, v))
+            if room is None:
+                grid = carve_interior(sig, rng, fields, corner_field, cut)
+                overlay = {}
+            else:
+                grid, overlay = room(rng, colors)
             stamp(grid, sig, shape, corner_shape)
             pix = to_materials(grid, base, rock, ore, style["ore_rate"], rng)
             stamp(pix, sig, paint, corner_paint)
+            for (x, y), color in overlay.items():
+                pix[y][x] = color
 
             air += sum(1 for row in pix for c in row if c == AIR)
             write_png(f"{biome['prefix']}_{sig[0]}{sig[1]}{sig[2]}{sig[3]}_{v}.png", pix)
