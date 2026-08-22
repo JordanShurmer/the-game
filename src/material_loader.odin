@@ -23,7 +23,7 @@ Material_Table :: struct {
 	kind:        []Cell_Kind,
 	work:        []Cell_Works,
 
-	weight_lut: [4 * SANDBOX_WIDE_LANES]u8,
+	weight_lut: [8 * SANDBOX_WIDE_LANES]u8,
 	lut_ok:     bool,
 	wide_ok:    bool,
 

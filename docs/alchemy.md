@@ -132,25 +132,45 @@ is about 8000 samples a tick, against the 5000 one bang costs. There
 is no allocation and no list that grows.
 
 `make bench` before and after must be read, and the number recorded in
-this note the way `docs/physics.md` records its own. Measured on the
-shipped map, `bin/bench`'s default run (`Coalmine`, 2048 square, 100
-ticks, no alchemy material anywhere in view):
+this note the way `docs/physics.md` records its own.
 
-| | Before | After |
+Three new materials pushed the shipped table to 35, past
+`SANDBOX_WIDE_IDS` (32), and the first cut of this note shipped that
+plainly: the vpshufb fast path `docs/physics.md` "LOAD is now wide"
+describes stood down for the whole game, on every biome, whether or
+not any alchemy was near, and `Coalmine` alone read 1.09 ms a tick
+before against 1.15 after. That is not an acceptable price for three
+rows of data, so `SANDBOX_WIDE_IDS` is 64 now, not 32. The scheme
+generalises the way the old one worked: it was two 16-entry shuffle
+tables and one `vpcmpgtb`/`vpblendvb` on `idx > 15`, covering ids 0..31
+a byte half at a time. It is four tables and a chain of three blends
+now, on `idx > 15`, `idx > 31` and `idx > 47`, covering ids 0..63; every
+id still stays under 128, so the signed compares still read right.
+`weight_lut` grew from `4 * SANDBOX_WIDE_LANES` bytes to `8 *
+SANDBOX_WIDE_LANES`, one quarter per table, and `sandbox_build_luts`
+fills all four. The asm itself had to be re-tuned to fit: the naive
+translation needs 19 live ymm registers for 16 that exist, so `sel`
+and the final unpack step now share one register across the whole
+block instead of each getting its own, which is the only reason the
+four-table version compiles at all.
+
+Measured on the shipped map, `bin/bench`'s default run (`Coalmine`,
+2048 square, 100 ticks, interleaved with the build before this rung,
+best of five each way):
+
+| | Before this rung | After it |
 | --- | --- | --- |
-| ms a tick | 1.09 | 1.15 |
+| ms a tick | 1.09 | 1.09 |
 
-The checksum does not move. The cost is not the sparkle: `Coalmine`
-never holds `Attor`, `Smylt` or `Sparkle`, so nothing there reacts or
-lights a spark. It is that the shipped table now holds 35 materials,
-past `SANDBOX_WIDE_IDS` (32), so the vpshufb fast path
-`docs/physics.md` "LOAD is now wide" describes stands down everywhere,
-not only where the alchemy is, and every tick pays the plain weight
-lookup instead. `test_the_weight_lut_holds_every_material` and
-`test_the_wide_weights_agree_with_the_plain_ones` hold that stand-down
-to be correct rather than silently wrong. The rung that would buy it
-back is a third tier in the lookup, covering ids 32 to 63; nothing
-built here needs it yet.
+Widening the lookup gets back to the number `docs/physics.md` reports
+for its own build, and the checksum never moves either side of it.
+`test_the_weight_lut_holds_every_material` and
+`test_the_wide_weights_agree_with_the_plain_ones` once again require
+the shipped table to fit the lookup, rather than accepting that it
+does not; `test_a_long_material_table_stands_the_wide_pass_down` still
+holds the stand-down correct for a table that truly does outgrow 64,
+because that behaviour is worth keeping even though the shipped table
+no longer needs it.
 
 The alchemy gallery itself, `bin/bench biome=Alchemy size=512
 ticks=900`, costs 0.13 ms a tick against the physics gallery's 0.30 at
