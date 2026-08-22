@@ -563,6 +563,66 @@ glyph       = ;
 luminosity  = 96
 
 # ------------------------------------------------------------
+# Alchemy: a poison, water, and what the two make of each other.
+# See docs/alchemy.md.
+# ------------------------------------------------------------
+
+[Attor]
+# ator, attor: poison, venom. A toxic liquid, a little heavier than
+# water and a little lighter than Toxic_Sludge, so it lies under one
+# and over the other.
+state       = Liquid
+density     = 1.25
+fall_speed  = 3
+hardness    = 0
+flammability= 0
+conductivity= 1
+toxicity    = 7
+lifetime    = -1
+color       = 0xFFB8CE2E
+contact     = Poisons
+immersion   = Poisons Drowns
+tags        =
+glyph       = a
+
+[Smylt]
+# smylte: calm, still, serene. The neutral liquid the mix leaves. It
+# does nothing at all, which is the point of it.
+state       = Liquid
+density     = 1.05
+fall_speed  = 3
+hardness    = 0
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF9FB8C4
+contact     = Wets
+immersion   = Drowns
+tags        =
+glyph       = m
+
+[Sparkle]
+# A dot of light the mix throws off. It rises, flashes, and is gone.
+# It has no contact and no immersion: it burns nothing, wets nothing,
+# and poisons nothing. It is light and nothing else.
+state       = Special
+density     = 0.08
+fall_speed  = 1          # rises
+hardness    = 0
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = 10         # ticks; a sixth of a second
+color       = 0xFFDFF3FF
+contact     =
+immersion   =
+tags        =
+glyph       = *
+luminosity  = 190
+decays_to   = Air
+
+# ------------------------------------------------------------
 # Reactions. See docs/physics.md, "The reaction table".
 # ------------------------------------------------------------
 
@@ -583,3 +643,8 @@ Snow  + Fire            -> Water + Fire         220
 Snow  + Lava            -> Water + Lava         240
 Flammable_Gas + Fire    -> Fire  + Fire         255
 Lava  + Wood            -> Lava  + Burning_Wood 200
+
+# A chain of rows: one pair, tried in the order written. 170 + 86 = 256,
+# so the pair always reacts. See docs/alchemy.md, "The mix".
+Attor + Water           -> Sparkle + Smylt       170
+Attor + Water           -> Smylt   + Smylt        86

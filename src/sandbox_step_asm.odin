@@ -6,55 +6,78 @@ import "core:testing"
 
 SANDBOX_WIDE_LANES :: 32
 
-SANDBOX_WIDE_IDS :: 32
+SANDBOX_WIDE_IDS :: 64
 
 @(private = "file") B32 :: #simd[SANDBOX_WIDE_LANES]u8
 
+// Four 16-entry shuffle tables per byte (low and high), chosen by a chain of
+// three thresholds: id>15 picks block 1 over 0, id>31 picks block 2 over
+// whatever block 0/1 gave, id>47 picks block 3 over that. Every id stays
+// under 128, so the signed vpcmpgtb compares are still correct.
 @(private = "file")
 weights_32 :: asm(
-	cells:   [^]u8,
-	moved:   [^]u8,
-	out:     [^]u16,
-	lo_a:    B32,
-	lo_b:    B32,
-	hi_a:    B32,
-	hi_b:    B32,
-	fifteen: B32,
+	cells:      [^]u8,
+	moved:      [^]u8,
+	out:        [^]u16,
+	lo_a:       B32,
+	lo_b:       B32,
+	lo_c:       B32,
+	lo_d:       B32,
+	hi_a:       B32,
+	hi_b:       B32,
+	hi_c:       B32,
+	hi_d:       B32,
+	fifteen:    B32,
+	thirtyone:  B32,
+	fortyseven: B32,
 ) [
 	idx: B32,
 	sel: B32,
 	lo:  B32,
 	hi:  B32,
 	t:   B32,
-	u:   B32,
 	#clobber memory,
 	#clobber flags,
 ] {
 	vmovdqu   idx, [cells]
-	vpcmpgtb  sel, idx, fifteen
 
+	vpcmpgtb  sel, idx, fifteen
 	vpshufb   lo, lo_a, idx
 	vpshufb   t, lo_b, idx
 	vpblendvb lo, lo, t, sel
+	vpcmpgtb  sel, idx, thirtyone
+	vpshufb   t, lo_c, idx
+	vpblendvb lo, lo, t, sel
+	vpcmpgtb  sel, idx, fortyseven
+	vpshufb   t, lo_d, idx
+	vpblendvb lo, lo, t, sel
 
+	vpcmpgtb  sel, idx, fifteen
 	vpshufb   hi, hi_a, idx
 	vpshufb   t, hi_b, idx
 	vpblendvb hi, hi, t, sel
+	vpcmpgtb  sel, idx, thirtyone
+	vpshufb   t, hi_c, idx
+	vpblendvb hi, hi, t, sel
+	vpcmpgtb  sel, idx, fortyseven
+	vpshufb   t, hi_d, idx
+	vpblendvb hi, hi, t, sel
 
-	vpxor     u, u, u
+	vpxor     sel, sel, sel
 	vmovdqu   t, [moved]
-	vpcmpgtb  t, t, u
+	vpcmpgtb  t, t, sel
 	vpor      lo, lo, t
 	vpor      hi, hi, t
 
 	vpunpcklbw t, lo, hi
-	vpunpckhbw u, lo, hi
-	vperm2i128 lo, t, u, 0x20
-	vperm2i128 hi, t, u, 0x31
+	vpunpckhbw sel, lo, hi
+	vperm2i128 lo, t, sel, 0x20
+	vperm2i128 hi, t, sel, 0x31
 
 	vmovdqu   [out], lo
 	vmovdqu   [out + 32], hi
 }
+
 
 sandbox_wide_start :: #force_inline proc "contextless" (from, last: i32) -> i32 {
 	aligned := (from + SANDBOX_WIDE_LANES - 1) &~ i32(SANDBOX_WIDE_LANES - 1)
@@ -79,18 +102,26 @@ weights_span :: proc "contextless" (
 	cells: [^]u8,
 	moved: [^]u8,
 	out:   [^]u16,
-	lut:   ^[4 * SANDBOX_WIDE_LANES]u8,
+	lut:   ^[8 * SANDBOX_WIDE_LANES]u8,
 	from, last: i32,
 ) -> (x: i32) {
 	W :: SANDBOX_WIDE_LANES
 	lo_a := intrinsics.unaligned_load((^B32)(&lut[0]))
 	lo_b := intrinsics.unaligned_load((^B32)(&lut[W]))
-	hi_a := intrinsics.unaligned_load((^B32)(&lut[2 * W]))
-	hi_b := intrinsics.unaligned_load((^B32)(&lut[3 * W]))
+	lo_c := intrinsics.unaligned_load((^B32)(&lut[2 * W]))
+	lo_d := intrinsics.unaligned_load((^B32)(&lut[3 * W]))
+	hi_a := intrinsics.unaligned_load((^B32)(&lut[4 * W]))
+	hi_b := intrinsics.unaligned_load((^B32)(&lut[5 * W]))
+	hi_c := intrinsics.unaligned_load((^B32)(&lut[6 * W]))
+	hi_d := intrinsics.unaligned_load((^B32)(&lut[7 * W]))
 
 	x = from
 	for ; x + W <= last + 1; x += W {
-		weights_32(cells[x:], moved[x:], out[x + 1:], lo_a, lo_b, hi_a, hi_b, B32(15))
+		weights_32(
+			cells[x:], moved[x:], out[x + 1:],
+			lo_a, lo_b, lo_c, lo_d, hi_a, hi_b, hi_c, hi_d,
+			B32(15), B32(31), B32(47),
+		)
 	}
 	return x
 }
@@ -114,14 +145,14 @@ sandbox_build_luts :: proc(table: ^Material_Table) {
 	if !table.lut_ok do return
 
 	for m in 0 ..< len(table.materials) {
-		half := m / 16 * W
+		quarter := m / 16 * W
 		lane := m % 16
 		w := table.weight[m]
 
-		table.weight_lut[half + lane] = u8(w)
-		table.weight_lut[half + lane + 16] = u8(w)
-		table.weight_lut[2 * W + half + lane] = u8(w >> 8)
-		table.weight_lut[2 * W + half + lane + 16] = u8(w >> 8)
+		table.weight_lut[quarter + lane] = u8(w)
+		table.weight_lut[quarter + lane + 16] = u8(w)
+		table.weight_lut[4 * W + quarter + lane] = u8(w >> 8)
+		table.weight_lut[4 * W + quarter + lane + 16] = u8(w >> 8)
 	}
 }
 
@@ -180,17 +211,17 @@ test_the_weight_lut_holds_every_material :: proc(t: ^testing.T) {
 
 	W :: SANDBOX_WIDE_LANES
 	for m in 0 ..< len(table.materials) {
-		half := m / 16 * W
+		quarter := m / 16 * W
 		lane := m % 16
 		w := table.weight[m]
 
 		for second in 0 ..= 16 {
 			if second != 0 && second != 16 do continue
-			got := u16(table.weight_lut[half + lane + second]) |
-			       u16(table.weight_lut[2 * W + half + lane + second]) << 8
+			got := u16(table.weight_lut[quarter + lane + second]) |
+			       u16(table.weight_lut[4 * W + quarter + lane + second]) << 8
 			testing.expectf(
 				t, got == w,
-				"material %d (%s) weighs %d, and the lut half at +%d says %d",
+				"material %d (%s) weighs %d, and the lut quarter at +%d says %d",
 				m, table.names[m], w, second, got,
 			)
 		}
@@ -230,6 +261,6 @@ test_a_long_material_table_stands_the_wide_pass_down :: proc(t: ^testing.T) {
 	defer delete(table.materials)
 
 	sandbox_build_luts(&table)
-	testing.expect(t, !table.lut_ok, "a table of 33 materials must not fit the lookup")
+	testing.expect(t, !table.lut_ok, "a table of 65 materials must not fit the lookup")
 	testing.expect(t, !table.wide_ok, "and the wide pass must stand down")
 }

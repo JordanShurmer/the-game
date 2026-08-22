@@ -103,3 +103,9 @@ color     = 0xFF9B59B6
 generator = image
 image     = data/rooms/gallery.png
 fill_0    = Bedrock
+
+[Alchemy]
+color     = 0xFF4EC9C9
+generator = image
+image     = data/rooms/alchemy.png
+fill_0    = Bedrock

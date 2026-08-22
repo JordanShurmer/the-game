@@ -144,6 +144,11 @@ all.
 
 A reaction is a pair of materials that meet and both change.
 
+A pair may name more than one row, tried in the order written, all on
+one roll. `docs/alchemy.md`, "A chain of rows", says how that works
+and what it builds: the poison and the water, and the light the two
+throw off.
+
 `data/materials.txt` gains one reserved section, the way
 `data/biomes.txt` already has `[Map]`. The same parser reads it.
 

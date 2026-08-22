@@ -331,6 +331,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_forget_pots(l, enemy_pots)
 	light_forget_drudges(l, drudges)
 	light_forget_bangs(l, t)
+	light_forget_sparks(l, t)
 
 	x, y := light_orb_source(t, p)
 	l.live_x = light_slot(x - l.origin_x)
@@ -343,6 +344,7 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_throw_pots(l, t, enemy_pots)
 	light_throw_drudges(l, t, drudges, p)
 	light_throw_bangs(l, t)
+	light_throw_sparks(l, t)
 }
 
 @(private = "file")
@@ -497,6 +499,42 @@ light_throw_bangs :: proc(l: ^Light, t: Terrain) {
 	}
 }
 
+// A sparkle clears the box it lit last tick, the firefly way: a slot
+// written over in the middle of its life would otherwise leave the light
+// it threw stuck on the ground. See docs/alchemy.md, "The ring".
+@(private = "file")
+light_forget_sparks :: proc(l: ^Light, t: Terrain) {
+	if t.sandbox == nil do return
+
+	for &sp in t.sandbox.sparks.sparks {
+		if !sp.lit do continue
+		light_clear_box(l.live, sp.lx, sp.ly, SPARKLE_REACH)
+		sp.lit = false
+	}
+}
+
+@(private = "file")
+light_throw_sparks :: proc(l: ^Light, t: Terrain) {
+	if t.sandbox == nil do return
+
+	table := t.world.materials
+	sb := t.sandbox
+	for &sp in sb.sparks.sparks {
+		if sp.life <= 0 do continue
+
+		x := sb.origin_x + sp.x
+		y := sb.origin_y + sp.y
+		lx := light_slot(x - l.origin_x)
+		ly := light_slot(y - l.origin_y)
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+
+		light_flood(l, l.live, t, x, y, spark_power(table, sp), SPARKLE_REACH, SPARKLE_FALL)
+		sp.lx = lx
+		sp.ly = ly
+		sp.lit = true
+	}
+}
+
 light_fall_reach :: proc(power: u8, fall: Light_Fall) -> i32 {
 	value := u32(power)
 	steps := i32(0)
@@ -551,6 +589,7 @@ test_every_reach_outlasts_the_falloff_it_bounds :: proc(t: ^testing.T) {
 		{"a bang", light_lumens(table, table.blast), BANG_REACH, BANG_FALL},
 		{"a fuse", light_lumens(table, table.fire), POT_FUSE_REACH, POT_FUSE_FALL},
 		{"a firefly", light_lumens(table, table.firefly), FIREFLY_REACH, FIREFLY_FALL},
+		{"a sparkle", light_lumens(table, table.sparkle), SPARKLE_REACH, SPARKLE_FALL},
 	}
 
 	for c in cases {
@@ -577,11 +616,22 @@ test_the_lights_of_the_world_are_ordered :: proc(t: ^testing.T) {
 	crystal := light_lumens(table, table.crystal)
 	firefly := light_lumens(table, table.firefly)
 	fuse := light_lumens(table, table.fire)
+	sparkle := light_lumens(table, table.sparkle)
 
 	testing.expectf(
 		t, bang >= orb,
 		"a bang must be the brightest thing in the world while it lasts, got %d against an orb of %d",
 		bang, orb,
+	)
+	testing.expectf(
+		t, orb >= sparkle,
+		"a sparkle must never outshine the orb he carries, got %d against %d",
+		sparkle, orb,
+	)
+	testing.expectf(
+		t, sparkle > crystal,
+		"a sparkle must outshine the trail he leaves, got %d against %d",
+		sparkle, crystal,
 	)
 	testing.expectf(
 		t, crystal < orb,
@@ -598,6 +648,19 @@ test_the_lights_of_the_world_are_ordered :: proc(t: ^testing.T) {
 		"the fuse on a thrown pot must not outshine the orb he carries, got %d against %d",
 		fuse, orb,
 	)
+}
+
+// The smallest light in the world: brightness is not reach.
+@(test)
+test_a_sparkle_is_the_smallest_light_in_the_world :: proc(t: ^testing.T) {
+	others := []i32{LIGHT_ORB_REACH, LIGHT_CRYSTAL_REACH, BANG_REACH, POT_FUSE_REACH, FIREFLY_REACH}
+	for reach in others {
+		testing.expectf(
+			t, SPARKLE_REACH < reach,
+			"a sparkle must be the smallest light in the world, and its reach of %d is not under %d",
+			SPARKLE_REACH, reach,
+		)
+	}
 }
 
 @(test)
@@ -660,6 +723,7 @@ test_every_light_is_painted_the_colour_its_material_carries :: proc(t: ^testing.
 		{"a crystal", table.crystal, LIGHT_CORE},
 		{"a firefly", table.firefly, FIREFLY_GLOW},
 		{"a bang", table.blast, BANG_CORE},
+		{"a sparkle", table.sparkle, SPARKLE_GLOW},
 	}
 
 	for c in cases {
