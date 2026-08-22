@@ -623,6 +623,249 @@ luminosity  = 190
 decays_to   = Air
 
 # ------------------------------------------------------------
+# The second alchemy: the salts, the metals, and the two magics.
+# See docs/alchemy.md, "The second alchemy".
+#
+# Nine of these are matter a miner would know: salt, brine, nitre,
+# brimstone, the black salt the two make, the reek it burns off, lye,
+# quicksilver, and the amalgam quicksilver takes gold up into. Four are
+# not: a spell in a bottle, the gleam a spell leaves in stone, a cure,
+# and a shadow. Every one of them is a row here and a row in
+# [Reactions], and no code knows the name of any of them.
+# ------------------------------------------------------------
+
+[Sealt]
+# sealt: salt. It falls like sand and it goes into water and is gone.
+state       = Powder
+density     = 2.1
+fall_speed  = 3
+hardness    = 1
+flammability= 0
+conductivity= 2
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFF4F1E1
+contact     =
+immersion   =
+tags        =
+glyph       = +
+
+[Brine]
+# What salt and water make of each other. It lies between water (1.0)
+# and Smylt (1.05), so a pool of the two settles into bands, and it
+# carries a current far better than either.
+state       = Liquid
+density     = 1.03
+fall_speed  = 4
+hardness    = 0
+flammability= 0
+conductivity= 6
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF7FA8B0
+contact     = Wets
+immersion   = Drowns
+tags        =
+glyph       = -
+
+[Nitre]
+# Saltpetre, swept off a cave wall. It is no fuel at all; it is what
+# makes another fuel burn faster than it can on its own.
+state       = Powder
+density     = 1.9
+fall_speed  = 3
+hardness    = 1
+flammability= 0
+conductivity= 1
+toxicity    = 1
+lifetime    = -1
+color       = 0xFFE3E9D2
+contact     =
+immersion   =
+tags        = Oxidizer
+glyph       = N
+
+[Brimstone]
+# brynstan: the burning stone. Sulphur, yellow, and it does not burn
+# to flame at once: it gives off its reek first, and the reek burns.
+state       = Powder
+density     = 2.0
+fall_speed  = 3
+hardness    = 1
+flammability= 6
+conductivity= 0
+toxicity    = 2
+lifetime    = -1
+color       = 0xFFD8C43C
+contact     =
+immersion   =
+tags        = Fuel
+glyph       = b
+burns_to    = Reek
+
+[Reek]
+# The choking yellow fume brimstone gives off. It rises, it poisons
+# what it touches, and it is still a fuel: a flame walks up it.
+state       = Gas
+density     = 0.25
+fall_speed  = 1          # rises
+hardness    = 0
+flammability= 0          # it goes off from the reaction table, in one step
+conductivity= 0
+toxicity    = 4
+lifetime    = 300
+color       = 0xFF9AA36B
+contact     = Poisons
+immersion   = Poisons
+tags        = Fuel
+glyph       = r
+
+[Sweartsealt]
+# sweart: black. The black salt nitre and brimstone make where they
+# touch. It is half of black powder and it wants the other half.
+state       = Powder
+density     = 1.8
+fall_speed  = 3
+hardness    = 1
+flammability= 6
+conductivity= 0
+toxicity    = 1
+lifetime    = -1
+color       = 0xFF3A3630
+contact     =
+immersion   =
+tags        = Fuel Oxidizer
+glyph       = k
+burns_to    = Fire
+
+[Leag]
+# leag: lye. Wood ash left standing in water. It is the other end of
+# the scale from acid, and the two put each other out.
+state       = Liquid
+density     = 1.1
+fall_speed  = 3
+hardness    = 0
+flammability= 0
+conductivity= 4
+toxicity    = 2
+lifetime    = -1
+color       = 0xFFD6D8B8
+contact     = Dissolves
+immersion   = Dissolves
+tags        = Base
+glyph       = y
+
+[Cwicseolfor]
+# cwicseolfor: quicksilver. A liquid metal, heavier than anything else
+# that flows here, so it finds the bottom of every pool it is poured
+# into and stays there.
+state       = Liquid
+density     = 13.5
+fall_speed  = 4
+hardness    = 0
+flammability= 0
+conductivity= 9
+toxicity    = 5
+lifetime    = -1
+color       = 0xFFE8EDF2
+contact     = Poisons
+immersion   = Poisons Drowns
+tags        = Metal
+glyph       = q
+
+[Gemang]
+# gemang: a mingling. The soft solid quicksilver takes gold up into.
+# Fire drives the quicksilver back off and leaves the gold; a blast
+# only shakes the mingling apart again.
+state       = Solid
+density     = 14.2
+fall_speed  = 0
+hardness    = 2
+flammability= 0
+conductivity= 7
+toxicity    = 3
+lifetime    = -1
+color       = 0xFFB9A67A
+contact     = Poisons
+immersion   =
+tags        = Metal
+glyph       = M
+crumbles_to = Cwicseolfor
+
+[Galdor]
+# galdor: an incantation, a spell. A spell held in a bottle, lighter
+# than water so it floats on whatever it is poured onto. It is spent
+# in the flash it makes: every row it is in leaves a Sparkle where the
+# Galdor was.
+state       = Liquid
+density     = 0.92
+fall_speed  = 4
+hardness    = 0
+flammability= 0
+conductivity= 5
+toxicity    = 1
+lifetime    = -1
+color       = 0xFF6E5BD8
+contact     = Wets
+immersion   = Drowns
+tags        = Magical
+glyph       = x
+
+[Leoma]
+# leoma: a gleam, a ray of light. Rock that has taken a spell. It is
+# not a light of its own: it answers water with one, a spark for every
+# drop, for as long as the drops keep coming.
+state       = Solid
+density     = 2.7
+fall_speed  = 0
+hardness    = 6
+flammability= 0
+conductivity= 3
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF7BE0F5
+contact     =
+immersion   =
+tags        = Magical
+glyph       = E
+crumbles_to = Gravel
+
+[Haelu]
+# haelu: health, healing. The cure, and the quiet opposite of the mix:
+# it puts the poison out and throws no light at all doing it.
+state       = Liquid
+density     = 0.96
+fall_speed  = 4
+hardness    = 0
+flammability= 0
+conductivity= 2
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFEFB9A0
+contact     = Heals
+immersion   = Heals
+tags        = Magical
+glyph       = h
+
+[Sceadu]
+# sceadu: a shadow. A heavy black liquid that puts fires out, blinds a
+# gleam back to dead glass, and is undone by the cure as the cure is
+# undone by it.
+state       = Liquid
+density     = 1.9
+fall_speed  = 2
+hardness    = 0
+flammability= 0
+conductivity= 0
+toxicity    = 3
+lifetime    = -1
+color       = 0xFF140F1C
+contact     = Poisons
+immersion   = Drowns Poisons
+tags        = Magical
+glyph       = D
+
+# ------------------------------------------------------------
 # Reactions. See docs/physics.md, "The reaction table".
 # ------------------------------------------------------------
 
@@ -648,3 +891,42 @@ Lava  + Wood            -> Lava  + Burning_Wood 200
 # so the pair always reacts. See docs/alchemy.md, "The mix".
 Attor + Water           -> Sparkle + Smylt       170
 Attor + Water           -> Smylt   + Smylt        86
+
+# The salts. Salt goes into water and comes back out of it: the road
+# runs both ways, and heat is what walks it back.
+Sealt + Water           -> Brine   + Brine        120
+Sealt + Ice             -> Brine   + Water         60
+# Two chains, because boiling brine has two ends to it: the water goes
+# off and the salt is left, and where the salt is left is not always
+# where the flame was. See docs/alchemy.md, "A chain of rows".
+Brine + Fire            -> Steam   + Sealt        128
+Brine + Fire            -> Sealt   + Fire         127
+Brine + Lava            -> Steam   + Lava          40
+Brine + Lava            -> Sealt   + Lava         120
+
+# Black powder, in two steps, because a reaction takes two cells and
+# black powder is made of three things. Nitre and brimstone make the
+# black salt; the black salt takes up coal and is powder.
+Nitre       + Brimstone -> Sweartsealt + Sweartsealt  60
+Sweartsealt + Coal      -> Gunpowder   + Gunpowder    90
+Nitre + Fire            -> Fire    + Fire         200
+Reek  + Fire            -> Fire    + Fire         200
+
+# Lye: ash left standing in water, and what it does to acid.
+Ash  + Water            -> Leag    + Leag          35
+Leag + Acid             -> Smylt   + Smylt        200
+
+# The metals. Quicksilver takes gold up; fire gives it back.
+Cwicseolfor + Gold      -> Gemang  + Gemang       150
+Gemang + Fire           -> Gold    + Fire          40
+
+# The two magics. Every row Galdor is in spends it as a flash, so the
+# cell that held the spell is where the Sparkle is written.
+Galdor + Cwicseolfor    -> Sparkle + Gold          60
+Galdor + Rock           -> Sparkle + Leoma         12
+Leoma  + Water          -> Leoma   + Sparkle       40
+Haelu  + Attor          -> Smylt   + Smylt        255
+Haelu  + Ash            -> Dirt    + Dirt          60
+Sceadu + Fire           -> Sceadu  + Smoke        220
+Sceadu + Leoma          -> Sceadu  + Obsidian      30
+Sceadu + Haelu          -> Smylt   + Smylt        255
