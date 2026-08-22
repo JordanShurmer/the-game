@@ -38,11 +38,12 @@ def build_room_1(cv):
     """Attor: a tank of poison pours down a stair into a basin. No water,
     no light: this is the liquid on its own."""
     r = Room(cv, 1)
-    r.tank(55, 8, 95, 32, "Attor", hole_side="bottom", hole_lo=70, hole_hi=80)
-    for i in range(4):
-        ly = 40 + i * 18
-        lx0 = 60 - i * 8
-        r.box(lx0, ly, lx0 + 30, ly + 2, BEDROCK)
+    # Shifted clear of the entrance shaft in this room's own north wall.
+    r.tank(44, 4, 74, 24, "Attor", hole_side="right", hole_lo=8, hole_hi=17)
+    for i in range(5):
+        ly = 30 + i * 16
+        lx0 = 70 - i * 6
+        r.box(lx0, ly, lx0 + 24, ly + 2, BEDROCK)
     r.plinth(100)
 
 
@@ -51,8 +52,8 @@ def build_room_2(cv):
     streams touch as they fall and react the whole way down. The
     sparks flash over the basin and Smylt pools under them."""
     r = Room(cv, 2)
-    r.tank(10, 6, 58, 28, "Attor", wall=3, hole_side="bottom", hole_lo=53, hole_hi=58)
-    r.tank(61, 6, 109, 28, "Water", wall=3, hole_side="bottom", hole_lo=61, hole_hi=66)
+    r.tank(10, 6, 59, 28, "Attor", wall=3, hole_side="bottom", hole_lo=54, hole_hi=59)
+    r.tank(60, 6, 109, 28, "Water", wall=3, hole_side="bottom", hole_lo=60, hole_hi=65)
     r.box(20, 90, 99, 119, BEDROCK)
     r.box(24, 94, 95, 119, AIR)
     r.plinth(4, w=5, h=4)
@@ -94,19 +95,21 @@ def build_room_4(cv):
 
 
 def build_room_5(cv):
-    """Layers: oil, water, Smylt and Attor pour into one narrow tank from
-    four side taps and settle in four bands, in the order the
-    densities say (Oil 0.85, Water 1.0, Smylt 1.05, Attor 1.25)."""
+    """Layers: oil, water, Smylt and Attor pour down one narrow column
+    and settle in four bands, in the order the densities say (Oil
+    0.85, Water 1.0, Smylt 1.05, Attor 1.25). The reservoir above holds
+    them stacked out of order on purpose: the pour down the column is
+    what sorts them, the same gravity that starts every room here."""
     r = Room(cv, 5)
-    x0, x1 = 55, 68
+    x0, x1 = 50, 69
     r.box(x0 - 4, 4, x1 + 4, r.floor, BEDROCK)
     r.box(x0, 4, x1, r.floor, AIR)
 
-    taps = [("Oil", 8), ("Water", 34), ("Smylt", 60), ("Attor", 86)]
-    for fill, ly0 in taps:
-        r.box(20, ly0, x0 - 5, ly0 + 18, BEDROCK)
-        r.box(23, ly0 + 3, x0 - 8, ly0 + 15, fill)
-        r.box(x0 - 7, ly0 + 6, x0 - 1, ly0 + 10, AIR)  # the hole into the column
+    r.tank(20, 4, 99, 40, "Oil", wall=3, hole_side="bottom", hole_lo=x0 + 2, hole_hi=x1 - 2)
+    order = ["Attor", "Smylt", "Oil", "Water"]
+    band = (37 - 7 + 1) // len(order)
+    for i, fill in enumerate(order):
+        r.box(23, 7 + i * band, 96, 7 + (i + 1) * band - 1, fill)
     r.plinth(4, w=5, h=4)
 
 
@@ -116,9 +119,20 @@ def build_room_6(cv):
     own walls, and the room has no door to either neighbour, so the
     sparks are the only light there is."""
     r = Room(cv, 6)
-    r.tank(45, 10, 75, 30, "Water", wall=3, hole_side="bottom", hole_lo=59, hole_hi=61)
-    r.box(20, 100, 99, 119, "Attor")
-    r.plinth(4, w=5, h=4)
+    # A one cell hole and a long fall to the pool below, so the water
+    # comes down as a drip through open air rather than a poured mass.
+    # Kept to the left, clear of the shaft down to room 10 in the
+    # middle of the floor, so neither the drip nor the pool it feeds
+    # can find its own way down that hole.
+    r.tank(15, 4, 42, 50, "Water", wall=3, hole_side="bottom", hole_lo=27, hole_hi=27)
+    # A walled basin, open at the top for the drip to fall into: what
+    # the drip and the reaction leave has nowhere to spread but here,
+    # however tall it stacks, so it can never spill toward the shaft.
+    r.box(6, 65, 9, 119, BEDROCK)
+    r.box(41, 65, 44, 119, BEDROCK)
+    r.box(6, 116, 44, 119, BEDROCK)
+    r.box(10, 100, 40, 119, "Attor")
+    r.plinth(90, w=5, h=4)
 
 
 def build_hall(n):
