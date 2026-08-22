@@ -954,6 +954,27 @@ def room_erase(overlay, x0, x1, y0, y1):
             overlay.pop((x, y), None)
 
 
+def fit_rect(grid, overlay, colors, material, inside, x0, x1, y0, y1, value=SOLID):
+    """Set a rectangle, but only where `inside` (the room's own bare
+    shape test) says yes. Nothing built may cross the shell, so every
+    fitting -- beam, post, plank, bin, crate, brace, ladder -- is
+    placed with this, never with the unclipped `room_carve`."""
+    for y in range(max(0, y0), min(TILE, y1)):
+        for x in range(max(0, x0), min(TILE, x1)):
+            if inside(x, y):
+                grid[y][x] = value
+                if band_of(x, y) is None:
+                    overlay[(x, y)] = colors[material]
+
+
+def fit_open(grid, overlay, inside, x0, x1, y0, y1):
+    for y in range(max(0, y0), min(TILE, y1)):
+        for x in range(max(0, x0), min(TILE, x1)):
+            if inside(x, y):
+                grid[y][x] = OPEN
+                overlay.pop((x, y), None)
+
+
 def in_shell_shape(x, y, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry):
     """A rounded room silhouette: straight sides, a semi-elliptical cap
     of half-axes (top_rx, top_ry) at the top and one of (bot_rx, bot_ry)
@@ -997,7 +1018,7 @@ def build_shell(grid, overlay, colors, material, rng, x0, x1, y0, y1, top_rx, to
     Nothing outside the packing is touched, so the cave stands right up
     against it -- the room sits in the cave system, not apart from it.
     Returns a shape test for the bare interior, for a caller to sculpt
-    further."""
+    and clip against."""
     wob = wobble_field(rng)
     cx0, cy0 = (x0 + x1) / 2, (y0 + y1) / 2
     margin = int(SHELL_T + max(top_ry, bot_ry) + 12)
@@ -1025,27 +1046,30 @@ def build_shell(grid, overlay, colors, material, rng, x0, x1, y0, y1, top_rx, to
     return lambda x, y: in_shell_shape(x, y, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
 
-def cut_doorway(grid, overlay, colors, material, side, near, far, span=72, frame=8):
+def cut_doorway(grid, overlay, colors, material, side, near, far, wall_at, span=72, frame=8, collar=None):
     """Cut a doorway through the shell on `side` ('N', 'E', 'S' or 'W'),
-    clear from `near` to `far` along the wall's own depth, framed on
-    both long edges in `material`, `frame` cells thick -- a jamb either
-    side of an east or west doorway, a lintel above and a sill below a
-    north or south one. `near` and `far` need not be ordered."""
+    clear from `near` to `far` along the wall's own depth. The frame is
+    a collar right where the wall crosses, `collar` cells deep centred
+    on `wall_at` -- a thickening in the plane of the wall itself, not a
+    bar standing out into the room."""
+    if collar is None:
+        collar = SHELL_T + 8
     d0, d1 = sorted((near, far))
+    c0, c1 = sorted((wall_at - collar // 2, wall_at + collar // 2))
     mid = (MOUTH_LO + MOUTH_HI) // 2
     lo, hi = mid - span // 2, mid + span // 2
     if side in "NS":
         room_carve(grid, lo, hi, d0, d1, OPEN)
         room_erase(overlay, lo, hi, d0, d1)
         for a0, a1 in ((lo - frame, lo), (hi, hi + frame)):
-            room_carve(grid, a0, a1, d0, d1, SOLID)
-            room_paint(overlay, a0, a1, d0, d1, colors[material])
+            room_carve(grid, a0, a1, c0, c1, SOLID)
+            room_paint(overlay, a0, a1, c0, c1, colors[material])
     else:
         room_carve(grid, d0, d1, lo, hi, OPEN)
         room_erase(overlay, d0, d1, lo, hi)
         for a0, a1 in ((lo - frame, lo), (hi, hi + frame)):
-            room_carve(grid, d0, d1, a0, a1, SOLID)
-            room_paint(overlay, d0, d1, a0, a1, colors[material])
+            room_carve(grid, c0, c1, a0, a1, SOLID)
+            room_paint(overlay, c0, c1, a0, a1, colors[material])
 
 
 def carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry):
@@ -1090,44 +1114,120 @@ def place_ribs(grid, overlay, colors, material, x0, x1, y0, y1, top_ry, bot_ry, 
         y += step
 
 
-def place_pillar(grid, overlay, colors, material, cx, y0, y1, shaft_w=14, cap_w=22, cap_h=10):
+def course_masonry(overlay, colors, base, joint, x0, x1, y0, y1, block_w=28, block_h=14, jw=3):
+    """A running-bond masonry pattern painted over a wall wherever it
+    is currently `base`: a joint of `joint` between courses (horizontal
+    bands `block_h` tall) and between blocks within a course
+    (`block_w` wide), offset by half a block every other course, so
+    the joints stagger the way real coursing does."""
+    period_h, period_w = block_h + jw, block_w + jw
+    for y in range(max(0, y0), min(TILE, y1)):
+        course = (y - y0) // period_h
+        within = (y - y0) % period_h
+        offset = (block_w // 2) if course % 2 else 0
+        h_joint = within < jw
+        for x in range(max(0, x0), min(TILE, x1)):
+            if overlay.get((x, y)) != colors[base]:
+                continue
+            v_joint = ((x - x0 + offset) % period_w) < jw
+            if (h_joint or v_joint) and band_of(x, y) is None:
+                overlay[(x, y)] = colors[joint]
+
+
+def rivet_wall(overlay, colors, base, rivet, hoop, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry):
+    """A steel tank's own texture: a rivet dot every 16 cells around
+    the seam, and a Rock hoop 10 cells wide banding the tank every 110
+    cells or so around its whole perimeter."""
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    avg_r = ((x1 - x0) / 2 + (y1 - y0) / 2 + top_rx + top_ry + bot_rx + bot_ry) / 5
+    circumference = 2 * math.pi * avg_r
+    n_hoops = max(2, round(circumference / 110))
+    hoop_half_angle = max(0.02, (5 / avg_r))
+    margin = int(SHELL_T + max(top_ry, bot_ry) + 8)
+    bx0, bx1 = int(x0 - top_rx - margin), int(x1 + top_rx + margin)
+    by0, by1 = int(y0 - margin), int(y1 + margin)
+    for y in range(max(0, by0), min(TILE, by1)):
+        for x in range(max(0, bx0), min(TILE, bx1)):
+            if overlay.get((x, y)) != colors[base]:
+                continue
+            ang = math.atan2(y - cy, x - cx)
+            arc = ang * avg_r
+            hit_hoop = False
+            for k in range(n_hoops):
+                target = -math.pi + 2 * math.pi * k / n_hoops
+                d = (ang - target + math.pi) % (2 * math.pi) - math.pi
+                if abs(d) < hoop_half_angle:
+                    hit_hoop = True
+                    break
+            if band_of(x, y) is None:
+                if hit_hoop:
+                    overlay[(x, y)] = colors[hoop]
+                elif (arc % 16) < 2:
+                    overlay[(x, y)] = colors[rivet]
+
+
+def place_pillar(grid, overlay, colors, material, inside, cx, y0, y1, shaft_w=14, cap_w=22, cap_h=10):
     """A pillar: a shaft `shaft_w` wide, with a base and a capital, each
     a block `cap_w` wide and `cap_h` tall, so it reads as built rather
     than as a bar standing in the middle of the floor."""
-    room_carve(grid, cx - shaft_w // 2, cx + shaft_w // 2, y0, y1, SOLID)
-    room_paint(overlay, cx - shaft_w // 2, cx + shaft_w // 2, y0, y1, colors[material])
+    fit_rect(grid, overlay, colors, material, inside, cx - shaft_w // 2, cx + shaft_w // 2, y0, y1)
     for cy0, cy1 in ((y0, y0 + cap_h), (y1 - cap_h, y1)):
-        room_carve(grid, cx - cap_w // 2, cx + cap_w // 2, cy0, cy1, SOLID)
-        room_paint(overlay, cx - cap_w // 2, cx + cap_w // 2, cy0, cy1, colors[material])
+        fit_rect(grid, overlay, colors, material, inside, cx - cap_w // 2, cx + cap_w // 2, cy0, cy1)
 
 
-def place_plank(grid, overlay, colors, material, x0, x1, y, floor_y, thickness=5, post_w=6):
+def place_brace(grid, overlay, colors, material, inside, ax, ay, bx, by, width=6):
+    """A diagonal strut from (ax, ay) to (bx, by): what says a frame is
+    braced rather than just resting together."""
+    dx, dy = bx - ax, by - ay
+    length2 = dx * dx + dy * dy or 1
+    x0, x1 = sorted((ax, bx))
+    y0, y1 = sorted((ay, by))
+    for y in range(int(y0 - width), int(y1 + width) + 1):
+        for x in range(int(x0 - width), int(x1 + width) + 1):
+            if not (0 <= x < TILE and 0 <= y < TILE) or not inside(x, y) or band_of(x, y) is not None:
+                continue
+            t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / length2))
+            px, py = ax + t * dx, ay + t * dy
+            if (x - px) ** 2 + (y - py) ** 2 <= (width / 2) ** 2:
+                grid[y][x] = SOLID
+                overlay[(x, y)] = colors[material]
+
+
+def place_plank(grid, overlay, colors, material, inside, x0, x1, y, land_y, thickness=5, post_w=6):
     """A plank `thickness` cells thick from x0 to x1, held up by a post
-    of the same material down to `floor_y`."""
-    room_carve(grid, x0, x1, y, y + thickness, SOLID)
-    room_paint(overlay, x0, x1, y, y + thickness, colors[material])
+    of the same material down to `land_y` -- a water line or a floor,
+    never ending in the air."""
+    fit_rect(grid, overlay, colors, material, inside, x0, x1, y, y + thickness)
     pcx = (x0 + x1) // 2
-    lo, hi = sorted((y + thickness, floor_y))
-    room_carve(grid, pcx - post_w // 2, pcx + post_w // 2, lo, hi, SOLID)
-    room_paint(overlay, pcx - post_w // 2, pcx + post_w // 2, lo, hi, colors[material])
+    lo, hi = sorted((y + thickness, land_y))
+    fit_rect(grid, overlay, colors, material, inside, pcx - post_w // 2, pcx + post_w // 2, lo, hi)
 
 
-def place_bracket_ledge(grid, overlay, colors, material, wall_x, out, y, thickness, from_west, into=10):
+def place_ladder(grid, overlay, colors, material, inside, x, y0, y1, width=5, rung=18):
+    fit_rect(grid, overlay, colors, material, inside, x - width // 2, x + width // 2, y0, y1)
+    yy = y0
+    while yy < y1:
+        fit_rect(grid, overlay, colors, material, inside, x - width, x + width, int(yy), int(yy) + 3)
+        yy += rung
+
+
+def place_bracket_ledge(grid, overlay, colors, material, inside, wall_x, out, y, thickness, from_west, into=10):
     """A ledge `thickness` thick, running `out` cells from the wall at
-    `wall_x`, held by a bracket driven `into` cells back into that
-    wall."""
+    `wall_x`, held on two brackets driven `into` cells back into the
+    wall, and braced by a diagonal strut back to it."""
     if from_west:
         x0, x1 = wall_x, wall_x + out
     else:
         x0, x1 = wall_x - out, wall_x
-    room_carve(grid, x0, x1, y, y + thickness, SOLID)
-    room_paint(overlay, x0, x1, y, y + thickness, colors[material])
-    if from_west:
-        bx0, bx1 = wall_x - into, wall_x
-    else:
-        bx0, bx1 = wall_x, wall_x + into
-    room_carve(grid, bx0, bx1, y - 6, y, SOLID)
-    room_paint(overlay, bx0, bx1, y - 6, y, colors[material])
+    fit_rect(grid, overlay, colors, material, inside, x0, x1, y, y + thickness)
+    for bx in (x0 + out * 0.15, x0 + out * 0.75) if from_west else (x1 - out * 0.15, x1 - out * 0.75):
+        if from_west:
+            bx0, bx1 = wall_x - into, wall_x
+        else:
+            bx0, bx1 = wall_x, wall_x + into
+        fit_rect(grid, overlay, colors, material, inside, int(bx0), int(bx1), y - 6, y)
+    far_x = x1 if from_west else x0
+    place_brace(grid, overlay, colors, material, inside, wall_x, y - 6, far_x, y + thickness + 16)
 
 
 def in_mound(x, y, cx, floor_y, half_w, height):
@@ -1139,36 +1239,63 @@ def in_mound(x, y, cx, floor_y, half_w, height):
     return nx * nx + ny * ny <= 1.0
 
 
-def place_coal_heap(grid, overlay, colors, cx, floor_y, half_w, height):
-    for y in range(floor_y - height - 1, floor_y + 1):
-        for x in range(cx - half_w - 1, cx + half_w + 1):
-            if in_mound(x, y, cx, floor_y, half_w, height):
+def place_coal_bin(grid, overlay, colors, inside, cx, floor_y, half_w, height, wall=6):
+    """A three-sided Wood bin on the floor, open at the top, filled
+    with Coal: dark against black air is not there at all unless a
+    lighter material frames it, and the bin's own walls are that
+    frame."""
+    x0, x1 = cx - half_w, cx + half_w
+    top = floor_y - height
+    fit_rect(grid, overlay, colors, "Coal", inside, x0, x1, top, floor_y)
+    fit_rect(grid, overlay, colors, "Wood", inside, x0 - wall, x0, top - wall, floor_y)
+    fit_rect(grid, overlay, colors, "Wood", inside, x1, x1 + wall, top - wall, floor_y)
+    fit_rect(grid, overlay, colors, "Wood", inside, x0 - wall, x1 + wall, top - wall, top)
+
+
+def in_bowl(x, y, cx, rim_y, rx, ry):
+    if y < rim_y:
+        return False
+    nx, ny = (x - cx) / rx, (y - rim_y) / ry
+    return nx * nx + ny * ny <= 1.0
+
+
+def carve_bowl_pit(grid, overlay, colors, inside, cx, rim_y, half_w, depth, liquid, rim=6, lip=7):
+    """A pit sunk into the floor: a rounded bowl lined in Steel, an
+    Obsidian lip -- a rim course following the top edge on both sides,
+    not a bar across it -- and the liquid filled flat below that rim.
+    A hole in the floor with fire in it, not an orange box."""
+    outer_rx, outer_ry = half_w + rim, depth + rim
+    for y in range(rim_y - 2, rim_y + outer_ry + 3):
+        for x in range(cx - outer_rx - 2, cx + outer_rx + 3):
+            if not (0 <= x < TILE and 0 <= y < TILE) or not inside(x, y):
+                continue
+            if in_bowl(x, y, cx, rim_y, half_w, depth):
+                grid[y][x] = OPEN
+                if band_of(x, y) is None:
+                    overlay[(x, y)] = colors[liquid]
+            elif in_bowl(x, y, cx, rim_y, outer_rx, outer_ry):
                 grid[y][x] = SOLID
                 if band_of(x, y) is None:
-                    overlay[(x, y)] = colors["Coal"]
+                    overlay[(x, y)] = colors["Steel"]
+    for y in range(rim_y, rim_y + lip):
+        for x in range(cx - outer_rx - 2, cx + outer_rx + 3):
+            if 0 <= x < TILE and 0 <= y < TILE and inside(x, y) and band_of(x, y) is None:
+                if overlay.get((x, y)) == colors["Steel"]:
+                    overlay[(x, y)] = colors["Obsidian"]
 
 
-def carve_pit(grid, overlay, colors, x0, x1, y0, y1, liquid, rim=6, lip=16):
-    """A pit sunk into the floor: a Steel rim around it, an Obsidian
-    lip -- a rim course around the whole top edge, not a bar across it
-    -- and the liquid filling it flat."""
-    room_carve(grid, x0 - rim, x1 + rim, y0 - rim, y1 + rim, SOLID)
-    room_paint(overlay, x0 - rim, x1 + rim, y0 - rim, y1 + rim, colors["Steel"])
-    room_carve(grid, x0, x1, y0, y1, OPEN)
-    room_paint(overlay, x0, x1, y0, y1, colors[liquid])
-    room_paint(overlay, x0 - rim, x1 + rim, y0 - rim, y0 - rim + lip, colors["Obsidian"])
-
-
-def paint_vein(grid, overlay, colors, x, y, length, rng, material):
-    """A vein crawling through solid rock, the way `to_materials`
-    already draws ore: a random walk that only marks a cell already
-    solid. Starting it right at the wall's outer face is what exposes
-    the vein there instead of leaving it a mark floating in open air."""
-    for _ in range(length):
-        if 0 <= x < TILE and 0 <= y < TILE and grid[y][x] == SOLID and band_of(x, y) is None:
-            overlay[(x, y)] = colors[material]
-        x += rng.randint(-1, 1)
-        y += rng.randint(-1, 1)
+def carve_gold_seam(grid, overlay, colors, x0, x1, y_base, amp, rng):
+    """A seam of gold, 8 to 14 cells thick, over 200 long, wandering
+    through the dirt above the shell and dipping to bite into the
+    packing wherever the wander runs low. It may only mark cells the
+    grid already holds as solid, so it never crosses open air."""
+    phase = rng.uniform(0, 2 * math.pi)
+    for x in range(x0, x1):
+        cy = y_base + int(amp * math.sin(phase + x * 0.02) + amp * 0.4 * math.sin(phase * 1.7 + x * 0.05))
+        th = 8 + int(3 * (1 + math.sin(phase * 2.3 + x * 0.03)))
+        for y in range(cy - th // 2, cy + th // 2):
+            if 0 <= x < TILE and 0 <= y < TILE and grid[y][x] == SOLID and band_of(x, y) is None:
+                overlay[(x, y)] = colors["Gold"]
 
 
 def paint_thick_line(overlay, colors, material, ax, ay, bx, by, width):
@@ -1186,15 +1313,11 @@ def paint_thick_line(overlay, colors, material, ax, ay, bx, by, width):
                 overlay[(x, y)] = colors[material]
 
 
-def place_glyph(grid, overlay, colors, wall_material, glyph_material, cx, cy, kind, size=25):
-    """One maker's mark, etched into a plaque set proud of the wall so
-    it reads as part of the build: a down triangle for water, an up one
-    for fire, a circle with a dot otherwise. A few strokes, `size` * 2
-    across and 6 wide."""
-    x0, x1 = cx - size - 8, cx + size + 8
-    y0, y1 = cy - size - 8, cy + size + 8
-    room_carve(grid, x0, x1, y0, y1, SOLID)
-    room_paint(overlay, x0, x1, y0, y1, colors[wall_material])
+def place_glyph(overlay, colors, glyph_material, cx, cy, kind, size=25):
+    """One maker's mark, etched flush on the wall face -- a down
+    triangle for water, an up one for fire, a circle with a dot
+    otherwise. A few strokes, `size` * 2 across and 6 wide, and nothing
+    else: no plaque standing proud, just the mark."""
     if kind == "down":
         pts = ((cx - size, cy - size), (cx + size, cy - size), (cx, cy + size))
     elif kind == "up":
@@ -1218,106 +1341,135 @@ def place_glyph(grid, overlay, colors, wall_material, glyph_material, cx, cy, ki
                     overlay[(x, y)] = colors[glyph_material]
 
 
+def scatter_rubble(grid, overlay, colors, inside, floor_y, x0, x1, rng, count=12):
+    """A dozen lumps of Gravel and Rock on the floor: a floor that is a
+    perfect line is the last thing that says drawn."""
+    for _ in range(count):
+        cx = rng.randint(x0, x1)
+        w = rng.randint(2, 5)
+        h = rng.randint(4, 10)
+        mat = "Gravel" if rng.random() < 0.5 else "Rock"
+        fit_rect(grid, overlay, colors, mat, inside, cx - w, cx + w, floor_y - h, floor_y)
+
+
 def room_cistern(grid, rng, colors):
     """coalmine_1111_1: the Cistern. See the module docstring."""
     x0, x1, y0, y1 = 105, 405, 106, 406
     top_rx = bot_rx = 150
     top_ry = bot_ry = 80
     overlay = {}
-    build_shell(grid, overlay, colors, "Steel", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside = build_shell(grid, overlay, colors, "Steel", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     for side in "NESW":
-        near, far = {
-            "N": (y0 - SHELL_T - 6, y0 + 30), "S": (y1 + SHELL_T + 6, y1 - 30),
-            "W": (x0 - SHELL_T - 6, x0 + 30), "E": (x1 + SHELL_T + 6, x1 - 30),
+        near, far, wall_at = {
+            "N": (y0 - SHELL_T - 6, y0 + 30, y0), "S": (y1 + SHELL_T + 6, y1 - 30, y1),
+            "W": (x0 - SHELL_T - 6, x0 + 30, x0), "E": (x1 + SHELL_T + 6, x1 - 30, x1),
         }[side]
-        cut_doorway(grid, overlay, colors, "Steel", side, near, far)
+        cut_doorway(grid, overlay, colors, "Steel", side, near, far, wall_at)
         carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     place_ribs(grid, overlay, colors, "Steel", x0, x1, y0, y1, top_ry, bot_ry, rng,
                skip=((MOUTH_LO - 4, MOUTH_HI + 4),))
+
+    # the tank's own courses: a rivet seam and Rock hoops banding it
+    rivet_wall(overlay, colors, "Steel", "Gravel", "Rock", x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     # the tank's own rounded bottom is the basin: already round, already
     # steel-lined by the wall, so it only needs filling to a flat level
     level = 345
     for y in range(level, y1 + bot_ry + 4):
         for x in range(x0 - bot_rx - 4, x1 + bot_rx + 4):
-            if in_shell_shape(x, y, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry):
+            if inside(x, y):
                 if band_of(x, y) is None:
                     overlay[(x, y)] = colors["Water"]
 
     # two wood planks on posts down to the water, staggered, with a
     # gap over the middle so the north doorway drops a player into it
-    place_plank(grid, overlay, colors, "Wood", 130, 235, 235, level)
-    place_plank(grid, overlay, colors, "Wood", 275, 390, 275, level)
+    place_plank(grid, overlay, colors, "Wood", inside, 130, 235, 235, level)
+    place_plank(grid, overlay, colors, "Wood", inside, 275, 390, 275, level)
 
-    # a gold vein, crawling through the roof rock from where it meets
-    # the wall's outer face
-    paint_vein(grid, overlay, colors, x0 + 40, y0 - SHELL_T - 2, 220, rng, "Gold")
-    paint_vein(grid, overlay, colors, x1 - 60, y0 - SHELL_T - 2, 180, rng, "Gold")
+    # a wood ladder down the east wall, drop shaft to the water, so the
+    # tank can be climbed out of
+    place_ladder(grid, overlay, colors, "Wood", inside, x1 - WALL_T - 10, 200, level)
 
-    # the maker's mark: a down-pointing triangle for water, on the wall
-    # above the basin
-    place_glyph(grid, overlay, colors, "Steel", "Obsidian", x0 - WALL_T + 25 + 8, 300, "down")
+    # a seam of gold, wide and long, wandering the dirt above the tank
+    # and biting into the packing where it dips low
+    carve_gold_seam(grid, overlay, colors, x0 - 60, x1 + 60, y0 - SHELL_T - 30, 22, rng)
+
+    # the maker's mark, flush on the inner wall face, over the water line
+    place_glyph(overlay, colors, "Obsidian", x0 + WALL_T + 20, level - 40, "down")
+
+    scatter_rubble(grid, overlay, colors, inside, level - 2, x0 + 20, 150, rng, count=4)
 
     return overlay
 
 
 def room_magazine(grid, rng, colors):
     """coalmine_0101_1: the Magazine. See the module docstring."""
-    x0, x1, y0, y1 = 76, 436, 150, 410
-    top_rx, top_ry = (x1 - x0) // 2, 90
+    x0, x1, y0, y1 = 76, 436, 125, 410
+    top_rx, top_ry = (x1 - x0) // 2, 55
     bot_rx = bot_ry = 24
     overlay = {}
-    build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
-    # coursing: thin gravel joints along the straight run of each wall,
-    # so the shell reads as blocks, not one poured slab
-    for wx in (x0 + WALL_T // 2, x1 - WALL_T // 2 - 1):
-        yy = y0 + top_ry + 20
-        while yy < y1 - bot_ry:
-            room_paint(overlay, wx - WALL_T // 2, wx + WALL_T // 2 + 1, int(yy), int(yy) + 2, colors["Gravel"])
-            yy += 26
+    # coursed masonry over the whole shell -- the largest single change
+    # a wall this size can carry
+    margin = int(SHELL_T + max(top_ry, bot_ry) + 10)
+    course_masonry(overlay, colors, "Rock", "Gravel", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
 
-    door_span = (MOUTH_LO - 4, MOUTH_HI + 4)
     for side in "EW":
-        near, far = {"W": (x0 - SHELL_T - 6, x0 + 30), "E": (x1 + SHELL_T + 6, x1 - 30)}[side]
-        cut_doorway(grid, overlay, colors, "Rock", side, near, far)
+        near, far, wall_at = {"W": (x0 - SHELL_T - 6, x0 + 30, x0), "E": (x1 + SHELL_T + 6, x1 - 30, x1)}[side]
+        cut_doorway(grid, overlay, colors, "Rock", side, near, far, wall_at)
         carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
+    door_span = (MOUTH_LO - 4, MOUTH_HI + 4)
     place_ribs(grid, overlay, colors, "Rock", x0, x1, y0, y1, top_ry, bot_ry, rng, skip=(door_span,))
 
-    # the timber frame: a beamed ceiling on four pillars, a hall tall
-    # enough to be a hall
+    # the timber frame, entirely inside the belt the doorway also lives
+    # in: posts floor to lintel, a brace in the top corner of every bay
     FX0, FX1 = x0 + 24, x1 - 24
-    FY0, FY1 = y0 + top_ry + 10, y1 - bot_ry
-    room_carve(grid, FX0, FX1, FY0, FY0 + 16, SOLID)
-    room_paint(overlay, FX0, FX1, FY0, FY0 + 16, colors["Wood"])
+    FLOOR = 382
+    LY0, LY1 = 184, 200   # the lintel
+
+    # a masonry floor across the hall, so the timber stands on
+    # something and a player does not fall through the furniture
+    fit_rect(grid, overlay, colors, "Rock", inside, x0 + WALL_T, x1 - WALL_T, FLOOR, FLOOR + 20)
+    course_masonry(overlay, colors, "Rock", "Gravel", x0, x1, FLOOR, FLOOR + 20)
+
+    fit_rect(grid, overlay, colors, "Wood", inside, FX0, FX1, LY0, LY1)
     pillars = [FX0 + (FX1 - FX0) * (i + 1) // 5 for i in range(4)]
     for px in pillars:
-        place_pillar(grid, overlay, colors, "Wood", px, FY0 + 16, FY1, shaft_w=14, cap_w=22, cap_h=10)
+        place_pillar(grid, overlay, colors, "Wood", inside, px, LY1, FLOOR, shaft_w=14, cap_w=22, cap_h=10)
 
-    # a coal heap flanking each of the middle two pillars
-    for px in pillars[1:3]:
-        place_coal_heap(grid, overlay, colors, px - 34, FY1, 20, 26)
+    bays = [FX0] + pillars + [FX1]
+    for b0, b1 in zip(bays, bays[1:]):
+        place_brace(grid, overlay, colors, "Wood", inside, b0 + 6, LY1 + 4, b0 + 34, LY1 - 2)
 
-    # a steel trough of oil, in the first bay
-    bay0 = (FX0 + pillars[0]) // 2
-    room_carve(grid, bay0 - 24, bay0 + 24, FY1 - 16, FY1, OPEN)
-    room_paint(overlay, bay0 - 28, bay0 + 28, FY1 - 20, FY1, colors["Steel"])
-    room_paint(overlay, bay0 - 22, bay0 + 22, FY1 - 16, FY1, colors["Oil"])
+    # coal bins in two bays, an oil trough in the first, the tnt crates
+    # in the last, behind a wood partition
+    bay_mid = [(a + b) // 2 for a, b in zip(bays, bays[1:])]
 
-    # the tnt cache, walled off behind wood, in the last bay
-    bay4 = (pillars[3] + FX1) // 2
-    room_carve(grid, bay4 - 20, bay4 + 20, FY0 + 16, FY1, OPEN)
-    room_paint(overlay, bay4 - 20, bay4 + 20, FY0 + 16, FY1, colors["Tnt"])
-    for wx0, wx1 in ((bay4 - 26, bay4 - 20), (bay4 + 20, bay4 + 26)):
-        room_carve(grid, wx0, wx1, FY0 + 16, FY1, SOLID)
-        room_paint(overlay, wx0, wx1, FY0 + 16, FY1, colors["Wood"])
-    room_carve(grid, bay4 - 26, bay4 + 26, FY0 + 10, FY0 + 16, SOLID)
-    room_paint(overlay, bay4 - 26, bay4 + 26, FY0 + 10, FY0 + 16, colors["Wood"])
+    bay0 = bay_mid[0]
+    fit_rect(grid, overlay, colors, "Steel", inside, bay0 - 45, bay0 + 45, FLOOR - 18, FLOOR - 8)
+    fit_rect(grid, overlay, colors, "Oil", inside, bay0 - 41, bay0 + 41, FLOOR - 14, FLOOR - 8)
 
-    place_glyph(grid, overlay, colors, "Rock", "Steel", x1 + WALL_T - 25 - 8, 195, "circle")
+    place_coal_bin(grid, overlay, colors, inside, bay_mid[1], FLOOR, 22, 26)
+    place_coal_bin(grid, overlay, colors, inside, bay_mid[2], FLOOR, 22, 26)
+
+    bay4 = bay_mid[4]
+    for wx0, wx1 in ((bay4 - 38, bay4 - 34), (bay4 + 34, bay4 + 38)):
+        fit_rect(grid, overlay, colors, "Wood", inside, wx0, wx1, LY1, FLOOR)
+    fit_rect(grid, overlay, colors, "Wood", inside, bay4 - 38, bay4 + 38, LY1, LY1 + 6)
+    # four crates, not one slab: a Wood backing shows through as the
+    # 4-cell gap between and around them
+    fit_rect(grid, overlay, colors, "Wood", inside, bay4 - 30, bay4 + 30, FLOOR - 64, FLOOR - 4)
+    for cx0 in (bay4 - 26, bay4 + 2):
+        for cy0 in (FLOOR - 56, FLOOR - 28):
+            fit_rect(grid, overlay, colors, "Tnt", inside, cx0, cx0 + 24, cy0, cy0 + 24)
+
+    place_glyph(overlay, colors, "Steel", x1 - WALL_T - 20, 335, "circle")
+
+    scatter_rubble(grid, overlay, colors, inside, FLOOR - 2, FX0, bays[1], rng, count=10)
 
     return overlay
 
@@ -1328,33 +1480,45 @@ def room_well(grid, rng, colors):
     top_rx = bot_rx = (x1 - x0) // 2
     top_ry = bot_ry = 90
     overlay = {}
-    build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+
+    margin = int(SHELL_T + max(top_ry, bot_ry) + 10)
+    course_masonry(overlay, colors, "Rock", "Gravel", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
 
     for side in "NS":
-        near, far = {"N": (y0 - SHELL_T - 6, y0 + 30), "S": (y1 + SHELL_T + 6, y1 - 30)}[side]
-        cut_doorway(grid, overlay, colors, "Rock", side, near, far)
+        near, far, wall_at = {"N": (y0 - SHELL_T - 6, y0 + 30, y0), "S": (y1 + SHELL_T + 6, y1 - 30, y1)}[side]
+        cut_doorway(grid, overlay, colors, "Rock", side, near, far, wall_at)
         carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     place_ribs(grid, overlay, colors, "Rock", x0, x1, y0, y1, top_ry, bot_ry, rng)
 
-    # steel bands, hooping the shaft at intervals
-    for by in (150, 260, 370):
+    # steel hoops, banding the shaft at intervals
+    for by in (150, 260, 350):
         for wx0, wx1 in ((x0 - WALL_T, x0), (x1, x1 + WALL_T)):
-            room_paint(overlay, wx0, wx1, by, by + 14, colors["Steel"])
+            room_paint(overlay, wx0, wx1, by, by + 12, colors["Steel"])
 
-    # scaffold ledges on brackets, alternating walls, staggered down
-    for y, from_west in ((130, True), (210, False), (290, True), (370, False)):
+    # scaffold ledges on brackets, braced back to the wall, alternating
+    # sides, staggered down; a ladder joins two of them
+    ledges = ((130, True), (210, False), (290, True), (370, False))
+    for y, from_west in ledges:
         wall_x = x0 + WALL_T if from_west else x1 - WALL_T
-        place_bracket_ledge(grid, overlay, colors, "Wood", wall_x, 95, y, 5, from_west)
+        place_bracket_ledge(grid, overlay, colors, "Wood", inside, wall_x, 95, y, 5, from_west)
+    place_ladder(grid, overlay, colors, "Wood", inside, x0 + WALL_T + 14, 145, 285)
 
-    # the bottom: a clear rock ledge on one side, the lava pit on the
-    # other, so the hazard is beside the way down, not blind under it
-    FY = 440
-    room_carve(grid, x0 + WALL_T, x0 + WALL_T + 130, FY, FY + 16, SOLID)
-    room_paint(overlay, x0 + WALL_T, x0 + WALL_T + 130, FY, FY + 16, colors["Rock"])
-    carve_pit(grid, overlay, colors, x1 - WALL_T - 110, x1 - WALL_T - 10, FY - 10, FY + 44, "Lava")
+    # the shaft needs a floor: masonry across the bottom, a south
+    # doorway cut through one side of it, the lava pit sunk in beside
+    # it rather than under it
+    FLOOR = 400
+    MC0, MC1 = MOUTH_LO - 4, MOUTH_HI + 4
+    fit_rect(grid, overlay, colors, "Rock", inside, x0 + WALL_T, x1 - WALL_T, FLOOR, FLOOR + 16)
+    course_masonry(overlay, colors, "Rock", "Gravel", x0, x1, FLOOR, FLOOR + 16)
+    fit_open(grid, overlay, inside, MC0, MC1, FLOOR, FLOOR + 16)
 
-    place_glyph(grid, overlay, colors, "Rock", "Gold", x0 - WALL_T + 25 + 8, 210, "up")
+    carve_bowl_pit(grid, overlay, colors, inside, x1 - WALL_T - 60, FLOOR - 4, 50, 44, "Lava")
+
+    place_glyph(overlay, colors, "Gold", x0 + WALL_T + 20, 210, "up")
+
+    scatter_rubble(grid, overlay, colors, inside, FLOOR - 2, x0 + WALL_T, x0 + WALL_T + 120, rng, count=6)
 
     return overlay
 
