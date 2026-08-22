@@ -170,10 +170,11 @@ def build_room_6(cv):
 
 def build_hall(n):
     """An empty, walled, doored hall with a plinth: room for what comes
-    next."""
+    next. The plinth sits clear of every wall, so it reads as a
+    standalone pedestal and not a bump on the corner."""
     def _build(cv):
         r = Room(cv, n)
-        r.plinth(4, w=5, h=4)
+        r.plinth(56, w=8, h=6)
     return _build
 
 
