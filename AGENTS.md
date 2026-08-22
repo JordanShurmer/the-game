@@ -105,7 +105,7 @@ of the whole world.
 | `cmd/bench/` | what a tick costs, on a real region |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain install, the tile seeder, and the wizard seeder |
+| `tools/` | the toolchain install, the tile seeder, the wizard seeder, and the gallery seeders |
 
 ## The player
 
@@ -113,11 +113,15 @@ of the whole world.
 numbers he moves by, and what this phase leaves out. Read it before
 changing `src/player.odin` or `src/sprite.odin`.
 `docs/lighting.md` is the note for the light he carries, for the
-fireflies over the pond, and for the bang an explosion gives off. Read
-it before changing `src/light.odin`, `src/firefly.odin` or
-`src/bang.odin`, and note the third rule below. `docs/water.md` is the
-note for the pond and the water shader; read it before changing
+fireflies over the pond, for the bang an explosion gives off, and for
+the sparkle a poison throws off meeting water. Read it before changing
+`src/light.odin`, `src/firefly.odin`, `src/bang.odin` or
+`src/sparkle.odin`, and note the third rule below. `docs/water.md` is
+the note for the pond and the water shader; read it before changing
 `src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
+`docs/alchemy.md` is the note for the poison, the water, and the
+neutral liquid the two leave; read it before changing
+`data/materials.txt`'s `[Reactions]` section or `src/sparkle.odin`.
 
 **Everything is a material, explosions and light included.** How
 bright a thing burns (`luminosity`), how hard it pushes (`force`), how

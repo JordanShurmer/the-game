@@ -132,7 +132,29 @@ is about 8000 samples a tick, against the 5000 one bang costs. There
 is no allocation and no list that grows.
 
 `make bench` before and after must be read, and the number recorded in
-this note the way `docs/physics.md` records its own.
+this note the way `docs/physics.md` records its own. Measured on the
+shipped map, `bin/bench`'s default run (`Coalmine`, 2048 square, 100
+ticks, no alchemy material anywhere in view):
+
+| | Before | After |
+| --- | --- | --- |
+| ms a tick | 1.09 | 1.15 |
+
+The checksum does not move. The cost is not the sparkle: `Coalmine`
+never holds `Attor`, `Smylt` or `Sparkle`, so nothing there reacts or
+lights a spark. It is that the shipped table now holds 35 materials,
+past `SANDBOX_WIDE_IDS` (32), so the vpshufb fast path
+`docs/physics.md` "LOAD is now wide" describes stands down everywhere,
+not only where the alchemy is, and every tick pays the plain weight
+lookup instead. `test_the_weight_lut_holds_every_material` and
+`test_the_wide_weights_agree_with_the_plain_ones` hold that stand-down
+to be correct rather than silently wrong. The rung that would buy it
+back is a third tier in the lookup, covering ids 32 to 63; nothing
+built here needs it yet.
+
+The alchemy gallery itself, `bin/bench biome=Alchemy size=512
+ticks=900`, costs 0.13 ms a tick against the physics gallery's 0.30 at
+the same size: the alchemy rooms are quieter, not more expensive.
 
 ## The alchemy gallery
 

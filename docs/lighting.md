@@ -29,12 +29,15 @@ every other light in the world.
 | a firefly | `Firefly_Light` | 96 | it does not decay |
 
 **The order they burn in is a rule.** A bang is the brightest thing in
-the world while it lasts, the orb comes next, the trail he leaves must
-never outshine the orb he carries, and a pond must never outshine the
-trail. That was three `#assert`s while the numbers were in the code.
-The numbers are in the table now, so it is
-`test_the_lights_of_the_world_are_ordered`, which reads the shipped
-file. `light_lumens` is the whole of the reading side.
+the world while it lasts, the orb comes next, a sparkle the poison
+throws off meeting water burns under the orb and over the trail he
+leaves, the trail he leaves must never outshine the orb he carries,
+and a pond must never outshine the trail. That was three `#assert`s
+while the numbers were in the code. The numbers are in the table now,
+so it is `test_the_lights_of_the_world_are_ordered`, which reads the
+shipped file. `light_lumens` is the whole of the reading side.
+`docs/alchemy.md`, "The light of a sparkle", says what a sparkle is
+and why it is the smallest light in the world.
 
 **A light that is only a light has no physical interaction.** The orb,
 a crystal and a firefly are `state = Phantom`, which says exactly that:
