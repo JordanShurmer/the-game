@@ -64,8 +64,8 @@ vec3 shade(Surf s)
 
     // A barely-there velvet rim where the deposit meets open air — the
     // one place soot lifts off true black at all.
-    float rim = m_fresnel(s, 2.2)*s.edge;
-    col += SOOT_COOL*rim*0.55;
+    float rim = m_fresnel(s, 1.8)*s.edge;
+    col += SOOT_COOL*rim*0.75;
 
     // Soot swallows even the open sky; give it almost none of the lift a
     // stony crest would get.
