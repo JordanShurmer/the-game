@@ -104,6 +104,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 		shot_draw_fireflies(shot, pixels, width, height)
 		shot_draw_pots(world, shot, pixels, width, height)
 		shot_draw_bangs(world, shot, pixels, width, height)
+		shot_draw_sparks(world, shot, pixels, width, height)
 		if has_player do shot_draw_orb(shot, pixels, width, height, player)
 	}
 	if shot.grid do shot_draw_grid(world, shot, pixels, width, height)
@@ -248,6 +249,23 @@ shot_draw_bangs :: proc(world: World, shot: Shot, pixels: []rl.Color, width, hei
 			f32(sb.origin_x + b.x), f32(sb.origin_y + b.y),
 			BANG_HALO, BANG_BLAZE, BANG_PEAK*glow,
 			BANG_GLOW, BANG_CORE,
+		)
+	}
+}
+
+@(private = "file")
+shot_draw_sparks :: proc(world: World, shot: Shot, pixels: []rl.Color, width, height: i32) {
+	if shot.sandbox == nil do return
+
+	sb := shot.sandbox
+	for sp in sb.sparks.sparks {
+		if sp.life <= 0 do continue
+		glow := f32(spark_power(world.materials, sp)) / 255
+		shot_draw_glow(
+			shot, pixels, width, height,
+			f32(sb.origin_x + sp.x), f32(sb.origin_y + sp.y),
+			SPARKLE_HALO, SPARKLE_BLAZE, SPARKLE_PEAK*glow,
+			SPARKLE_GLOW, SPARKLE_CORE,
 		)
 	}
 }
