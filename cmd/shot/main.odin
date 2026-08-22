@@ -176,7 +176,15 @@ main :: proc() {
 	}
 	if options.light {
 		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
-		game.light_follow(&sim.light, i32(player.x), i32(player.y))
+		// With no wizard in the frame there is no orb to follow, so the light
+		// follows the view instead. That is how a room lit by nothing but the
+		// sparks of its own reaction can be looked at.
+		lit_x, lit_y := i32(player.x), i32(player.y)
+		if !options.player {
+			lit_x = options.x + options.w * options.step / 2
+			lit_y = options.y + options.h * options.step / 2
+		}
+		game.light_follow(&sim.light, lit_x, lit_y)
 		game.light_step(&sim.light, terrain, player, &sim.flies)
 		shot.light = &sim.light
 		shot.flies = &sim.flies
