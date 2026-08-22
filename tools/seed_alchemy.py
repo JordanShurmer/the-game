@@ -114,26 +114,52 @@ def build_room_5(cv):
 
 
 def build_room_6(cv):
-    """The dark: a sealed chamber with one drip in the middle of it. Both
-    the reservoir and the pool it feeds are wholly inside this room's
-    own walls, and the room has no door to either neighbour, so the
-    sparks are the only light there is."""
-    r = Room(cv, 6)
-    # A one cell hole and a long fall to the pool below, so the water
-    # comes down as a drip through open air rather than a poured mass.
-    # Kept to the left, clear of the shaft down to room 10 in the
-    # middle of the floor, so neither the drip nor the pool it feeds
-    # can find its own way down that hole.
-    r.tank(15, 4, 42, 50, "Water", wall=3, hole_side="bottom", hole_lo=27, hole_hi=27)
-    # A walled basin, open at the top for the drip to fall into: what
-    # the drip and the reaction leave has nowhere to spread but here,
-    # however tall it stacks, so it can never spill toward the shaft.
-    r.box(6, 65, 9, 119, BEDROCK)
-    r.box(41, 65, 44, 119, BEDROCK)
-    r.box(6, 116, 44, 119, BEDROCK)
-    r.box(10, 100, 40, 119, "Attor")
-    r.plinth(90, w=5, h=4)
+    """The dark: a reservoir empties through a chute onto a shallow
+    ridge of Attor, sloped down to the floor on both sides. Both the
+    reservoir and the pool are wholly inside this room's own walls,
+    and the room has no door to either neighbour, so the sparks are
+    the only light there is.
 
+    A single drip over a flat, deep pool seals its own front: the
+    Smylt it makes is denser than water and lighter than Attor, so it
+    settles between the two exactly where the drop landed, and the
+    reaction stops touching anything new there. See docs/alchemy.md,
+    "Layering seals a slow drip", for the measurement behind this
+    shape. A slope is the fix that measures out true: Smylt formed on
+    a slope slides away from the drop point instead of capping it, so
+    the drip goes on meeting fresh Attor for as long as the slope
+    still has any, not just for the one tick the first drop lands.
+    """
+    r = Room(cv, 6)
+
+    # A deep reservoir, centred in the room, so it lasts. A ten cell
+    # chute under it, not a single narrow hole: measured against a one
+    # cell hole, the wide chute is what let the drop spread across the
+    # whole ridge below rather than punching straight through it.
+    r.tank(50, 4, 69, 40, "Water", wall=3, hole_side="bottom", hole_lo=55, hole_hi=64)
+    r.box(50, 41, 69, 50, AIR)
+
+    # The basin: a shallow ridge of Attor under the chute, sloped down
+    # to the floor on both sides, walled in, with a drain at the left
+    # end into the sump below. Kept clear of the shaft down to room
+    # 10, at the room's right edge.
+    r.box(10, 51, 97, 94, BEDROCK)
+    r.box(14, 51, 93, 94, AIR)
+    for lx in range(14, 54):
+        rise = min(lx - 14, 14)
+        r.box(lx, 94 - rise, lx, 94, "Attor")
+    for lx in range(54, 94):
+        rise = min(92 - lx, 14)
+        r.box(lx, 94 - rise, lx, 94, "Attor")
+    r.box(14, 91, 18, 94, AIR)
+
+    # The sump: a walled shaft straight down from the drain, far from
+    # the shaft down to room 10, so what drains here has nowhere to go
+    # but down, out of the room's own light.
+    r.box(10, 95, 13, 119, BEDROCK)
+    r.box(19, 95, 22, 119, BEDROCK)
+
+    r.plinth(4, w=5, h=4)
 
 def build_hall(n):
     """An empty, walled, doored hall with a plinth: room for what comes
@@ -165,7 +191,7 @@ SHAFTS = [
     (0, 0, 50),  # room 1 down to room 5
     (2, 0, 50),  # room 3 down to room 7
     (3, 1, 50),  # room 8 down to room 12
-    (1, 1, 50),  # room 6 down to room 10
+    (1, 1, 102),  # room 6 down to room 10, clear of its centred basin
     (0, 2, 50),  # room 9 down to room 13
 ]
 

@@ -83,6 +83,45 @@ The loader refuses a chain no reader could follow: a row after a row
 that already carries the chain past 255 can never fire, and that is a
 hard error naming both lines, not a silent dead row.
 
+### Layering seals a slow drip
+
+`Smylt` sits between the two reagents on purpose: at 1.05 it is
+heavier than `Water` (1.0) and lighter than `Attor` (1.25), so a pool
+of the three settles into three clean bands, water on top, `Smylt` in
+the middle, `Attor` on the bottom. That is what "The two liquids"
+above is for, and it is also a trap for any room that drips water onto
+a flat, deep pool of `Attor`: the first drop reacts and leaves a film
+of `Smylt` exactly where it landed, and that film is denser than the
+water still arriving and lighter than the `Attor` still underneath, so
+it stays put. The drop point is sealed, floor to ceiling, on the very
+first drop, and no reaction below the surface ever happens again no
+matter how much water is still falling.
+
+This is measured, not guessed. A reservoir over a flat pool, however
+big the reservoir, reacts for a few tens of ticks and then goes still:
+every design tried this way (a single hole, several staggered holes
+over the same flat pool, a staircase of ledges coated in `Attor`) shows
+the same shape, a short burst ending under 250 ticks in from a cold
+start, and then nothing, for as long as the room is left running.
+Widening the hole, deepening the reservoir, and adding more of them all
+change how much reacts in the burst; none of them make the burst last
+longer, because the seal does not care how much water is still coming.
+
+The fix is a slope, not a bigger reservoir. `Smylt` formed on a slope
+slides away from the drop point under its own weight instead of
+capping it, so the drop goes on meeting `Attor` that slid there
+already exposed, for as long as the slope still has any. Room 6, "the
+dark", is built on exactly this: a ridge of `Attor`, not a flat pool,
+under the drip. Measured on the shipped room, the burst runs from
+about tick 10 to about tick 150 and is quiet before and after; a lit
+shot at 100 ticks catches it and shots at 300, 800 and 2000 do not,
+which is the same finding said in a picture. A field that stayed lit
+for thousands of ticks from one reservoir would need either an
+emitter, which nothing in this world has, or a reservoir and a slope
+long enough to hold thousands of ticks of throughput, which does not
+fit in one room. What a room this size can honestly show is a real
+burst with a real cause, not an unending one.
+
 ## The light of a sparkle
 
 Every light in the world is a material and the light of this one is
