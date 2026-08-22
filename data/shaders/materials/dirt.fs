@@ -21,33 +21,42 @@
 // Powder: no crisp rim, a soft rolled shoulder instead.
 #define M_ROLL 0.85
 
-const vec3 DIRT_RED   = vec3(0.388, 0.247, 0.165); // the base earth, red-brown
-const vec3 DIRT_GREY  = vec3(0.243, 0.216, 0.196); // a cooler, ashier patch
-const vec3 DIRT_DARK  = vec3(0.095, 0.074, 0.060); // near-black humus patch
+const vec3 DIRT_RED   = vec3(0.431, 0.235, 0.141); // the base earth, red-brown
+const vec3 DIRT_GREY  = vec3(0.220, 0.208, 0.208); // a cooler, ashier patch
+const vec3 DIRT_DARK  = vec3(0.082, 0.062, 0.052); // near-black humus patch
 const vec3 DIRT_GRIT  = vec3(0.560, 0.514, 0.446); // pale flecks of stone
 const vec3 DIRT_ROOT  = vec3(0.420, 0.333, 0.192); // a rare warm root fibre
 
-const float DIRT_PATCH  = 0.032; // the slow colour drift, tens of cells
+const float DIRT_PATCH  = 0.028; // the slow colour drift, tens of cells
 const float DIRT_CLOD   = 0.42;  // the lumps, two to three cells across
 const float DIRT_FLECK  = 1.35;  // the grit, about one cell
 const float DIRT_RELIEF = 1.15;  // how much the lumps bump the light
 
-// Which of the three earth colours this patch of ground is.
+// Which of the three earth colours this patch of ground is. `m_fbm`
+// bunches up near the middle of its range, so its spread is stretched
+// out first or the patches would all blend to the same muddy average
+// instead of standing as distinct red-brown, grey and dark ground.
 vec3 dirt_patch_color(vec2 c)
 {
-    float p = m_fbm(c*DIRT_PATCH, 3);
-    vec3 col = mix(DIRT_RED, DIRT_GREY, smoothstep(0.34, 0.66, p));
-    float dark = m_fbm(c*DIRT_PATCH*1.9 + 40.0, 3);
-    return mix(col, DIRT_DARK, smoothstep(0.62, 0.86, dark)*0.85);
+    float p = m_fbm(c*DIRT_PATCH, 2);
+    p = clamp((p - 0.5)*2.4 + 0.5, 0.0, 1.0);
+    vec3 col = mix(DIRT_RED, DIRT_GREY, smoothstep(0.32, 0.68, p));
+
+    float dark = m_fbm(c*DIRT_PATCH*1.9 + 40.0, 2);
+    dark = clamp((dark - 0.5)*2.4 + 0.5, 0.0, 1.0);
+    return mix(col, DIRT_DARK, smoothstep(0.60, 0.82, dark));
 }
 
 // A dome for every clod, round off at its rim, with a little grain on
-// top so no two lumps sit at quite the same height.
+// top so no two lumps sit at quite the same height. Two scales of point
+// mixed together so the lumps are not all one size.
 float dirt_height(vec2 c)
 {
-    vec3 h = m_cells(c*DIRT_CLOD);
-    float dome = 1.0 - smoothstep(0.0, 0.68, h.x);
-    dome *= dome;
+    vec3 h  = m_cells(c*DIRT_CLOD);
+    vec3 h2 = m_cells(c*DIRT_CLOD*1.7 + 11.0);
+    float dome  = 1.0 - smoothstep(0.0, 0.68, h.x);
+    float dome2 = 1.0 - smoothstep(0.0, 0.68, h2.x);
+    dome = dome*dome*0.75 + dome2*dome2*0.35;
     return dome + m_noise(c*2.1)*0.10;
 }
 
