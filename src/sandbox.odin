@@ -48,7 +48,8 @@ Sandbox :: struct {
 	tick:     u64,
 	seed:     u64,
 
-	bangs: Bang_Ring,
+	bangs:  Bang_Ring,
+	sparks: Spark_Ring,
 
 	dirty:      []Sandbox_Rect,
 	next_dirty: []Sandbox_Rect,
@@ -98,6 +99,7 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.rows.below[0], sb.rows.below[width + 1] = CELL_WALL, CELL_WALL
 
 	bang_forget_all(&sb.bangs)
+	spark_forget_all(&sb.sparks)
 
 	return sb, true
 }
@@ -148,6 +150,7 @@ sandbox_fill_from_world :: proc(sb: ^Sandbox, world: World, origin_x, origin_y: 
 	}
 	mem.zero_slice(sb.moved)
 	bang_forget_all(&sb.bangs)
+	spark_forget_all(&sb.sparks)
 
 	sandbox_mark_all(sb)
 }
@@ -219,6 +222,7 @@ Sandbox_Roll :: enum u32 {
 	Blast_Chip,
 	Blast_Throw,
 	Blast_Fire,
+	Spark_Seed,
 }
 
 sandbox_chance :: proc "contextless" (sb: ^Sandbox, x, y: i32, roll: Sandbox_Roll, index: u32 = 0) -> u32 {
@@ -984,6 +988,63 @@ test_water_on_lava_leaves_obsidian :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect(t, found, "water meeting lava must leave obsidian")
+}
+
+// Attor and water, banded a cell at a time so every cell of one touches a
+// cell of the other and the sealed column has no cell left stranded behind
+// a settled wall of Smylt, where the physics has no way to reach it back
+// (docs/physics.md, "no pressure, and no sideways exchange between
+// liquids"). Scaled up to a stable sample. See docs/alchemy.md, "The mix":
+// the pair always reacts, and the neutral share the pool settles to is 2/3
+// within a percent.
+@(test)
+test_the_mix_leaves_two_parts_in_three :: proc(t: ^testing.T) {
+	sb, table := test_sandbox(t, 10, 200, 7)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	attor, _ := find_material_index(table, "Attor")
+	water, _ := find_material_index(table, "Water")
+	smylt, _ := find_material_index(table, "Smylt")
+	sparkle, _ := find_material_index(table, "Sparkle")
+
+	for y in i32(0) ..< 200 {
+		m := y % 2 == 0 ? attor : water
+		for x in i32(0) ..< 10 do sandbox_paint(&sb, table, x, y, 0, Cell(m))
+	}
+	total := 10 * 200
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	settled := false
+	for _ in 0 ..< 4000 {
+		sandbox_step(&sb, table)
+		sandbox_census(&sb, counts)
+		if counts[attor] == 0 && counts[water] == 0 {
+			settled = true
+			break
+		}
+	}
+	if !testing.expect(t, settled, "the mix must run to a standstill with no Attor and no Water left") {
+		return
+	}
+
+	// A few more ticks past the sparkle lifetime, so every spark has decayed
+	// to Air and only the Smylt it left behind can be counted.
+	for _ in 0 ..< 20 do sandbox_step(&sb, table)
+	sandbox_census(&sb, counts)
+
+	testing.expect(t, counts[attor] == 0, "no Attor may be left")
+	testing.expect(t, counts[water] == 0, "no Water may be left")
+	testing.expectf(t, counts[sparkle] == 0, "every spark must have decayed by now, got %d", counts[sparkle])
+
+	share := f64(counts[smylt]) / f64(total)
+	testing.expectf(
+		t, abs(share-2.0/3.0) < 0.01,
+		"the neutral liquid must settle to 2/3 of the pool within a percent, got %v of %d (%v)",
+		counts[smylt], total, share,
+	)
 }
 
 @(test)

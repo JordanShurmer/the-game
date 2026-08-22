@@ -131,10 +131,9 @@ test_the_wide_weights_agree_with_the_plain_ones :: proc(t: ^testing.T) {
 	testing.expect(t, table_ok, "materials must load")
 	defer destroy_material_table(table)
 
-	testing.expect(
-		t, table.lut_ok,
-		"the shipped table must fit the lookup, or this test only runs the plain path",
-	)
+	// The alchemy grew the shipped table past SANDBOX_WIDE_IDS, so this now
+	// exercises the plain path only; see docs/alchemy.md, "What it costs".
+	// The comparison below still holds either way.
 
 	widths := [?]i32{1, 5, 31, 32, 33, 63, 64, 65, 127, 200}
 	for width in widths {
@@ -176,7 +175,15 @@ test_the_weight_lut_holds_every_material :: proc(t: ^testing.T) {
 	table, table_ok := load_materials("data/materials.txt")
 	testing.expect(t, table_ok, "materials must load")
 	defer destroy_material_table(table)
-	testing.expect(t, table.lut_ok, "the shipped table must fit the lookup")
+	// The alchemy grew the shipped table past SANDBOX_WIDE_IDS, so the wide
+	// pass now stands down on it; see docs/alchemy.md, "What it costs".
+	if !testing.expect(
+		t, len(table.materials) <= SANDBOX_WIDE_IDS == table.lut_ok,
+		"lut_ok must track SANDBOX_WIDE_IDS exactly",
+	) {
+		return
+	}
+	if !table.lut_ok do return
 
 	W :: SANDBOX_WIDE_LANES
 	for m in 0 ..< len(table.materials) {
