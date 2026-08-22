@@ -48,18 +48,31 @@ def build_room_1(cv):
 
 
 def build_room_2(cv):
-    """The mix: a curtain of alternating Attor and water spouts along
-    the ceiling, raining down side by side into one wide basin, the
-    way room 4's field of drips does. Two streams meeting at a single
-    point make one saturated blob of light; a row of them makes a
-    field of sparks the width of the room."""
+    """The mix: a rack of alternating Attor and water pipettes along the
+    ceiling, each dripping through a hole one cell wide into one wide
+    basin. A row of drips makes a field of sparks the width of the
+    room, where two streams meeting at a single point make one
+    saturated blob of light.
+
+    Each pipette is walled off from the one beside it, so the two
+    liquids cannot settle by density into one heavy half and one light
+    half before they drain. Every column keeps what it was drawn with,
+    and the curtain stays alternating for as long as it falls.
+
+    It runs for about as long as the deepest column: 6 by 62 cells is
+    372 of them, and one hole one cell wide passes one a tick.
+    """
     r = Room(cv, 2)
-    r.box(4, 4, 115, 26, BEDROCK)
-    r.box(7, 7, 112, 23, "Attor")
-    for lx in range(7, 112, 4):
-        fill = "Attor" if (lx // 4) % 2 == 0 else "Water"
-        r.box(lx, 7, min(lx + 3, 111), 23, fill)
-    r.box(7, 24, 112, 26, AIR)
+    ceiling_top, ceiling_bottom = 4, 70
+    r.box(4, ceiling_top, 115, ceiling_bottom, BEDROCK)
+
+    n = 0
+    for lx in range(8, 108, 7):
+        fill = "Attor" if n % 2 == 0 else "Water"
+        n += 1
+        r.box(lx, ceiling_top + 3, lx + 5, ceiling_bottom - 3, fill)
+        hole = lx + 2
+        r.box(hole, ceiling_bottom - 3, hole, ceiling_bottom, AIR)
 
     r.box(4, 90, 115, 119, BEDROCK)
     r.box(8, 94, 111, 119, AIR)
@@ -91,8 +104,21 @@ def build_room_3(cv):
 
 
 def build_room_4(cv):
-    """The rain: water drips through a perforated bedrock ceiling into a
-    shallow pool of Attor: a slow, unending field of sparks."""
+    """The rain, and the seal: water rains through a perforated ceiling
+    onto a shallow pool of Attor. For the first hundred ticks the whole
+    width of the pool sparks. Then it stops, and it never starts again.
+
+    This room is the lesson the other two are built to answer, and it
+    is left as it is on purpose. Water is lighter than Attor and floats
+    on it, and the Smylt the two make is heavier than water and lighter
+    than Attor, so it settles exactly between them. The pool caps
+    itself with its own product wherever a drop lands. Nothing here is
+    used up: the pool is still poison and the rain is still water, and
+    they can no longer reach each other.
+
+    Room 2 and room 6 answer it by never letting the two meet anywhere
+    but in the air. See docs/alchemy.md, "Layering seals a slow drip".
+    """
     r = Room(cv, 4)
     r.tank(4, 4, 115, 26, "Water", wall=3, hole_side=None)
     for hx in (20, 45, 70, 95):
@@ -121,52 +147,39 @@ def build_room_5(cv):
 
 
 def build_room_6(cv):
-    """The dark: a reservoir empties through a chute onto a shallow
-    ridge of Attor, sloped down to the floor on both sides. Both the
-    reservoir and the pool are wholly inside this room's own walls,
-    and the room has no door to either neighbour, so the sparks are
-    the only light there is.
+    """The dark: two chambers in the ceiling, one of Attor and one of
+    water, each draining down a duct one cell wide. The two ducts come
+    out side by side, so the two liquids fall as neighbouring columns
+    for the whole depth of the room and react the whole way down. What
+    the visitor sees is a ribbon of sparks hanging in a black room, and
+    nothing else: this room has no door to either neighbour, and it
+    reaches the museum by a shaft down to an unlit hall.
 
-    A single drip over a flat, deep pool seals its own front: the
-    Smylt it makes is denser than water and lighter than Attor, so it
-    settles between the two exactly where the drop landed, and the
-    reaction stops touching anything new there. See docs/alchemy.md,
-    "Layering seals a slow drip", for the measurement behind this
-    shape. A slope is the fix that measures out true: Smylt formed on
-    a slope slides away from the drop point instead of capping it, so
-    the drip goes on meeting fresh Attor for as long as the slope
-    still has any, not just for the one tick the first drop lands.
+    Every other room learns the same lesson the hard way. A drip onto
+    a pool seals its own front, because the Smylt it makes is denser
+    than water and lighter than Attor and settles between the two
+    exactly where the drop landed. See docs/alchemy.md, "Layering
+    seals a slow drip". Nothing settles here, because the two never
+    meet anywhere but in the air.
+
+    A duct one cell wide passes one cell a tick, so a chamber of about
+    1400 cells runs for about 1400 ticks a side.
     """
     r = Room(cv, 6)
 
-    # A deep reservoir, centred in the room, so it lasts. A ten cell
-    # chute under it, not a single narrow hole: measured against a one
-    # cell hole, the wide chute is what let the drop spread across the
-    # whole ridge below rather than punching straight through it.
-    r.tank(50, 4, 69, 40, "Water", wall=3, hole_side="bottom", hole_lo=55, hole_hi=64)
-    r.box(50, 41, 69, 50, AIR)
+    DUCT_A, DUCT_B = 58, 59
+    top, bottom = 6, 44
+    mouth = 56  # where both ducts open into the room
 
-    # The basin: a shallow ridge of Attor under the chute, sloped down
-    # to the floor on both sides, walled in, with a drain at the left
-    # end into the sump below. Kept clear of the shaft down to room
-    # 10, at the room's right edge.
-    r.box(10, 51, 97, 94, BEDROCK)
-    r.box(14, 51, 93, 94, AIR)
-    for lx in range(14, 54):
-        rise = min(lx - 14, 14)
-        r.box(lx, 94 - rise, lx, 94, "Attor")
-    for lx in range(54, 94):
-        rise = min(92 - lx, 14)
-        r.box(lx, 94 - rise, lx, 94, "Attor")
-    r.box(14, 91, 18, 94, AIR)
+    r.box(18, 4, 99, mouth, BEDROCK)
+    r.box(22, top, DUCT_A - 1, bottom, "Attor")
+    r.box(DUCT_B + 1, top, 95, bottom, "Water")
 
-    # The sump: a walled shaft straight down from the drain, far from
-    # the shaft down to room 10, so what drains here has nowhere to go
-    # but down, out of the room's own light.
-    r.box(10, 95, 13, 119, BEDROCK)
-    r.box(19, 95, 22, 119, BEDROCK)
+    r.box(DUCT_A, bottom, DUCT_A, mouth, AIR)
+    r.box(DUCT_B, bottom, DUCT_B, mouth, AIR)
 
     r.plinth(4, w=5, h=4)
+
 
 def build_hall(n):
     """An empty, walled, doored hall with a plinth: room for what comes

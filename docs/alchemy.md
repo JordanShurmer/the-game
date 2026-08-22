@@ -107,20 +107,43 @@ Widening the hole, deepening the reservoir, and adding more of them all
 change how much reacts in the burst; none of them make the burst last
 longer, because the seal does not care how much water is still coming.
 
-The fix is a slope, not a bigger reservoir. `Smylt` formed on a slope
-slides away from the drop point under its own weight instead of
-capping it, so the drop goes on meeting `Attor` that slid there
-already exposed, for as long as the slope still has any. Room 6, "the
-dark", is built on exactly this: a ridge of `Attor`, not a flat pool,
-under the drip. Measured on the shipped room, the burst runs from
-about tick 10 to about tick 150 and is quiet before and after; a lit
-shot at 100 ticks catches it and shots at 300, 800 and 2000 do not,
-which is the same finding said in a picture. A field that stayed lit
-for thousands of ticks from one reservoir would need either an
-emitter, which nothing in this world has, or a reservoir and a slope
-long enough to hold thousands of ticks of throughput, which does not
-fit in one room. What a room this size can honestly show is a real
-burst with a real cause, not an unending one.
+The fix is not a bigger reservoir, and it is not a slope either. A
+slope helps a little, because `Smylt` formed on one slides away from
+the drop point instead of capping it, but it only puts the seal off:
+the slope silts up with its own product from the bottom, and the room
+goes quiet again. The fix is to give the two liquids nowhere to
+settle. **They must meet in the air and nowhere else.** Room 2 rains
+`Attor` and water down side by side into one basin, and room 6 drops
+them as two neighbouring columns the whole depth of a dark room.
+Neither reaction ever stands on anything: what a drop leaves behind
+falls away from the front instead of over it, and the room runs for as
+long as the taps have anything in them.
+
+Room 4 is left as a flat pool under rain on purpose, so the museum
+shows the trap as well as the answer to it. It sparks the width of its
+pool for about a hundred ticks and is then still for ever, with a pool
+of poison and a rain of water that can no longer reach each other.
+
+### A tap is a pipette, not a pond
+
+How long an exhibit runs is a number chosen when it is drawn:
+
+    ticks it runs = cells in the tap / cells across its hole
+
+A hole one cell wide passes at most one cell a tick, because one cell
+is all that fits through it in a step. That is the whole meter, and it
+is why room 2's rack of pipettes runs for about 370 ticks and room 6's
+two chambers for about 1400 each.
+
+The shape of the tap matters as much as the size of the hole. A wide
+tank over a narrow hole does **not** drain at one cell a tick: a
+liquid only moves sideways into a cell that has nothing claiming the
+cell above it, so a full tank cannot walk its bottom row across to the
+hole, and it drains at the speed its surface can spread instead —
+slower, and slower still the wider it is. A tall narrow column over
+its own hole has every cell standing over the hole already. So a tap
+that has to keep time is a pipette; a tank that only has to look full
+is a pond.
 
 ## The light of a sparkle
 
@@ -237,16 +260,17 @@ be filled as the alchemy grows.
 | # | Room | What it shows | What starts it |
 | --- | --- | --- | --- |
 | 1 | Attor | A tank of poison pours down a stair into a basin. No water, no light: this is the liquid on its own | gravity |
-| 2 | The mix | An Attor tap and a water tap over one basin. They meet in the air, the sparks flash, and Smylt pools under them | gravity |
+| 2 | The mix | A rack of alternating Attor and water pipettes rains the two down side by side into one basin. Sparks the width of the room, for about 370 ticks | gravity |
 | 3 | The measure | Three parts Attor sealed over three parts water in a graduated tube, against a bedrock scale. What is left stands at four | gravity |
-| 4 | The rain | Water drips through a perforated bedrock ceiling into a shallow pool of Attor: a slow, unending field of sparks | gravity |
+| 4 | The rain, and the seal | Water rains onto a flat pool of Attor. It sparks the width of the pool for about a hundred ticks, and is then still for ever. The trap the other rooms are built to answer | gravity |
 | 5 | Layers | Oil, water, Smylt and Attor pour into one tank and settle in four bands, in the order the densities say | gravity |
-| 6 | The dark | A sealed chamber with one drip in the middle of it. The sparks are the only light there is | gravity |
+| 6 | The dark | Two ducts a cell apart drop Attor and water down a black room as neighbouring columns. A ribbon of sparks and nothing else, for about 1400 ticks | gravity |
 | 7-16 | Halls | Empty, walled, doored, with a plinth. Room for what comes next | — |
 
 Room 6 is the room this whole note is for. Shoot it with the lighting
-on and nothing else in the frame, and the sparks either read as
-fireflies over a dark pool or the numbers above are wrong.
+on and nothing else in the frame: a ribbon of sparks hangs down the
+middle of a black room, and the light of it reaches the two chambers
+that feed it and nothing further.
 
 ## Looking at it
 
