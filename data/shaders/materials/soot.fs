@@ -39,6 +39,10 @@ float soot_floc(vec2 c, out float puff)
     return smoothstep(0.28, 0.72, fine);
 }
 
+// How much of the world's haze soot gives back. Everything else takes
+// all of it. See the note at the end of `shade`.
+const float SOOT_HAZE_EAT = 0.26;
+
 vec3 shade(Surf s)
 {
     float puff;
@@ -71,5 +75,21 @@ vec3 shade(Surf s)
     // stony crest would get.
     col *= mix(0.80, 1.0, s.ao);
 
-    return m_dress(col, s);
+    // Soot is the one material that must not take the world's haze whole.
+    //
+    // `m_dress` ends in `m_haze`, which adds `HAZE*lux*(1 - col)`. That
+    // term is scaled by how dark the material already is, so the darker
+    // a thing the more haze it collects, and everything converges on the
+    // same warm beige. Rock, at about four tenths, takes a fifth of it.
+    // Soot, at under a tenth, takes nearly all of it, and the blackest
+    // material in the world comes out the same colour as the air beside
+    // it. The picture then reads as fog, not as a hole.
+    //
+    // Cutting it is not a cheat. Soot is a fractal of carbon and it is
+    // the least reflective thing there is: the light bouncing between it
+    // and the eye is swallowed as surely as the light that lands on it.
+    // So soot dresses itself, with the haze turned down.
+    vec3 out_col = m_gloom(col, s.lux);
+    out_col += SOOT_HAZE_EAT*vec3(0.306, 0.251, 0.149)*s.lux*(1.0 - out_col);
+    return m_bloom(out_col, s.glow);
 }

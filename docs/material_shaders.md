@@ -93,6 +93,26 @@ an unlit cave, and the material floats out of the picture. Hand it a
 reflectance, in the range the flat colour of the material sits in, and it
 returns the pixel.
 
+It is made of three, which a shader may call itself when it must:
+`m_gloom(col, s.lux)`, then the haze, then `m_bloom(col, s.glow)`.
+
+Two materials have to reach inside it.
+
+**A material that makes its own light** adds that light *after* the
+dressing, or the dark sinks the very thing that is supposed to survive
+the dark. A burning coal, a lava crack and a fire all do this.
+
+**A material darker than about a tenth reflectance takes too much haze.**
+The haze is `HAZE*lux*(1 - col)`, so it is scaled by how dark the
+material already is: rock, at four tenths, takes a fifth of it, and soot,
+at under a tenth, takes nearly all of it. Everything then converges on
+the same warm beige, and the blackest material in the world comes out the
+colour of the air beside it. Cutting the haze such a material takes is
+not a cheat — a thing that reflects almost nothing also swallows the
+light bouncing between it and the eye. `soot.fs` shows the shape of it.
+Do this only for a material that is genuinely near black, and say why in
+the file.
+
 ## Looking at one material
 
 A vein of gold four cells wide in an unlit cave says almost nothing about
