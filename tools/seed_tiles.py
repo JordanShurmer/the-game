@@ -1055,7 +1055,98 @@ def build_shell(grid, overlay, colors, material, rng, x0, x1, y0, y1, top_rx, to
                 if band_of(x, y) is None:
                     overlay[(x, y)] = colors["Rock"]
 
-    return lambda x, y: in_shell_shape(x, y, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside = lambda x, y: in_shell_shape(x, y, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    shell = lambda x, y: in_shell_shape(
+        x, y, x0 - SHELL_T, x1 + SHELL_T, y0 - SHELL_T, y1 + SHELL_T,
+        top_rx + SHELL_T, top_ry + SHELL_T, bot_rx + SHELL_T, bot_ry + SHELL_T,
+    )
+    forbidden = lambda x, y: shell(x, y) and not inside(x, y)
+    return inside, forbidden
+
+
+def carve_disc_avoiding(grid, cx, cy, r, forbidden):
+    """`carve_disc`, but a cell the shell owns -- its wall or its
+    packing -- is never opened. A walk built from this can cross
+    natural cave freely and still never breach the shell."""
+    for y in range(max(0, cy - r), min(TILE, cy + r + 1)):
+        for x in range(max(0, cx - r), min(TILE, cx + r + 1)):
+            if (x - cx) ** 2 + (y - cy) ** 2 <= r * r and not forbidden(x, y):
+                grid[y][x] = OPEN
+
+
+def carve_walk_avoiding(grid, x0, y0, x1, y1, r, rng, forbidden, wobble=0.7):
+    """`carve_walk`, but never opens a cell the shell owns."""
+    x, y = float(x0), float(y0)
+    radius = float(r)
+    for _ in range(4 * TILE):
+        dx, dy = x1 - x, y1 - y
+        distance = max(1e-6, (dx * dx + dy * dy) ** 0.5)
+        if distance <= 3.0:
+            break
+        dx, dy = dx / distance, dy / distance
+        swing = rng.uniform(-wobble, wobble)
+        x += dx - dy * swing
+        y += dy + dx * swing
+        radius = min(r + 16, max(24.0, radius + rng.uniform(-0.35, 0.35)))
+        carve_disc_avoiding(grid, round(x), round(y), int(radius), forbidden)
+    carve_disc_avoiding(grid, x1, y1, int(radius), forbidden)
+
+
+def reconnect_outside_shell(grid, rng, forbidden, attempts=6):
+    """`connect` used to join every sizeable pocket of a tile before a
+    shell was ever set into it. The shell can cut the cave into new
+    pockets, so this runs the same join again on the grid as it stands
+    now, cave and shell together -- but the walk it carves may never
+    open a cell the shell owns, so the shell stays one closed curve.
+
+    A walk that grazes the shell can still fail to bridge a pocket in
+    one pass, so this recomputes components and tries again: each pass
+    that opens anything changes what `nearest_of` finds next."""
+    for _ in range(attempts):
+        label, sizes = components(grid)
+        if not sizes:
+            return
+        main = max(range(len(sizes)), key=lambda i: sizes[i])
+        joined_any = False
+        for index, size in enumerate(sizes):
+            if index == main or size < POCKET:
+                continue
+            point = nearest_of(label, index, TILE // 2, TILE // 2)
+            if point is None:
+                continue
+            goal = nearest_of(label, main, point[0], point[1])
+            if goal is None:
+                continue
+            carve_walk_avoiding(grid, point[0], point[1], goal[0], goal[1],
+                                 rng.randint(TRUNK_R[0], TRUNK_R[1] + 12), rng, forbidden)
+            joined_any = True
+        if not joined_any:
+            return
+
+
+def find_clear_span(lo, hi, blocked, min_span, clearance=60):
+    """Walk an inner wall face from `lo` to `hi` and return the first
+    span at least `min_span` wide that is not within `clearance` cells
+    of anything in `blocked` -- a doorway, a jamb, a fitting, a liquid
+    level. Raise if there is none: drawing the glyph anyway, over
+    whatever is in its way, is exactly the bug this guards against."""
+    padded = sorted((a - clearance, b + clearance) for a, b in blocked)
+    merged = []
+    for a, b in padded:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    cursor = lo
+    for a, b in merged:
+        if a > cursor and a - cursor >= min_span:
+            return cursor, min(a, hi)
+        cursor = max(cursor, b)
+        if cursor >= hi:
+            break
+    if hi - cursor >= min_span:
+        return cursor, hi
+    raise ValueError(f"no span >= {min_span} in [{lo},{hi}] clear of {blocked} by {clearance}")
 
 
 def cut_doorway(grid, overlay, colors, material, side, near, far, wall_at, span=72, frame=8, collar=None):
@@ -1204,20 +1295,55 @@ def place_plank(grid, overlay, colors, material, inside, x0, x1, y, land_y, thic
     fit_rect(grid, overlay, colors, material, inside, pcx - post_w // 2, pcx + post_w // 2, lo, hi)
 
 
-def place_ladder(grid, overlay, colors, material, inside, x, y0, y1, width=5, rung=18):
-    fit_rect(grid, overlay, colors, material, inside, x - width // 2, x + width // 2, y0, y1)
+def place_ladder(grid, overlay, colors, material, inside, x, y0, y1, gap=16, rung_len=20, stile_w=3):
+    """Two stiles `gap` apart, and a rung `rung_len` long, 4 cells
+    thick, crossing between them every `gap` down: a ladder, not a
+    dotted line up the middle of a bare wall."""
+    for sx in (x - gap // 2, x + gap // 2):
+        fit_rect(grid, overlay, colors, material, inside, sx - stile_w // 2, sx + stile_w // 2, y0, y1)
     yy = y0
     while yy < y1:
-        fit_rect(grid, overlay, colors, material, inside, x - width, x + width, int(yy), int(yy) + 3)
-        yy += rung
+        fit_rect(grid, overlay, colors, material, inside, x - rung_len // 2, x + rung_len // 2, int(yy), int(yy) + 4)
+        yy += gap
+
+
+def place_chain(grid, overlay, colors, material, inside, cx, y0, y1, width=5, link=12):
+    """A chain: a column `width` wide with a link pattern in it, not a
+    plain bar -- a wider tick every `link` cells down its length."""
+    fit_rect(grid, overlay, colors, material, inside, cx - width // 2, cx + width // 2, y0, y1)
+    yy = y0
+    while yy < y1:
+        fit_rect(grid, overlay, colors, material, inside, cx - width // 2 - 2, cx + width // 2 + 2, int(yy), int(yy) + 3)
+        yy += link
+
+
+def place_rail_cart(grid, overlay, colors, inside, x0, x1, floor_y, cart_x):
+    """Two Steel rails on Wood sleepers the length of the lane, and a
+    cart resting on them: a Wood box on Steel wheels, heaped with
+    Coal. Furniture on the floor, well short of the beam above it."""
+    xx = x0
+    while xx < x1:
+        fit_rect(grid, overlay, colors, "Wood", inside, int(xx), int(xx) + 6, floor_y - 8, floor_y - 4)
+        xx += 22
+    fit_rect(grid, overlay, colors, "Steel", inside, x0, x1, floor_y - 8, floor_y - 6)
+    fit_rect(grid, overlay, colors, "Steel", inside, x0, x1, floor_y - 5, floor_y - 3)
+
+    cw = 34
+    fit_rect(grid, overlay, colors, "Steel", inside, cart_x - cw // 2 + 4, cart_x - cw // 2 + 10, floor_y - 6, floor_y)
+    fit_rect(grid, overlay, colors, "Steel", inside, cart_x + cw // 2 - 10, cart_x + cw // 2 - 4, floor_y - 6, floor_y)
+    fit_rect(grid, overlay, colors, "Wood", inside, cart_x - cw // 2, cart_x + cw // 2, floor_y - 22, floor_y - 6)
+    for x in range(cart_x - cw // 2 + 3, cart_x + cw // 2 - 3):
+        h = 10 - abs(x - cart_x) * 10 // (cw // 2)
+        fit_rect(grid, overlay, colors, "Coal", inside, x, x + 1, floor_y - 22 - max(0, h), floor_y - 22)
 
 
 def place_bracket_ledge(grid, overlay, colors, material, inside, wall_x, out, y, thickness, from_west, into=10):
-    """A ledge `thickness` thick, running `out` cells from the wall at
-    `wall_x`, held on two brackets driven `into` cells back into the
-    wall, and a strut under it, from low on the wall out to the far
-    end -- never across the platform's own face, or it reads as a
-    crossed stick instead of something to stand on."""
+    """A ledge `thickness` thick (8 to 10: clearly the heaviest thing
+    here), running `out` cells from the wall at `wall_x`, held on two
+    brackets driven `into` cells back into the wall, and a strut half
+    as thick underneath, from low on the wall out to short of the far
+    end. A slab and a strut the same weight, meeting at a point, draw
+    a wedge, not a platform -- so neither happens here."""
     if from_west:
         x0, x1 = wall_x, wall_x + out
     else:
@@ -1229,8 +1355,9 @@ def place_bracket_ledge(grid, overlay, colors, material, inside, wall_x, out, y,
         else:
             bx0, bx1 = wall_x, wall_x + into
         fit_rect(grid, overlay, colors, material, inside, int(bx0), int(bx1), y - 6, y)
-    far_x = x1 if from_west else x0
-    place_brace(grid, overlay, colors, material, inside, wall_x, y + thickness + 24, far_x, y + thickness + 1)
+    strut_w = max(4, thickness // 2)
+    far_x = wall_x + out * 0.78 if from_west else wall_x - out * 0.78
+    place_brace(grid, overlay, colors, material, inside, wall_x, y + thickness + 22, far_x, y + thickness + 2, width=strut_w)
 
 
 def in_mound(x, y, cx, floor_y, half_w, height):
@@ -1361,7 +1488,7 @@ def room_cistern(grid, rng, colors):
     top_rx = bot_rx = 150
     top_ry = bot_ry = 80
     overlay = {}
-    inside = build_shell(grid, overlay, colors, "Steel", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside, shell_mask = build_shell(grid, overlay, colors, "Steel", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     for side in "NESW":
         near, far, wall_at = {
@@ -1399,22 +1526,40 @@ def room_cistern(grid, rng, colors):
     # and biting into the packing where it dips low
     carve_gold_seam(grid, overlay, colors, x0 - 60, x1 + 60, y0 - SHELL_T - 30, 22, rng)
 
-    # the maker's mark, on a clear span of wall below the planks and
-    # well clear of the west doorway's own jamb
-    place_glyph(overlay, colors, "Obsidian", x0 + WALL_T + 20, 330, "down")
+    # the rope-swing: a Steel chain from the crown of the dome down to
+    # just over the water, a Steel box on its end -- the single most
+    # recognisable thing in the reference. It falls through the same
+    # gap between the planks the north doorway already drops a player
+    # toward, so it stands in the open shaft, not across a foothold.
+    crown_x = (x0 + x1) // 2 - 11  # off the tile's exact centre, still in the gap between the planks
+    crown_y = int(y0 + top_ry * (1 - math.sqrt(max(0.0, 1 - ((crown_x - min(max(crown_x, x0 + top_rx), x1 - top_rx)) / top_rx) ** 2)))) + 8
+    place_chain(grid, overlay, colors, "Steel", inside, crown_x, crown_y, level - 20)
+    fit_rect(grid, overlay, colors, "Steel", inside, crown_x - 12, crown_x + 12, level - 20, level - 2)
+
+    # the maker's mark: found by walking the dome for a span clear of
+    # the north doorway, never placed by eye
+    dome_lo, dome_hi = find_clear_span(x0, x1, [(211, 299)], min_span=40)
+    gcx = (dome_lo + dome_hi) // 2
+    gsize = max(12, min(22, (dome_hi - dome_lo) // 2 - 6))
+    clamp_x = min(max(gcx, x0 + top_rx), x1 - top_rx)
+    gnx = (gcx - clamp_x) / top_rx
+    gcy = int(y0 + top_ry * (1 - math.sqrt(max(0.0, 1 - gnx * gnx)))) + gsize + 4
+    place_glyph(overlay, colors, "Gold", gcx, gcy, "down", size=gsize)
 
     scatter_rubble(grid, overlay, colors, inside, level - 2, x0 + 20, 150, rng, count=4)
+
+    reconnect_outside_shell(grid, rng, shell_mask)
 
     return overlay
 
 
 def room_magazine(grid, rng, colors):
     """coalmine_0101_1: the Magazine. See the module docstring."""
-    x0, x1, y0, y1 = 76, 436, 125, 410
-    top_rx, top_ry = (x1 - x0) // 2, 55
-    bot_rx = bot_ry = 24
+    x0, x1, y0, y1 = 76, 436, 115, 420
+    top_rx, top_ry = (x1 - x0) // 2, 45
+    bot_rx = bot_ry = 18
     overlay = {}
-    inside = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside, shell_mask = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     # coursed masonry over the whole shell -- the largest single change
     # a wall this size can carry
@@ -1432,7 +1577,7 @@ def room_magazine(grid, rng, colors):
     # the timber frame, entirely inside the belt the doorway also lives
     # in: posts floor to lintel, a brace in the top corner of every bay
     FX0, FX1 = x0 + 24, x1 - 24
-    FLOOR = 382
+    FLOOR = 384
     LY0, LY1 = 184, 200   # the lintel
 
     # the lane comes first: a clear run the whole length of the hall,
@@ -1484,9 +1629,17 @@ def room_magazine(grid, rng, colors):
         for cy0 in (FLOOR - 56, FLOOR - 28):
             fit_rect(grid, overlay, colors, "Tnt", inside, cx0, cx0 + 24, cy0, cy0 + 24)
 
-    # the maker's mark, on a clear span of the west wall: well below
-    # the doorway and its jamb, well above the oil trough
-    place_glyph(overlay, colors, "Steel", x0 - WALL_T + 18, 340, "circle", size=18)
+    # a rail line the length of the lane, and a coal cart on it,
+    # clear of the duct and every bay's own furniture
+    place_rail_cart(grid, overlay, colors, inside, FX0, FX1, FLOOR, 318)
+
+    # the maker's mark: found by walking the east wall for a span
+    # clear of the doorway, never placed by eye. It sits at the top of
+    # that span, so it never crosses down into the floor.
+    glo, ghi = find_clear_span(y0 + top_ry, y1 - bot_ry, [(211, 299)], min_span=40)
+    gsize = max(10, min(16, (ghi - glo) // 2 - 6))
+    gcy = glo + gsize + 4
+    place_glyph(overlay, colors, "Steel", x1 - WALL_T - gsize - 6, gcy, "circle", size=gsize)
 
     scatter_rubble(grid, overlay, colors, inside, FLOOR - 2, bay_mid[2] + 20, bay4 - 40, rng, count=8)
 
@@ -1495,6 +1648,8 @@ def room_magazine(grid, rng, colors):
     # crawl below the floor are never sealed off from the hall between
     # them, whatever else stands in it
     fit_open(grid, overlay, inside, 284, 300, 0, TILE)
+
+    reconnect_outside_shell(grid, rng, shell_mask)
 
     return overlay
 
@@ -1505,7 +1660,7 @@ def room_well(grid, rng, colors):
     top_rx = bot_rx = (x1 - x0) // 2
     top_ry = bot_ry = 90
     overlay = {}
-    inside = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    inside, shell_mask = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     margin = int(SHELL_T + max(top_ry, bot_ry) + 10)
     course_masonry(overlay, colors, "Rock", "Gravel", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
@@ -1527,8 +1682,13 @@ def room_well(grid, rng, colors):
     ledges = ((130, True), (210, False), (290, True), (370, False))
     for y, from_west in ledges:
         wall_x = x0 + WALL_T if from_west else x1 - WALL_T
-        place_bracket_ledge(grid, overlay, colors, "Wood", inside, wall_x, 95, y, 5, from_west)
+        place_bracket_ledge(grid, overlay, colors, "Wood", inside, wall_x, 95, y, 9, from_west)
     place_ladder(grid, overlay, colors, "Wood", inside, x0 + WALL_T + 14, 145, 285)
+
+    # the well's own chain: Steel down the middle of the shaft, a Wood
+    # bucket on the end, hanging level with the second ledge
+    place_chain(grid, overlay, colors, "Steel", inside, (x0 + x1) // 2, y0 + top_ry + 10, 218)
+    fit_rect(grid, overlay, colors, "Wood", inside, (x0 + x1) // 2 - 9, (x0 + x1) // 2 + 9, 218, 234)
 
     # the shaft needs a floor, the full width of it: masonry, with the
     # south doorway cut through its clear (west) side, well clear of
@@ -1540,11 +1700,22 @@ def room_well(grid, rng, colors):
     course_masonry(overlay, colors, "Rock", "Gravel", x0, x1, FLOOR, FLOOR + 16)
     fit_open(grid, overlay, inside, MC0, MC1, FLOOR, FLOOR + 16)
 
-    carve_bowl_pit(grid, overlay, colors, inside, 362, FLOOR, 38, 34, "Lava")
+    # the bowl, with the floor running up to its rim on both sides --
+    # clear margin to the doorway gap on the west, clear margin to the
+    # wall on the east, so it never reads as stuck to either
+    carve_bowl_pit(grid, overlay, colors, inside, 355, FLOOR, 30, 28, "Lava")
 
-    place_glyph(overlay, colors, "Gold", x0 + WALL_T + 20, 210, "up")
+    # the maker's mark: found by walking the east wall for a span
+    # clear of both ledges, never placed by eye
+    glo, ghi = find_clear_span(y0 + top_ry, y1 - bot_ry,
+                                [(204, 243), (364, 403)], min_span=28)
+    gsize = max(8, min(16, (ghi - glo) // 2 - 5))
+    gcy = glo + gsize + 4
+    place_glyph(overlay, colors, "Gold", x1 - WALL_T - gsize - 6, gcy, "up", size=gsize)
 
     scatter_rubble(grid, overlay, colors, inside, FLOOR - 2, x0 + WALL_T, x0 + WALL_T + 120, rng, count=6)
+
+    reconnect_outside_shell(grid, rng, shell_mask)
 
     return overlay
 
