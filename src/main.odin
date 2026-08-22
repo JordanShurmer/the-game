@@ -34,6 +34,12 @@ App :: struct {
 	water:     Water,
 	water_run: []u8,
 
+	shaders: Material_Shaders,
+	lux:     []u8,
+
+	look:  Look,
+	clock: f32,
+
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
 
@@ -54,6 +60,7 @@ Window_Shot :: struct {
 	throw:  bool,
 	aim:    u8,
 	ticks:  int,
+	look:   string,
 	on:     bool,
 }
 
@@ -79,11 +86,17 @@ main :: proc() {
 	app_init_view(&app)
 	defer app_destroy_view(&app)
 
-	if shot.on do app_walk(&app, shot.walk)
+	if shot.look != "" && !app_look_at(&app, shot.look) {
+		fmt.eprintfln("no material is named %s, so there is nothing to look at", shot.look)
+		os.exit(1)
+	}
+
+	if shot.on && !app.look.on do app_walk(&app, shot.walk)
 	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
 
 	frames := 0
 	for !rl.WindowShouldClose() {
+		app.clock = app.look.on ? f32(frames) / 60 : f32(rl.GetTime())
 		if !shot.on do app_handle_input(&app)
 
 		playing := !app.editor.open && !app.tile_edit.open
@@ -104,18 +117,21 @@ main :: proc() {
 			0,
 			rl.WHITE,
 		)
-		app_draw_water(&app, w, h)
-		app_draw_crystals(&app)
-		app_draw_fireflies(&app)
-		app_draw_drudges(&app)
-		app_draw_pots(&app, &app.pots)
-		app_draw_pots(&app, &app.drudge_pots)
-		app_draw_bangs(&app)
-		app_draw_sparks(&app)
-		app_draw_player(&app)
-		draw_hud(&app)
-		editor_draw(&app)
-		tile_editor_draw(&app)
+		app_draw_materials(&app, w, h)
+		if !app.look.on {
+			app_draw_water(&app, w, h)
+			app_draw_crystals(&app)
+			app_draw_fireflies(&app)
+			app_draw_drudges(&app)
+			app_draw_pots(&app, &app.pots)
+			app_draw_pots(&app, &app.drudge_pots)
+			app_draw_bangs(&app)
+			app_draw_sparks(&app)
+			app_draw_player(&app)
+			draw_hud(&app)
+			editor_draw(&app)
+			tile_editor_draw(&app)
+		}
 		rl.EndDrawing()
 
 		frames += 1
@@ -153,6 +169,8 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			}
 		case "ticks":
 			if n, ok := strconv.parse_int(value); ok do shot.ticks = max(n, 0)
+		case "look":
+			shot.look = value
 		}
 	}
 	return shot
@@ -208,6 +226,7 @@ app_unload_data :: proc(app: ^App) {
 app_init_view :: proc(app: ^App) {
 	app.cells = make([]Cell, WINDOW_W * WINDOW_H)
 	app.pixels = make([]rl.Color, WINDOW_W * WINDOW_H)
+	app.lux = make([]u8, WINDOW_W * WINDOW_H)
 	app.water_run = make([]u8, WINDOW_W)
 
 	blank := rl.Image {
@@ -224,6 +243,11 @@ app_init_view :: proc(app: ^App) {
 	app.water = water_load(app.world.materials, WINDOW_W, WINDOW_H)
 	if !app.water.on {
 		fmt.eprintfln("%s did not load: the water is drawn flat", WATER_SHADER_PATH)
+	}
+
+	app.shaders = material_shaders_load(app.world.materials, WINDOW_W, WINDOW_H)
+	if !app.shaders.on {
+		fmt.eprintfln("%s brought no shader: every material is drawn flat", MATERIAL_SHADER_DIR)
 	}
 
 	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
@@ -268,10 +292,12 @@ app_destroy_view :: proc(app: ^App) {
 	destroy_sprite_sheet(app.drudge_sprite)
 	rl.UnloadTexture(app.sprite_texture)
 	destroy_sprite_sheet(app.sprite)
+	material_shaders_unload(&app.shaders)
 	water_unload(&app.water)
 	rl.UnloadTexture(app.texture)
 	delete(app.cells)
 	delete(app.pixels)
+	delete(app.lux)
 	delete(app.water_run)
 }
 
@@ -281,6 +307,11 @@ app_view_cells :: proc(app: ^App) -> (w, h: i32) {
 
 app_regenerate :: proc(app: ^App) {
 	w, h := app_view_cells(app)
+	if app.look.on {
+		app_regenerate_look(app, w, h)
+		return
+	}
+
 	view := World_View {
 		x    = app.cam_x,
 		y    = app.cam_y,
@@ -300,11 +331,46 @@ app_regenerate :: proc(app: ^App) {
 		}
 	}
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
-	if app_lighting(app) do water_mark(&app.water, app.cells, w, h, app.water_run)
+	if app_lighting(app) {
+		water_mark(&app.water, app.cells, w, h, app.water_run)
+		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h)
+	}
 }
 
 app_lighting :: proc(app: ^App) -> bool {
-	return app.follow_player && !app.editor.open && !app.tile_edit.open
+	return app.look.on || (app.follow_player && !app.editor.open && !app.tile_edit.open)
+}
+
+// Point the whole view at one material, on the bench. See src/look.odin.
+app_look_at :: proc(app: ^App, name: string) -> bool {
+	idx, found := find_material_index(app.world.materials, name)
+	if !found do return false
+
+	app.look = Look {
+		cell = Cell(idx),
+		name = app.world.materials.names[idx],
+		on   = true,
+	}
+	app.step = 1
+	app.zoom = WORLD_VIEW_MAX_ZOOM
+	app.cam_x = 0
+	app.cam_y = 0
+	app.dirty = true
+	return true
+}
+
+@(private = "file")
+app_regenerate_look :: proc(app: ^App, w, h: i32) {
+	air, _ := find_material_index(app.world.materials, "Air")
+
+	look_fill(app.look, app.cells, app.lux, w, h, Cell(air))
+
+	count := int(w) * int(h)
+	for i in 0 ..< count {
+		app.pixels[i] = light_shade(app.color_lut[app.cells[i]], app.lux[i])
+	}
+	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
+	material_shaders_mark(&app.shaders, app.cells, app.lux, w, h)
 }
 
 @(private = "file")
@@ -314,11 +380,33 @@ app_shade :: proc(app: ^App, view: World_View) {
 		row := app.cells[int(ty) * int(view.w):][:view.w]
 		out := app.pixels[int(ty) * int(view.w):][:view.w]
 
+		lit := app.lux[int(ty) * int(view.w):][:view.w]
+
 		for tx in i32(0) ..< view.w {
 			wx := view.x + tx * view.step
-			out[tx] = light_shade(app.color_lut[row[tx]], light_lux(&app.light, wx, wy))
+			lux := light_lux(&app.light, wx, wy)
+			lit[tx] = lux
+			out[tx] = light_shade(app.color_lut[row[tx]], lux)
 		}
 	}
+}
+
+// Every material that brings a shader paints over its own cells, before
+// the water lays its surface over the top of them.
+@(private = "file")
+app_draw_materials :: proc(app: ^App, w, h: i32) {
+	if !app_lighting(app) do return
+
+	material_shaders_draw(
+		&app.shaders,
+		app.texture,
+		rl.Rectangle{0, 0, f32(w), f32(h)},
+		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
+		{WINDOW_W, WINDOW_H},
+		{f32(app.cam_x), f32(app.cam_y)},
+		f32(app.step),
+		app.clock,
+	)
 }
 
 @(private = "file")
@@ -330,7 +418,7 @@ app_draw_water :: proc(app: ^App, w, h: i32) {
 		{WINDOW_W, WINDOW_H},
 		{f32(app.cam_x), f32(app.cam_y)},
 		f32(app.step),
-		f32(rl.GetTime()),
+		app.clock,
 	)
 	rl.DrawTexturePro(
 		app.texture,
