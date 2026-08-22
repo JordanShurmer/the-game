@@ -1490,6 +1490,12 @@ def room_magazine(grid, rng, colors):
 
     scatter_rubble(grid, overlay, colors, inside, FLOOR - 2, bay_mid[2] + 20, bay4 - 40, rng, count=8)
 
+    # a hatch through the beam and the floor, clear of every doorway,
+    # post, hanger and stick of furniture: the loft above and the
+    # crawl below the floor are never sealed off from the hall between
+    # them, whatever else stands in it
+    fit_open(grid, overlay, inside, 284, 300, 0, TILE)
+
     return overlay
 
 
