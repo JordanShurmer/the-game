@@ -37,13 +37,17 @@ Material_Table :: struct {
 	orb:         u16,
 	crystal:     u16,
 	firefly:     u16,
+	sparkle:     u16,
 }
 
+// next chains to the next row for the same pair, -1 for the end of the
+// chain. See docs/alchemy.md, "A chain of rows".
 Reaction :: struct {
 	a, b:   u16,
 	c, d:   u16,
 	chance: u8,
-	_pad:   [3]u8,
+	_pad:   [1]u8,
+	next:   i16,
 }
 #assert(size_of(Reaction) == 12)
 
@@ -52,6 +56,20 @@ Raw_Reaction :: struct {
 	a, b, c, d: string,
 	chance:     u8,
 	line:       int,
+}
+
+// Walks a chain from its head and returns the last row in it and the sum of
+// every chance along the way. -1 in, -1 out, floor 0: an empty chain.
+@(private = "file")
+reaction_chain_tail :: proc(reactions: []Reaction, head: i16) -> (tail: i16, floor: u32) {
+	tail = -1
+	at := head
+	for at >= 0 {
+		floor += u32(reactions[at].chance)
+		tail = at
+		at = reactions[at].next
+	}
+	return
 }
 
 load_materials :: proc(path: string, allocator := context.allocator) -> (table: Material_Table, ok: bool) {
@@ -281,11 +299,19 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	if idx, found := find_material_index(table, "Firefly_Light"); found {
 		table.firefly = u16(idx)
 	}
+	if idx, found := find_material_index(table, "Sparkle"); found {
+		table.sparkle = u16(idx)
+	}
 
 	n := len(table.materials)
 	reaction_at = make([]i16, n * n, allocator)
 	for &r in reaction_at do r = -1
 	reacts = make([]bool, n, allocator)
+
+	// The line each stored row came from, so a row that can never fire
+	// names the row that filled the chain before it. Kept only for the
+	// load; not part of the table.
+	reaction_line := make([dynamic]int, context.temp_allocator)
 
 	for row in reaction_rows {
 		ai, aok := find_material_index(table, row.a)
@@ -309,11 +335,35 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			return {}, false
 		}
 
-		append(&reactions, Reaction{a = u16(ai), b = u16(bi), c = u16(ci), d = u16(di), chance = row.chance})
-		reaction_at[ai * n + bi] = i16(len(reactions) - 1)
+		// A row after a row that already carries the chain past 255 can
+		// never fire. See docs/alchemy.md, "A chain of rows".
+		tail_fwd, floor := reaction_chain_tail(reactions[:], reaction_at[ai*n+bi])
+		if floor >= 256 {
+			fmt.eprintfln(
+				"%s:%d: [Reactions] row can never fire: the chain from %s:%d already reaches %d of 255",
+				path, row.line, path, reaction_line[tail_fwd], floor,
+			)
+			return {}, false
+		}
 
-		append(&reactions, Reaction{a = u16(bi), b = u16(ai), c = u16(di), d = u16(ci), chance = row.chance})
-		reaction_at[bi * n + ai] = i16(len(reactions) - 1)
+		idx_fwd := i16(len(reactions))
+		append(&reactions, Reaction{a = u16(ai), b = u16(bi), c = u16(ci), d = u16(di), chance = row.chance, next = -1})
+		append(&reaction_line, row.line)
+		if tail_fwd >= 0 {
+			reactions[tail_fwd].next = idx_fwd
+		} else {
+			reaction_at[ai*n + bi] = idx_fwd
+		}
+
+		tail_rev, _ := reaction_chain_tail(reactions[:], reaction_at[bi*n+ai])
+		idx_rev := i16(len(reactions))
+		append(&reactions, Reaction{a = u16(bi), b = u16(ai), c = u16(di), d = u16(ci), chance = row.chance, next = -1})
+		append(&reaction_line, row.line)
+		if tail_rev >= 0 {
+			reactions[tail_rev].next = idx_rev
+		} else {
+			reaction_at[bi*n + ai] = idx_rev
+		}
 
 		reacts[ai] = true
 		reacts[bi] = true
@@ -440,14 +490,14 @@ test_load_materials_count :: proc(t: ^testing.T) {
 	table, ok := load_materials("data/materials.txt")
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "load must succeed")
-	testing.expect(t, len(table.materials) == 32, "expected 32 materials")
-	testing.expect(t, len(table.names) == 32, "names must match materials")
-	testing.expect(t, len(table.glyphs) == 32, "glyphs must match materials")
-	testing.expect(t, len(table.decays_to) == 32, "decay table must match materials")
-	testing.expect(t, len(table.burns_to) == 32, "burn table must match materials")
-	testing.expect(t, len(table.crumbles_to) == 32, "crumble table must match materials")
-	testing.expect(t, len(table.reaction_at) == 32 * 32, "reaction_at must be n*n")
-	testing.expect(t, len(table.reacts) == 32, "reacts must match materials")
+	testing.expect(t, len(table.materials) == 35, "expected 35 materials")
+	testing.expect(t, len(table.names) == 35, "names must match materials")
+	testing.expect(t, len(table.glyphs) == 35, "glyphs must match materials")
+	testing.expect(t, len(table.decays_to) == 35, "decay table must match materials")
+	testing.expect(t, len(table.burns_to) == 35, "burn table must match materials")
+	testing.expect(t, len(table.crumbles_to) == 35, "crumble table must match materials")
+	testing.expect(t, len(table.reaction_at) == 35 * 35, "reaction_at must be n*n")
+	testing.expect(t, len(table.reacts) == 35, "reacts must match materials")
 }
 
 @(test)
@@ -484,6 +534,7 @@ test_every_light_of_the_world_is_a_material :: proc(t: ^testing.T) {
 		{"the orb on his staff", table.orb, true},
 		{"a crystal of light", table.crystal, true},
 		{"a firefly", table.firefly, true},
+		{"the sparkle the mix throws off", table.sparkle, false},
 	}
 
 	for c in cases {
@@ -818,5 +869,101 @@ test_unknown_material_in_reaction_fails_the_load :: proc(t: ^testing.T) {
 
 	table, ok := load_materials(path)
 	testing.expect(t, !ok, "an unknown material in a reaction row must fail the load")
+	if ok do destroy_material_table(table)
+}
+
+@(private = "file")
+CHAIN_MATERIALS :: `
+[Air]
+state = Gas
+color = 0x00000000
+
+[A]
+state = Solid
+color = 0xFF010101
+
+[B]
+state = Solid
+color = 0xFF020202
+
+[C]
+state = Solid
+color = 0xFF030303
+
+[D]
+state = Solid
+color = 0xFF040404
+`
+
+// A pair may name as many rows as it likes, tried in the order written, and
+// the roll is one per pair. See docs/alchemy.md, "A chain of rows".
+@(test)
+test_reaction_rows_chain_in_the_order_they_are_written :: proc(t: ^testing.T) {
+	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   100\nA + B -> D + D    50\n"
+	path := "material_chain_case.tmp.txt"
+	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
+	defer os.remove(path)
+
+	table, ok := load_materials(path)
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "a chain of two rows must load") do return
+
+	a, _ := find_material_index(table, "A")
+	b, _ := find_material_index(table, "B")
+	c, _ := find_material_index(table, "C")
+	d, _ := find_material_index(table, "D")
+	n := len(table.materials)
+
+	head := table.reaction_at[a*n+b]
+	if !testing.expect(t, head >= 0, "the pair must react") do return
+
+	first := table.reactions[head]
+	testing.expect(t, first.chance == 100 && int(first.c) == c, "the first row written must be tried first")
+	testing.expect(t, first.next >= 0, "the first row must chain to the second")
+
+	second := table.reactions[first.next]
+	testing.expect(t, second.chance == 50 && int(second.c) == d, "the second row written must come second")
+	testing.expect(t, second.next == -1, "the chain must end after the last row written")
+
+	rhead := table.reaction_at[b*n+a]
+	rfirst := table.reactions[rhead]
+	testing.expect(t, rfirst.chance == 100 && int(rfirst.d) == c, "the reverse chain must carry the same order")
+	rsecond := table.reactions[rfirst.next]
+	testing.expect(t, rsecond.chance == 50 && int(rsecond.d) == d)
+	testing.expect(t, rsecond.next == -1)
+}
+
+// A single row must behave exactly as it did before the chain existed: it
+// is its own whole chain, and the chain ends after it.
+@(test)
+test_a_single_reaction_row_is_its_own_whole_chain :: proc(t: ^testing.T) {
+	table, ok := load_materials("data/materials.txt")
+	defer destroy_material_table(table)
+	if !testing.expect(t, ok, "materials must load") do return
+
+	water, _ := find_material_index(table, "Water")
+	lava, _ := find_material_index(table, "Lava")
+	n := len(table.materials)
+
+	forward := table.reactions[table.reaction_at[water*n+lava]]
+	testing.expect(t, forward.next == -1, "a single row has no next row to chain to")
+}
+
+// A row after a row that already carries the chain past 255 can never
+// fire. The loader refuses it rather than keeping a silent dead row.
+@(test)
+test_the_loader_refuses_a_chain_row_that_can_never_fire :: proc(t: ^testing.T) {
+	// The first two rows already carry the chain to 300, past 255, so no
+	// roll can ever be left over for the third.
+	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   200\nA + B -> D + D   100\nA + B -> C + D    10\n"
+	path := "material_chain_overflow_case.tmp.txt"
+	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
+	defer os.remove(path)
+
+	table, ok := load_materials(path)
+	testing.expect(
+		t, !ok,
+		"a row after rows that already carry the chain past 255 must be refused",
+	)
 	if ok do destroy_material_table(table)
 }

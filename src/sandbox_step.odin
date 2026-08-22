@@ -52,6 +52,7 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 	}
 
 	bang_age(&sb.bangs)
+	spark_age(&sb.sparks)
 	sb.tick += 1
 }
 
@@ -169,14 +170,27 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 
 	s := sides[live[sandbox_chance(sb, x, y, .React_Side) % u32(count)]]
 	ni := sandbox_index(sb, x + s[0], y + s[1])
-	r  := table.reactions[table.reaction_at[int(material) * n + int(sb.cells[ni])]]
-	if sandbox_chance(sb, x, y, .React_Roll) & 255 >= u32(r.chance) do return false
+	head := table.reaction_at[int(material) * n + int(sb.cells[ni])]
 
-	sandbox_put(sb, table, index, Cell(r.c))
-	sandbox_put(sb, table, ni, Cell(r.d))
-	sb.moved[index] = true
-	sb.moved[ni] = true
-	return true
+	// One roll for the pair, walked along the chain with a running floor.
+	// See docs/alchemy.md, "A chain of rows".
+	roll := sandbox_chance(sb, x, y, .React_Roll) & 255
+	floor := u32(0)
+	for at := head; at >= 0; {
+		r := table.reactions[at]
+		if roll < floor + u32(r.chance) {
+			sandbox_put(sb, table, index, Cell(r.c))
+			sandbox_put(sb, table, ni, Cell(r.d))
+			sb.moved[index] = true
+			sb.moved[ni] = true
+			if r.c == table.sparkle do spark_add(sb, table, x, y)
+			if r.d == table.sparkle do spark_add(sb, table, x + s[0], y + s[1])
+			return true
+		}
+		floor += u32(r.chance)
+		at = r.next
+	}
+	return false
 }
 
 sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
