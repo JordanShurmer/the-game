@@ -39,7 +39,7 @@ float sand_ripple(vec2 c)
     vec2 across = vec2(-axis.y, axis.x);
     float along = dot(p, axis);
     float bow = dot(p, across);
-    float wander = m_fbm(vec2(bow*0.5, 0.0), 2)*3.2;
+    float wander = m_fbm(vec2(bow*0.4, 0.0), 2)*1.3;
     float phase = (along + wander)*6.2831853;
     float ridge = sin(phase) + 0.32*sin(phase*2.0 + 0.9);
     return ridge*0.5 + 0.5;
@@ -77,8 +77,8 @@ vec3 shade(Surf s)
 
     // A scatter of dark heavy-mineral grains, one cell or so, rare.
     vec3 gp = m_cells(s.cell*SAND_GRAIN*1.3 + 90.0);
-    float mineral = smoothstep(0.20, 0.0, gp.x)*step(0.93, m_hash(gp.yz + 4.0));
-    body = mix(body, SAND_DARK, mineral*0.8);
+    float mineral = smoothstep(0.16, 0.0, gp.x)*step(0.965, m_hash(gp.yz + 4.0));
+    body = mix(body, SAND_DARK, mineral*0.75);
 
     // Fine grain texture at the size of a cell: a little brightness
     // jitter per grain so the body never looks like a flat wash.
