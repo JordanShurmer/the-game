@@ -26,18 +26,20 @@
 // Glass does not roll into a soft shoulder; it breaks at a sharp edge.
 #define M_ROLL 3.0
 
-const vec3 OBS_F0 = vec3(0.050, 0.050, 0.052);   // almost nothing, straight on
-const vec3 OBS_WHITE = vec3(1.0, 0.99, 0.98);    // the mirror it becomes at grazing angle
+// Nearly neutral, nudged a hair cool-violet so the body reads as black
+// glass and not, once the world's warm haze lands on it, as a brown.
+const vec3 OBS_F0 = vec3(0.052, 0.048, 0.062);
+const vec3 OBS_WHITE = vec3(0.99, 0.99, 1.0);    // the mirror it becomes at grazing angle
 
 const float OBS_SHELL = 0.145;    // scale of the conchoidal shells, about 7 cells across
 const float OBS_SHELL2 = 0.048;   // a second, larger family, about 21 cells
 const float OBS_RELIEF = 15.0;    // how steeply a shell rolls over near its rim
-const float OBS_FACET = 2.1;      // fine glassy imperfection, a cell or two
-const float OBS_FACET_RELIEF = 3.2;
+const float OBS_FACET = 0.78;     // fine glassy imperfection, a cell or two — never sub-cell
+const float OBS_FACET_RELIEF = 1.8;
 const float OBS_ROUGH = 0.045;    // a very tight, hard, glassy speculum
 const float OBS_FRESNEL_POWER = 3.0;
 
-const vec3 OBS_GLOW = vec3(0.62, 0.20, 0.10);   // warm brown-red, the body lit from within
+const vec3 OBS_GLOW = vec3(0.70, 0.22, 0.09);   // warm brown-red, the body lit from within
 
 // One conchoidal shell: the smooth dome of a curved fracture, built from
 // the distance to the nearest of a scatter of shell centres. `m_cells`
@@ -70,23 +72,34 @@ float obs_facet(vec2 c)
     return m_noise(c*OBS_FACET)*0.5 + m_noise(c*OBS_FACET*2.13 + 5.0)*0.5;
 }
 
-// The bevel of the vein with the shells and the facets laid over it as
-// two independent bumps, so the fine glint never washes out the broad
-// curve of a shell, or the other way round.
-vec3 obs_face(Surf s)
+// The bevel of the vein with the shells laid over it as a bump. This is
+// the smooth, macro normal: the broad curve of a conchoidal shell alone,
+// with nothing fine enough to trouble it, so the crown of every dome
+// stays glassy and the surface between shells stays flat.
+vec3 obs_macro(Surf s)
 {
     float e = 0.85;
     float hs  = obs_shells(s.cell);
     float hsx = obs_shells(s.cell + vec2(e, 0.0));
     float hsy = obs_shells(s.cell + vec2(0.0, e));
 
+    vec2 slope = vec2(hs - hsx, hs - hsy)*OBS_RELIEF;
+    return normalize(vec3(s.n.xy + slope, s.n.z));
+}
+
+// The macro normal with a fine wash of glassy imperfection laid over it
+// besides — used only where a hard, small specular hot point is
+// computed, so the sparkle of a facet catching the light never disturbs
+// the broad, clean shading of the shell itself.
+vec3 obs_detail(vec3 macro, Surf s)
+{
+    float e = 0.85;
     float hf  = obs_facet(s.cell);
     float hfx = obs_facet(s.cell + vec2(e, 0.0));
     float hfy = obs_facet(s.cell + vec2(0.0, e));
 
-    vec2 slope = vec2(hs - hsx, hs - hsy)*OBS_RELIEF
-               + vec2(hf - hfx, hf - hfy)*OBS_FACET_RELIEF;
-    return normalize(vec3(s.n.xy + slope, s.n.z));
+    vec2 slope = vec2(hf - hfx, hf - hfy)*OBS_FACET_RELIEF;
+    return normalize(vec3(macro.xy + slope, macro.z));
 }
 
 // A GGX-shaped lobe, tight enough to read as a hard, small hot point
@@ -101,10 +114,11 @@ float obs_spec(vec3 n, vec3 h, float rough)
 
 vec3 shade(Surf s)
 {
-    vec3 n = obs_face(s);
+    vec3 n = obs_macro(s);
+    vec3 nd = obs_detail(n, s);
     vec3 h = normalize(s.l + M_VIEW);
     float ndv = max(dot(n, M_VIEW), 0.0);
-    float ndl = max(dot(n, s.l), 0.0);
+    float ndl = max(dot(nd, s.l), 0.0);
 
     // The fresnel swing: almost nothing head on, a near-perfect,
     // uncoloured mirror at a glancing angle. This carries the material.
@@ -112,8 +126,10 @@ vec3 shade(Surf s)
     float rim = pow(1.0 - ndv, OBS_FRESNEL_POWER);
     vec3 mirror = mix(OBS_F0, OBS_WHITE, rim);
 
-    // The lamp, reflected as a tight, hard hot point.
-    float lobe = obs_spec(n, h, OBS_ROUGH);
+    // The lamp, reflected as a tight, hard hot point off the fine facet
+    // normal, so the highlight breaks into scattered points of light
+    // rather than one smooth sheen.
+    float lobe = obs_spec(nd, h, OBS_ROUGH);
     float shadow = ndl/(ndl*0.6 + 0.4);
     vec3 lamp = fresnel*lobe*shadow*1.3;
 
@@ -133,7 +149,7 @@ vec3 shade(Surf s)
     // faint warm brown-red glow, strongest where the glass is buried
     // and the surface faces the viewer square on (thickest path out).
     float inner = s.bury*(1.0 - rim)*0.5;
-    vec3 glow = OBS_GLOW*inner*0.22;
+    vec3 glow = OBS_GLOW*inner*0.38;
 
     vec3 col = lamp + env + edgeGlow + glow;
     return m_dress(col, s);

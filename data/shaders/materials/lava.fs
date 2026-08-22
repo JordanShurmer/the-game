@@ -35,7 +35,7 @@ const vec3 LAVA_CRUST_LIT  = vec3(0.150, 0.128, 0.112); // cooled rock, grain ca
 const vec3 LAVA_CRUST_BAKE = vec3(0.360, 0.150, 0.075); // rock baked just outside a crack
 
 const float LAVA_PLATE_SCALE = 0.082;  // size of a crust plate, in cells
-const float LAVA_DRIFT_SPEED = 0.020;  // how fast the plate seams creep
+const float LAVA_DRIFT_SPEED = 0.100;  // how fast the plate seams creep
 const float LAVA_DRIFT_RANGE = 2.2;    // cells a seam wanders across
 const float LAVA_CRACK_BASE  = 0.060;  // half-width of the hottest core
 const float LAVA_CRACK_GLOW  = 1.9;    // how much further the colour is seen
