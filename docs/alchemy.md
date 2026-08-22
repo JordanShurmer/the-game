@@ -1,8 +1,15 @@
 # Alchemy
 
-The first alchemy of the world: a poison, water, and what the two
-make of each other. This note says what the materials are, what the
-mix does, how the light of it is drawn, and where to walk through it.
+The alchemy of the world, in two parts. The first is a poison, water,
+and what the two make of each other. The second is thirteen materials
+more: the salts, the metals, and two magics, which is where the world
+gets salt out of a pool, black powder out of three minerals, gold out
+of quicksilver, and a stone that answers water with light.
+
+This note says what the materials are, what they make of each other,
+how the light of it is drawn, and where to walk through it. Everything
+here is data. There is no alchemy code: `data/materials.txt` holds the
+rows and the sandbox in `docs/physics.md` runs them.
 
 Read `docs/physics.md` for the sandbox and the reaction table this
 builds on, and `docs/lighting.md` for the rule every light in this
@@ -238,6 +245,225 @@ The alchemy gallery itself, `bin/bench biome=Alchemy size=512
 ticks=900`, costs 0.13 ms a tick against the physics gallery's 0.30 at
 the same size: the alchemy rooms are quieter, not more expensive.
 
+The second alchemy added thirteen materials, which takes the shipped
+table from 35 to 48. That is still under `SANDBOX_WIDE_IDS` (64), so
+the vectorised pass stands and nothing above had to be re-tuned;
+`test_the_second_alchemy_leaves_the_wide_pass_standing` is what keeps
+it that way, and it fails on the material that would cost the whole
+game its fast path rather than on a benchmark somebody has to remember
+to read.
+
+Measured on one machine, interleaved, best of three each way. This is
+not the machine the numbers above were taken on, so read the pairs and
+not the absolute values:
+
+| `bin/bench` | Before the second alchemy | After it |
+| --- | --- | --- |
+| `Coalmine` 2048, the shipped world | 0.88 ms | 0.91 ms |
+| `Gallery` 512, the physics rooms | 0.20 ms | 0.24 ms |
+| `Alchemy` 512, this gallery | 0.20 ms | 0.46 ms |
+
+The shipped world and the physics gallery hold their checksums exactly
+across the change, which is the number that matters: thirteen materials
+no biome uses cost the world nothing, and the two readings that move are
+inside the run to run spread of this machine.
+
+The alchemy gallery costs twice what it did because it is doing twice as
+much: eight rooms that were empty halls now run matter, three of them
+with a reaction on every tick. That is the exhibit, not a regression.
+
+## The second alchemy
+
+Thirteen materials came after the first three, and not one line of code
+came with them. Nine are matter a miner would know and four are not,
+which is the shape the world wants: the magical has to stand against
+something ordinary or it is only colour.
+
+| Material | Old English | What it is |
+| --- | --- | --- |
+| `Sealt` | *sealt*: salt | A white powder. It goes into water and it comes back out of it |
+| `Brine` | — | What salt and water make. It lies between water and `Smylt`, and it carries a current far better than either |
+| `Nitre` | — | Saltpetre off a cave wall. No fuel at all: what makes another fuel burn faster than it can alone |
+| `Brimstone` | *brynstan*: the burning stone | Sulphur. It does not catch as flame; it gives off its reek first, and the reek burns |
+| `Reek` | — | The choking yellow fume brimstone gives off. It rises, it poisons, and a flame walks up it |
+| `Sweartsealt` | *sweart*: black | The black salt nitre and brimstone make. Half of black powder, wanting the other half |
+| `Leag` | *leag*: lye | Wood ash left standing in water. The other end of the scale from acid |
+| `Cwicseolfor` | *cwicseolfor*: quicksilver | A liquid metal at 13.5, the heaviest thing that flows here |
+| `Gemang` | *gemang*: a mingling | The soft solid quicksilver takes gold up into |
+| `Galdor` | *galdor*: an incantation | A spell in a bottle. Every row it is in spends it as a flash |
+| `Leoma` | *leoma*: a gleam, a ray of light | Rock that has taken a spell. No light of its own; it answers water with one |
+| `Haelu` | *haelu*: health, healing | The cure, and the quiet opposite of the mix |
+| `Sceadu` | *sceadu*: a shadow | A heavy black liquid that puts fires out and blinds a gleam to dead glass |
+
+Every one of them is a row in `data/materials.txt` and a row or two in
+`[Reactions]`, and `src/alchemy_test.odin` measures each one in the
+sandbox: paint the cells, step the tick, count what is left.
+
+### The salt road
+
+```
+Sealt + Water -> Brine + Brine   120
+Sealt + Ice   -> Brine + Water    60
+Brine + Fire  -> Steam + Sealt   128   # the flame is smothered by the salt it leaves
+Brine + Fire  -> Sealt + Fire    127   # or the brine dries where it stands and the flame burns on
+Brine + Lava  -> Steam + Lava     40
+Brine + Lava  -> Sealt + Lava    120
+```
+
+The first road in the world that runs both ways. Salt goes into water
+and heat takes it back out, and neither end of it is a dead end: what
+comes out is what went in. `test_salt_goes_into_water_and_heat_brings_it_back`
+walks it in both directions in one sandbox — 168 cells of salt into 168
+of water leaves 262 of brine, and a flame banded into that brine brings
+the salt back.
+
+Boiling is two chains rather than two rows, because a reaction leaves
+two cells and there are three things to say: the water goes off, the
+salt stays, and where the salt stays is not always where the flame was.
+Half the rolls smother the flame with the salt it made; half dry the
+brine where it stands and leave the flame burning.
+
+**A salt pan crusts over.** `Sealt` at 2.1 is heavier than brine at
+1.03 and lighter than lava at 2.4, so the salt a pan of brine leaves
+settles exactly between the two and caps the pan. This is the trap of
+"Layering seals a slow drip" again, and now it is a powder doing it:
+80 cells of brine over lava leave 10 of salt in the first few hundred
+ticks and then stand for ever, brine still under the crust, lava still
+under that. `test_a_salt_pan_crusts_over_with_its_own_salt` runs it
+5000 ticks and requires the counts to be identical at 1000 and at 5000.
+
+Room 7 of the gallery is both halves: the road on the left, the crust
+on the right.
+
+### Black powder, in two steps
+
+```
+Nitre       + Brimstone -> Sweartsealt + Sweartsealt   60
+Sweartsealt + Coal      -> Gunpowder   + Gunpowder     90
+```
+
+Black powder was found before this and it is made now. A reaction takes
+two cells and black powder is made of three things, so it cannot be one
+row: nitre and brimstone make the black salt where they touch, and the
+black salt takes up coal and is powder.
+
+This is the pattern to copy for anything that needs three ingredients.
+It costs one material — the half made thing — and it buys a recipe the
+player can find by dropping one pile onto another.
+`test_black_powder_is_made_in_two_steps` holds both steps.
+
+Brimstone burns the same way, in two steps, for the same reason:
+
+```
+[Brimstone]  flammability = 6   burns_to = Reek
+Reek + Fire -> Fire + Fire   200
+Nitre + Fire -> Fire + Fire  200
+```
+
+A flame reaching brimstone does not get a flame back. It gets the fume,
+and the fume is the fuel, so a bed of brimstone lights from the top down
+through a yellow cloud that rises off it and poisons what it touches on
+the way. Nitre is no fuel at all and still feeds the fire, which is what
+an oxidiser is.
+
+### Lye, and the acid it answers
+
+```
+Ash  + Water -> Leag  + Leag     35
+Leag + Acid  -> Smylt + Smylt   200
+```
+
+Ash left standing in water is lye, so the world makes lye wherever
+something burnt has fallen in a pool: it is the first material here
+that the world can make without a hand in it. Lye and acid put each
+other out and leave `Smylt`, which is the second road to the calm
+liquid and the first that has nothing to do with poison.
+
+Nothing seals this one. `Smylt` at 1.05 is lighter than lye at 1.1 and
+lighter than acid at 1.2, so what the reaction leaves floats up out of
+the front instead of settling across it, and acid still arriving sinks
+straight through the lye to what has not reacted yet. A room that drips
+acid onto lye runs until one of them is gone, and room 9 is that room.
+
+### The metals
+
+```
+Cwicseolfor + Gold -> Gemang + Gemang   150
+Gemang      + Fire -> Gold   + Fire      40
+```
+
+Gold is a solid, and a solid stays in the wall it is in: nothing in the
+world could move it. Quicksilver can. It takes gold up into an amalgam
+along the line where the two meet, and fire drives the quicksilver back
+off and leaves the gold standing wherever the flame reached.
+
+The flame has to stand on the amalgam to do it, and a flame in the air
+rises away, so the way to work an amalgam is a film of oil on top of it
+and a light. `test_fire_drives_the_quicksilver_off_and_leaves_the_gold`
+does exactly that, because the first cut of it lit nothing at all:
+`sandbox_ignite` only ignites what is flammable, and an amalgam is not.
+
+A blast breaks an amalgam back into quicksilver: `crumbles_to =
+Cwicseolfor`, so what a pot leaves in a gilded wall is a puddle.
+
+### The two magics
+
+```
+Galdor + Cwicseolfor -> Sparkle + Gold        60
+Galdor + Rock        -> Sparkle + Leoma       12
+Leoma  + Water       -> Leoma   + Sparkle     40
+Haelu  + Attor       -> Smylt   + Smylt      255
+Haelu  + Ash         -> Dirt    + Dirt        60
+Sceadu + Fire        -> Sceadu  + Smoke      220
+Sceadu + Leoma       -> Sceadu  + Obsidian    30
+Sceadu + Haelu       -> Smylt   + Smylt      255
+```
+
+**A spell is spent in the flash it makes.** Every row `Galdor` is in
+writes the `Sparkle` into the cell that held the spell, never into the
+cell it worked on, so the eye always reads the flash as the spell going
+out. Quicksilver under a spell is gold and plain rock under one is a
+gleam, and there is a spark either way and one less cell of spell.
+
+**A gleam is not a light.** `Leoma` has `luminosity = 0`, which is the
+whole of it: it answers water with a spark and it is never used up
+doing so. A vein of it under a drip flickers for as long as the drip
+lasts, and the drip is what runs out.
+`test_a_gleam_answers_every_drop_with_a_spark` holds all three parts —
+the spark, the crystal that stays, and the water that goes.
+
+This is the honest way to make a glowing material without new code. The
+world draws light from the rings in `docs/lighting.md` and nothing
+else, so a material that carries a `luminosity` no ring ever reads
+would be a number that lies. A material that *makes* `Sparkle` lights
+the room through the ring that is already there.
+
+**A magic only skins what it lies on.** `Galdor` turns rock into gleam
+and there is no row for `Galdor` on gleam, so the first cell it changes
+is a shell over the rest and the spell can go no deeper. `Sceadu` does
+the same to a slab of gleam: 1152 cells of it under a whole tank of
+shadow give up 58 to obsidian and then stand. Nothing had to be written
+to stop a bottle of spell turning a whole cave to crystal — the shape
+of the reaction stops it, the way `Smylt` stops the mix in "Layering
+seals a slow drip". A pour that has to reach further has to be given
+somewhere for the shell to fall away to.
+
+**The cure is the quiet opposite of the mix.** `Attor` and water flash
+and leave `Smylt`; `Attor` and `Haelu` leave the same `Smylt` and throw
+no light at all. `test_the_cure_puts_the_poison_out_with_no_light`
+requires the spark ring to stay empty for 2000 ticks, which is the only
+way to test a thing that is meant not to happen.
+
+**The shadow is the opposite of the light.** It puts fires out and is
+not spent doing it, it blinds a gleam back to dead black glass, and it
+and the cure undo each other into `Smylt`, so the two magics cancel the
+way an acid and a base do.
+
+The cure carries `contact = Heals` and `immersion = Heals`, and the
+world has nothing to heal yet. Those were effects the material format
+already knew and nothing had ever used; they say what the liquid is
+for, and the day the wizard can be hurt they are already written down.
+
 ## The alchemy gallery
 
 A second hand painted region, east of the physics gallery: map pixel
@@ -253,9 +479,15 @@ gallery is then its own file with its own room table and nothing else.
 Moving that code must not move a pixel: `data/rooms/gallery.png` is
 regenerated and has to come back byte for byte the same file.
 
-The first six rooms are the alchemy. The other ten are halls with
-plinths, walled and doored and empty, because this gallery is meant to
-be filled as the alchemy grows.
+Rooms 1 to 6 are the first alchemy and rooms 7 to 14 are the second.
+Room 10 and rooms 15 and 16 are halls with plinths, walled and doored
+and empty, because this gallery is meant to be filled as the alchemy
+grows, and it has been once already.
+
+Room 10 is empty for a reason of its own: room 6 comes down into it,
+and room 6 is judged by what can be seen from it, so nothing in room 10
+may make a light. Rooms 15 and 16 are the ones left for what comes
+next.
 
 | # | Room | What it shows | What starts it |
 | --- | --- | --- | --- |
@@ -265,12 +497,25 @@ be filled as the alchemy grows.
 | 4 | The rain, and the seal | Water rains onto a flat pool of Attor. It sparks the width of the pool for about a hundred ticks, and is then still for ever. The trap the other rooms are built to answer | gravity |
 | 5 | Layers | Oil, water, Smylt and Attor pour into one tank and settle in four bands, in the order the densities say | gravity |
 | 6 | The dark | Two ducts a cell apart drop Attor and water down a black room as neighbouring columns. A ribbon of sparks and nothing else, for about 1400 ticks | gravity |
-| 7-16 | Halls | Empty, walled, doored, with a plinth. Room for what comes next | — |
+| 7 | The salt road | A hopper of salt over a basin of water on the left, and a tank of brine over a pan of lava on the right. Salt in, salt out, and the crust the pan caps itself with | gravity |
+| 8 | Black powder | Two tubs of banded nitre and brimstone, each draining onto a walled bed of coal. The black salt is made in the tub and the powder on the bed. Nothing here is lit: the fire is the visitor's to bring | gravity |
+| 9 | Lye | Hoppers of ash and acid over one basin of water. The ash makes lye and the acid answers it, and nothing it makes can seal it, so it runs until one of the two is gone | gravity |
+| 10 | Hall | Empty, and unlit on purpose: room 6 comes down into it | — |
+| 11 | The quicksilver | A pan floored with gold under a tank of quicksilver. An amalgam forms along the line where the two meet, and gold moves for the first time | gravity |
+| 12 | The gleam | A pipette of Galdor onto plain rock on the left, and a pipette of water onto a vein of gleam on the right, 384 cells and about 380 ticks each. A spell spends itself in a flash and skins the stone it lands on; a gleam answers every drop with a spark and is never used up | gravity |
+| 13 | The cure | Two ducts a cell apart drop Attor and Haelu down a dark room, the way room 6 drops Attor and water. The same calm liquid, and no light at all. This is room 6 with the light taken out of it, and that is the exhibit | gravity |
+| 14 | The shadow | A slab of gleam under a tank of Sceadu. What the shadow lies on is blinded, gleam to dead black glass, and no deeper: the blinded shell is what stops it | gravity |
+| 15-16 | Halls | Empty, walled, doored, with a plinth. Room for what comes next | — |
 
-Room 6 is the room this whole note is for. Shoot it with the lighting
-on and nothing else in the frame: a ribbon of sparks hangs down the
-middle of a black room, and the light of it reaches the two chambers
-that feed it and nothing further.
+Room 6 is the room the first half of this note is for. Shoot it with
+the lighting on and nothing else in the frame: a ribbon of sparks hangs
+down the middle of a black room, and the light of it reaches the two
+chambers that feed it and nothing further.
+
+Room 13 is the same shot with nothing in it, and it has to be looked at
+next to room 6 or it says nothing: two liquids fall side by side the
+whole depth of a black room, they leave the same `Smylt` room 6 leaves,
+and the frame stays black.
 
 ## Looking at it
 
@@ -280,7 +525,15 @@ make shot
 ./bin/shot biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
 ./bin/shot x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
 ./bin/shot x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
+./bin/shot x=896 y=-2432 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
+./bin/shot x=896 y=-2304 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
+./bin/shot x=512 y=-2176 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
 ```
+
+A room of the second alchemy sits at world x `512 + 128 * col`, y
+`-2560 + 128 * row`, counting rooms 1 to 16 in reading order. Rooms 8,
+9, 11 and 14 make no light of their own, so shoot them flat: the
+picture to read there is what the colours have become, not what is lit.
 
 Rooms 2 and 6 are lit by nothing but their own reaction, so there is no
 wizard to carry the light: `light=1` with no `player` follows the

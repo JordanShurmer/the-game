@@ -429,6 +429,48 @@ test_a_gleam_answers_every_drop_with_a_spark :: proc(t: ^testing.T) {
 	)
 }
 
+// A magic only skins what it lies on. There is no row for a spell on a
+// gleam, so the first shell of gleam a spell makes is a wall between the
+// spell and the stone under it, and the pour stops with spell to spare.
+@(test)
+test_a_spell_skins_a_stone_and_goes_no_deeper :: proc(t: ^testing.T) {
+	sb, table := alchemy_sandbox(t, 20, 24, 53)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	galdor, _ := find_material_index(table, "Galdor")
+	rock, _ := find_material_index(table, "Rock")
+	leoma, _ := find_material_index(table, "Leoma")
+
+	alchemy_band(&sb, table, 12, 24, rock)
+	alchemy_band(&sb, table, 2, 10, galdor)
+
+	counts := make([]int, len(table.materials))
+	defer delete(counts)
+
+	for _ in 0 ..< 1000 do sandbox_step(&sb, table)
+	sandbox_census(&sb, counts)
+	skin := counts[leoma]
+	spell := counts[galdor]
+
+	testing.expect(t, skin > 0, "a spell must turn the stone it lands on into a gleam")
+	testing.expectf(
+		t, skin < 20 * 12 / 2,
+		"but not the whole block: %d of %d cells of rock are a gleam", skin, 20 * 12,
+	)
+	testing.expectf(t, spell > 0, "and the spell must be left over, not used up")
+
+	for _ in 0 ..< 3000 do sandbox_step(&sb, table)
+	sandbox_census(&sb, counts)
+
+	testing.expectf(
+		t, counts[leoma] == skin,
+		"and the shell is where it stops: %d cells of gleam against %d, 3000 ticks later",
+		counts[leoma], skin,
+	)
+	testing.expect(t, counts[rock] > 0, "the stone under the shell is untouched")
+}
+
 // The cure is the quiet opposite of the mix. Attor and water flash; Attor and
 // the cure leave the same calm liquid and throw no light at all.
 @(test)
