@@ -57,6 +57,11 @@ light there is; `light=0` turns that off and draws the world flat, which is
 what terrain is judged by. `walk=N` walks him N ticks first (negative
 walks left), which is the way to see the trail of crystals he leaves.
 
+A room lit by nothing but its own reaction has no wizard in it at
+all: `light=1` with no `player` follows the middle of the view
+instead of the origin, so a shot can judge a light source far from
+where he starts. See `docs/alchemy.md`, "Looking at it".
+
 ## Iterate on the world
 
 1. Change the tiles or the code.

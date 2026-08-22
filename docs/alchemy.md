@@ -254,10 +254,19 @@ fireflies over a dark pool or the numbers above are wrong.
 make shot
 ./bin/shot biome=Alchemy out=shots/alchemy.png                       # as painted
 ./bin/shot biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
-./bin/shot x=640 y=-2560 w=128 h=128 scale=2 ticks=240 out=shots/mix.png   # room 2
-./bin/shot x=640 y=-2432 w=128 h=128 scale=2 ticks=300 player=1 out=shots/dark.png  # room 6
+./bin/shot x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
+./bin/shot x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
 ```
+
+Rooms 2 and 6 are lit by nothing but their own reaction, so there is no
+wizard to carry the light: `light=1` with no `player` follows the
+middle of the view instead of the origin, which is the only way a room
+this far from where he starts can be judged lit at all. `player=1`
+would light the shot from wherever he starts instead, nowhere near
+this gallery, and the room would read as dark for the wrong reason.
 
 The mix is a thing that flashes, so a still is a still of one tick.
 Judge it by a run of them, 30 ticks apart, and by the pool that is
-left when they stop.
+left when they stop. Room 6's burst is brief, measured at "Layering
+seals a slow drip" above: look inside the first 150 ticks or the shot
+misses it.
