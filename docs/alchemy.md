@@ -310,9 +310,10 @@ Brine + Lava  -> Steam + Lava     40
 Brine + Lava  -> Sealt + Lava    120
 ```
 
-The first road in the world that runs both ways. Salt goes into water
-and heat takes it back out, and neither end of it is a dead end: what
-comes out is what went in. `test_salt_goes_into_water_and_heat_brings_it_back`
+A road that runs both ways. Salt goes into water and heat takes it back
+out, and neither end of it is a dead end: what comes out is what went
+in, and the pool between them is a material of its own that the world
+did not have. `test_salt_goes_into_water_and_heat_brings_it_back`
 walks it in both directions in one sandbox — 168 cells of salt into 168
 of water leaves 262 of brine, and a flame banded into that brine brings
 the salt back.
@@ -361,10 +362,11 @@ Nitre + Fire -> Fire + Fire  200
 ```
 
 A flame reaching brimstone does not get a flame back. It gets the fume,
-and the fume is the fuel, so a bed of brimstone lights from the top down
-through a yellow cloud that rises off it and poisons what it touches on
-the way. Nitre is no fuel at all and still feeds the fire, which is what
-an oxidiser is.
+and the fume is the fuel, so a bed of brimstone burns through a yellow
+cloud that rises off it and poisons what it touches on the way.
+`test_brimstone_burns_by_way_of_its_reek` lights one end of a bed and
+requires the reek before anything else. Nitre is no fuel at all and
+still feeds a fire, which is what an oxidiser is.
 
 ### Lye, and the acid it answers
 
@@ -373,10 +375,9 @@ Ash  + Water -> Leag  + Leag     35
 Leag + Acid  -> Smylt + Smylt   200
 ```
 
-Ash left standing in water is lye, so the world makes lye wherever
-something burnt has fallen in a pool: it is the first material here
-that the world can make without a hand in it. Lye and acid put each
-other out and leave `Smylt`, which is the second road to the calm
+Ash left standing in water is lye, so lye turns up wherever something
+burnt has fallen in a pool and nobody has to pour it. Lye and acid put
+each other out and leave `Smylt`, which is the second road to the calm
 liquid and the first that has nothing to do with poison.
 
 Nothing seals this one. `Smylt` at 1.05 is lighter than lye at 1.1 and
@@ -392,10 +393,11 @@ Cwicseolfor + Gold -> Gemang + Gemang   150
 Gemang      + Fire -> Gold   + Fire      40
 ```
 
-Gold is a solid, and a solid stays in the wall it is in: nothing in the
-world could move it. Quicksilver can. It takes gold up into an amalgam
-along the line where the two meet, and fire drives the quicksilver back
-off and leaves the gold standing wherever the flame reached.
+Gold is a solid, and a solid does not flow: it stays in the wall until
+something breaks it, and until now breaking it was the only way to move
+it at all. Quicksilver takes it up instead, into an amalgam along the
+line where the two meet, and fire drives the quicksilver back off and
+leaves the gold standing wherever the flame reached.
 
 The flame has to stand on the amalgam to do it, and a flame in the air
 rises away, so the way to work an amalgam is a film of oil on top of it
