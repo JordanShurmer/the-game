@@ -62,8 +62,8 @@ vec3 shade(Surf s)
     vec2 cinder_id;
     float cinder_d = ash_cinder(s.cell, cinder_id);
     float cinder_here = step(1.0 - ASH_CINDER_RATE, m_hash(cinder_id + 2.3));
-    float cinder_near = smoothstep(0.30, 0.0, cinder_d);
-    powder = mix(powder, ASH_CINDER, cinder_near*cinder_here);
+    float cinder_near = smoothstep(0.36, 0.0, cinder_d);
+    powder = mix(powder, ASH_CINDER, cinder_near*cinder_here*0.9);
 
     // The wrap-around diffuse: light bleeds around the terminator the
     // way it does through a heap of tiny scattering flakes, so the dark

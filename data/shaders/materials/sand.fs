@@ -28,7 +28,9 @@ const float SAND_GRAIN  = 1.05;  // the grains themselves, about one cell
 const float SAND_RIPPLE = 0.052; // the wind ripples, ten to thirty cells
 
 // The wind ripples: bands that stay put in world space and wander a
-// little along their own length, the way a dune's ridges do.
+// little along their own length, the way a dune's ridges do. A touch of
+// the second harmonic makes the crest sharper than the trough, the way
+// a real ripple's windward and leeward faces differ.
 float sand_ripple(vec2 c)
 {
     vec2 p = c*SAND_RIPPLE;
@@ -37,8 +39,9 @@ float sand_ripple(vec2 c)
     vec2 across = vec2(-axis.y, axis.x);
     float along = dot(p, axis);
     float bow = dot(p, across);
-    float wander = m_fbm(vec2(bow*0.6, 0.0), 2)*2.6;
-    float ridge = sin((along + wander)*6.2831853);
+    float wander = m_fbm(vec2(bow*0.5, 0.0), 2)*3.2;
+    float phase = (along + wander)*6.2831853;
+    float ridge = sin(phase) + 0.32*sin(phase*2.0 + 0.9);
     return ridge*0.5 + 0.5;
 }
 
@@ -54,16 +57,23 @@ vec3 sand_patch_color(vec2 c)
 
 vec3 shade(Surf s)
 {
-    // The wind-ripple relief bumps the normal a little: shallow, so it
-    // reads as a dune's rake of light and not as a bumpy clod.
+    // The wind-ripple relief bumps the normal a little, so a dune's
+    // crests catch the lamp and its troughs fall into their own soft
+    // shade even under a flat light.
     float e = 1.4;
     float h  = sand_ripple(s.cell);
     float hx = sand_ripple(s.cell + vec2(e, 0.0));
     float hy = sand_ripple(s.cell + vec2(0.0, e));
-    vec2 slope = vec2(h - hx, h - hy)*0.55;
+    vec2 slope = vec2(h - hx, h - hy)*0.85;
     vec3 n = normalize(vec3(s.n.xy + slope, s.n.z));
 
     vec3 body = sand_patch_color(s.cell);
+
+    // The ripple also tones the sand itself a shade paler on the crest
+    // and a shade darker in the trough, the way windblown grain sorts
+    // itself and catches dust in the lee. This is what keeps the bands
+    // reading even where the light itself is blown out.
+    body *= mix(0.90, 1.07, h);
 
     // A scatter of dark heavy-mineral grains, one cell or so, rare.
     vec3 gp = m_cells(s.cell*SAND_GRAIN*1.3 + 90.0);
@@ -73,7 +83,7 @@ vec3 shade(Surf s)
     // Fine grain texture at the size of a cell: a little brightness
     // jitter per grain so the body never looks like a flat wash.
     vec3 gr = m_cells(s.cell*SAND_GRAIN);
-    float jitter = (m_hash(gr.yz) - 0.5)*0.14;
+    float jitter = (m_hash(gr.yz) - 0.5)*0.10;
     body *= 1.0 + jitter;
 
     // Strong wrap diffuse: powder has no hard shadow line, light bleeds
@@ -87,14 +97,18 @@ vec3 shade(Surf s)
 
     vec3 lit = body*wrap*crown*shadow;
 
-    // The quartz glints: a sparse scatter of tiny, hard, near-white
-    // points where one grain in a thousand faces the lamp square on.
-    // Kept small and rare so it reads as a grain, not as a snow sparkle.
-    vec3 qp = m_cells(s.cell*SAND_GRAIN*2.2 + 5.0);
-    float near = smoothstep(0.10, 0.0, qp.x);
-    float pick = step(0.985, m_hash(qp.yz + 17.0));
+    // The quartz glints: a sparse scatter of whole grains, about a cell
+    // apart, that catch the lamp square on and burn hard, near-white.
+    // One grain in thirty is picked; of those, only the ones facing the
+    // lamp actually light up, so the scatter that shows is sparser
+    // still and never the same two grains at once from one light to the
+    // next disc.
+    vec3 qp = m_cells(s.cell*SAND_GRAIN + 5.0);
+    float spot = pow(clamp(1.0 - qp.x/0.55, 0.0, 1.0), 4.0);
+    float pick = step(0.965, m_hash(qp.yz + 17.0));
     float face = max(dot(n, s.l), 0.0);
-    float glint = near*pick*pow(face, 6.0)*shadow;
+    float glint = clamp(spot*pick*pow(face, 3.0)*1.6, 0.0, 1.0);
 
-    return m_dress(lit + SAND_GLINT*glint*0.9, s);
+    vec3 col = mix(lit, SAND_GLINT, glint);
+    return m_dress(col, s);
 }
