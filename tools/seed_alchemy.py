@@ -48,14 +48,21 @@ def build_room_1(cv):
 
 
 def build_room_2(cv):
-    """The mix: an Attor tap and a water tap side by side, so the two
-    streams touch as they fall and react the whole way down. The
-    sparks flash over the basin and Smylt pools under them."""
+    """The mix: a curtain of alternating Attor and water spouts along
+    the ceiling, raining down side by side into one wide basin, the
+    way room 4's field of drips does. Two streams meeting at a single
+    point make one saturated blob of light; a row of them makes a
+    field of sparks the width of the room."""
     r = Room(cv, 2)
-    r.tank(10, 6, 59, 28, "Attor", wall=3, hole_side="bottom", hole_lo=54, hole_hi=59)
-    r.tank(60, 6, 109, 28, "Water", wall=3, hole_side="bottom", hole_lo=60, hole_hi=65)
-    r.box(20, 90, 99, 119, BEDROCK)
-    r.box(24, 94, 95, 119, AIR)
+    r.box(4, 4, 115, 26, BEDROCK)
+    r.box(7, 7, 112, 23, "Attor")
+    for lx in range(7, 112, 4):
+        fill = "Attor" if (lx // 4) % 2 == 0 else "Water"
+        r.box(lx, 7, min(lx + 3, 111), 23, fill)
+    r.box(7, 24, 112, 26, AIR)
+
+    r.box(4, 90, 115, 119, BEDROCK)
+    r.box(8, 94, 111, 119, AIR)
     r.plinth(4, w=5, h=4)
 
 
