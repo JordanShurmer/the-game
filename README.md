@@ -49,7 +49,11 @@ ends.
 ### Look at the world
 
 `bin/shot` draws a rectangle of the world into a PNG with no window
-and no display. It is how to see what an edit did:
+and no display. It is how to see what an edit did. It paints every
+cell in the flat colour of its material: the material shaders run on
+the GPU, so only the window draws a cell of gold as metal or a cell of
+rock as stone. That is the right picture for terrain, which is judged
+by shape, and for the alchemy rooms, which are read by colour.
 
 ```sh
 make shot
@@ -57,15 +61,15 @@ make shot
 ./bin/shot walk=-600 out=shots/dark.png    # lit by the orb, and by what he left
 ```
 
-The water shader runs on the GPU, so only the window can show it. The
-game takes a shot of itself for that, and needs a display:
+For the shaders — the water among them — the game takes a shot of its
+own window instead, which needs a display:
 
 ```sh
 make game
 ./bin/the-game shot=shots/water.png frames=140 walk=-40
 ```
 
-The pictures in this README were drawn by those two commands and are
+The pictures in this README were drawn by these two commands and are
 kept in `docs/images/`. Shots themselves are not kept: `shots/` is
 scratch.
 
@@ -104,7 +108,7 @@ explosion that scatters matter by weight and gives off a bang of light
 as bright as his own orb while it lasts. `docs/pot.md` says how it
 flies, how it breaks, and what this phase leaves out.
 
-![A pot breaking: the blast opens a crater, decays into fire, and the debris it threw falls back](docs/images/blast.gif)
+![A pot breaking on the floor of the pond: the blast throws water and rock, and the debris falls back](docs/images/blast.gif)
 
 **The drudge.** A drudge patrols a stretch of the world, back and
 forth, and never gives up the walk to chase. Seen, he turns to face
@@ -138,7 +142,7 @@ fire gives it back, and a spell turns plain rock into a stone that
 answers water with light. `docs/alchemy.md` is the note, and the
 alchemy gallery is fourteen rooms of it running.
 
-![The alchemy gallery running: salt and water and the metals, a room to a reaction](docs/images/alchemy.gif)
+![The alchemy gallery running, drawn flat: salt and water and the metals, a room to a reaction](docs/images/alchemy.gif)
 
 Light and explosions are rows in that file too. An explosion is
 `Blast`: strong luminosity and an expulsive force, sitting in the
@@ -183,7 +187,7 @@ the author paints is what the wizard walks through. Borders between
 biomes stay hard cuts; inside one biome the lattice runs on unbroken,
 across region borders as well.
 
-![Coalmine terrain pulled back over several regions, the region borders drawn in orange and the caves running straight through them](docs/images/terrain.png)
+![Coalmine terrain pulled back over several regions, drawn flat, the region borders in orange and the caves running straight through them](docs/images/terrain.png)
 
 Which tile lands where is a Wang tiling. Every tile carries a color on
 each of its four sides. The lattice colors each of its edges from a
