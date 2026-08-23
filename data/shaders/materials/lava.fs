@@ -42,6 +42,20 @@ const float LAVA_CRACK_GLOW  = 1.9;    // how much further the colour is seen
 const float LAVA_SHIMMER_AMT = 0.09;
 const float LAVA_RELIEF      = 0.85;   // how hard the plates themselves bevel
 
+// The crust is cooled basalt, which is nearly black, and a nearly black
+// material collects almost the whole of the world's haze and comes out
+// grey. Grey crust kills the one contrast lava lives by: black plates
+// against a white hot crack. So the crust gives most of the haze back.
+// See docs/material_shaders.md, and `soot.fs`.
+const float LAVA_HAZE_EAT = 0.30;
+
+vec3 lava_dress_crust(vec3 col, Surf s)
+{
+    vec3 out_col = m_gloom(col, s.lux);
+    out_col += LAVA_HAZE_EAT*vec3(0.306, 0.251, 0.149)*s.lux*(1.0 - out_col);
+    return m_bloom(out_col, s.glow);
+}
+
 // The plates drift as one slow, wandering field shared by the whole
 // pool, so neighbouring plates keep their edges lined up while the
 // gaps between them breathe open and shut.
@@ -120,7 +134,7 @@ vec3 shade(Surf s)
 
     // Different fissures run at different temperatures, and none of
     // them sit still.
-    float crackTemp = mix(0.45, 1.0, m_hash(hit));
+    float crackTemp = mix(0.26, 1.05, m_hash(hit));
     float depthBump = clamp(s.depth*0.018, 0.0, 0.25);
     float flicker = (m_noise(s.cell*0.7 + seconds*1.1 + hit) - 0.5)*0.10;
 
@@ -148,7 +162,7 @@ vec3 shade(Surf s)
     float halo = 1.0 - smoothstep(hotHalf, visHalf*1.4, seam);
     rock = mix(rock, LAVA_CRUST_BAKE, halo*(1.0 - blend)*0.6);
 
-    vec3 col = mix(m_dress(rock, s), melt, blend);
+    vec3 col = mix(lava_dress_crust(rock, s), melt, blend);
 
     // The true edge of the body, where melt meets cold rock, is the
     // steepest temperature drop there is, and the brightest line of

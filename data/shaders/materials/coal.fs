@@ -31,16 +31,22 @@ const vec3 COAL_CRACK  = vec3(0.006, 0.006, 0.008); // the cleats themselves, tr
 const vec3 COAL_SHEEN  = vec3(0.520, 0.570, 0.640); // the wide, duller glass sheen of a facet turning toward the light
 const vec3 COAL_HILITE = vec3(0.800, 0.870, 1.000); // the hard glassy glint, a hair cool
 
-const float COAL_FACET     = 0.20; // the facets, four to five cells across
-const float COAL_TILT      = 1.35; // how hard a facet leans off the bevel
+const float COAL_FACET     = 0.38; // the facets, two to three cells across
+const float COAL_TILT      = 0.42; // how hard a facet leans off the bevel
 const float COAL_SEAM_IN   = 0.34; // where the gap between facets starts to show
 const float COAL_SEAM_OUT  = 0.52; // where it is fully sunk
 const float COAL_SHEEN_GLOSS = 24.0; // a whole facet's worth of glass, not a point
 const float COAL_GLOSS     = 130.0; // narrow and hard: the glint on top of the sheen
-const float COAL_SHEEN_STR  = 0.34;
-const float COAL_HILITE_STR = 1.7;
+const float COAL_SHEEN_STR  = 0.26;
+const float COAL_HILITE_STR = 0.95;
 const float COAL_FRES_POW  = 3.0;
-const float COAL_RIM_STR   = 0.60;
+const float COAL_RIM_STR   = 0.34;
+
+// How much of the world's haze coal gives back. Coal is dark enough to
+// collect nearly all of it and come out the colour of the air, the way
+// soot does; see the note at the end of `shade`, and `soot.fs`. It keeps
+// more than soot, because coal is glassy where soot is a sponge.
+const float COAL_HAZE_EAT  = 0.46;
 
 // One family of cleats: parallel cracks at `angle`, `spacing` cells
 // apart, `width` cells wide, walked off a straight line by `jitter` so
@@ -124,5 +130,14 @@ vec3 shade(Surf s)
     vec3 rim = COAL_HILITE*fres*s.edge*COAL_RIM_STR*(0.35 + 0.65*sheen_amt);
 
     vec3 col = mix(lit, COAL_CRACK, crack) + face + rim;
-    return m_dress(col, s);
+
+    // Coal, like soot, must not take the world's haze whole. The haze is
+    // `HAZE*lux*(1 - col)`, which is scaled by how dark the material
+    // already is, so the blackest materials collect the most of it and
+    // come out the colour of the air beside them. Coal is black, and
+    // black is the whole material, so it gives most of the haze back.
+    // See docs/material_shaders.md.
+    vec3 dressed = m_gloom(col, s.lux);
+    dressed += COAL_HAZE_EAT*vec3(0.306, 0.251, 0.149)*s.lux*(1.0 - dressed);
+    return m_bloom(dressed, s.glow);
 }
