@@ -68,8 +68,11 @@ load_biomes :: proc(
 	table.cells_per_pixel = 512
 	table.world_seed      = 1
 	table.off_map_biome   = BIOME_EMPTY
+	table.spawn_biome     = BIOME_EMPTY
+	table.spawn_region    = 1
 
 	off_map_name: string
+	spawn_name: string
 
 	next_tile := 0
 
@@ -109,6 +112,11 @@ load_biomes :: proc(
 		}
 		if (biome.generator == .Image) != (current_image != "") {
 			return .Image_Mismatch, current_line
+		}
+		switch biome.generator {
+		case .Wang:    if int(biome.variants) > WANG_MAX_VARIANTS do return .Bad_Value, current_line
+		case .Image:   if int(biome.variants) > IMAGE_MAX_VARIANTS do return .Bad_Value, current_line
+		case .Uniform: if biome.variants != 1 do return .Bad_Value, current_line
 		}
 		for b in biomes {
 			if b.key_color == biome.key_color {
@@ -199,6 +207,12 @@ load_biomes :: proc(
 				table.world_seed = v
 			case "biome_off_map":
 				off_map_name = value
+			case "spawn_biome":
+				spawn_name = value
+			case "spawn_region":
+				v, vok := strconv.parse_i64(value)
+				if !vok || v < 1 do return {}, .Bad_Value, line_index
+				table.spawn_region = i32(v)
 			}
 			continue
 		}
@@ -228,7 +242,7 @@ load_biomes :: proc(
 			current_prefix = value
 		case "variants":
 			v, vok := strconv.parse_i64(value)
-			if !vok || v < 1 || v > WANG_MAX_VARIANTS do return {}, .Bad_Value, line_index
+			if !vok || v < 1 || v > 255 do return {}, .Bad_Value, line_index
 			current.variants = u8(v)
 		case "image":
 			if value == "" do return {}, .Bad_Value, line_index
@@ -257,6 +271,13 @@ load_biomes :: proc(
 	}
 	if table.off_map_biome == BIOME_EMPTY {
 		return {}, .Unknown_Biome, 0
+	}
+	if spawn_name != "" {
+		idx, found := find_biome_index(table, spawn_name)
+		if !found {
+			return {}, .Unknown_Biome, 0
+		}
+		table.spawn_biome = Biome_Id(idx)
 	}
 
 	ok = true
@@ -304,7 +325,7 @@ test_load_biomes :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_test_tables(materials, biomes)
 
-	testing.expect(t, len(biomes.biomes) == 11, "expected 11 biomes")
+	testing.expect(t, len(biomes.biomes) == 13, "expected 13 biomes")
 	testing.expect(t, len(biomes.names) == len(biomes.biomes))
 	testing.expect(t, len(biomes.tile_prefixes) == len(biomes.biomes))
 	testing.expect(t, len(biomes.image_paths) == len(biomes.biomes))

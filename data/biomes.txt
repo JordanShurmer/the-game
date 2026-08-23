@@ -18,15 +18,18 @@ origin_pixel    = 8 8         # map pixel that holds world cell (0,0)
 cells_per_pixel = 512         # world cells along one edge of a region
 seed            = 20260818    # lays out the tile lattice; change it for another world
 biome_off_map   = Deep_Rock   # biome used outside the map image
+spawn_biome     = Homelands   # the wizard starts in this biome
+spawn_region    = 4           # the fourth of its regions, west to east
 
 # cells_per_pixel must be a whole number of tiles, or a biome border
 # would cut a tile in half. A tile is 512 cells, so that is a multiple
 # of 512, and at 512 a region is exactly one tile.
 
-# A biome fills its regions one of two ways.
+# A biome fills its regions one of three ways.
 #
 #   generator = uniform   the whole region is fill_0
 #   generator = wang      the region is a lattice of tiles from a set
+#   generator = image     the region is one whole painted picture
 #
 # A tile is a 512x512 PNG painted in material colors, one cell to one
 # world cell. A wang biome owns a whole set of them, named after the
@@ -49,6 +52,15 @@ biome_off_map   = Deep_Rock   # biome used outside the map image
 # generator = wang and tiles go together: either one on its own is a
 # hard error. fill_0 stays required, because a tile with no file yet
 # starts as a flat block of it.
+#
+# An image biome names a prefix the same way, and its pictures are
+#
+#   <image>_<variant>.png
+#
+# each one cells_per_pixel square. variants says how many there are,
+# and the world picks one per region off the world seed, so a biome
+# several regions long is several drawings of its set. One picture is
+# the ordinary case and the file is <image>_0.png.
 
 [Sky]
 color     = 0xFF87CEEB
@@ -98,14 +110,31 @@ color     = 0xFF6B6B6B
 generator = uniform
 fill_0    = Rock
 
+# The homelands: the surface strip the wizard starts on. Six regions of
+# field and cottage, drawn from a set of twelve pictures, and a seventh
+# region east of them that opens into the coal. See docs/homelands.md.
+
+[Homelands]
+color     = 0xFF7CB342
+generator = image
+image     = data/rooms/homelands    # data/rooms/homelands_0.png .. _11.png
+variants  = 12
+fill_0    = Dirt
+
+[Cavemouth]
+color     = 0xFF4A3B2A
+generator = image
+image     = data/rooms/cavemouth
+fill_0    = Dirt
+
 [Gallery]
 color     = 0xFF9B59B6
 generator = image
-image     = data/rooms/gallery.png
+image     = data/rooms/gallery
 fill_0    = Bedrock
 
 [Alchemy]
 color     = 0xFF4EC9C9
 generator = image
-image     = data/rooms/alchemy.png
+image     = data/rooms/alchemy
 fill_0    = Bedrock

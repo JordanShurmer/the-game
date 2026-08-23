@@ -1,10 +1,17 @@
 package game
 
+import "core:fmt"
+
 Biome_Generator :: enum u8 {
 	Uniform,
 	Wang,
 	Image,
 }
+
+// How many pictures one image biome may own. A picture is a whole
+// region, so the count is bounded by memory and not by a lattice: the
+// homelands are twelve.
+IMAGE_MAX_VARIANTS :: 16
 
 Biome_Id :: u8
 
@@ -32,12 +39,29 @@ Biome_Table :: struct {
 	origin_pixel_y:  i32,
 	world_seed:      u64,
 	off_map_biome:   Biome_Id,
+
+	// Where the wizard starts: the nth region of this biome, counted
+	// west to east along the row it lies on, one based. BIOME_EMPTY
+	// leaves the search to look for a cave mouth near the origin.
+	spawn_biome:     Biome_Id,
+	spawn_region:    i32,
 }
 
 biome_tile_count :: proc(table: Biome_Table) -> int {
 	total := 0
 	for b in table.biomes do total += wang_set_size(b)
 	return total
+}
+
+// An image biome names a prefix, not a file, exactly as a wang biome
+// does: its pictures are <prefix>_<variant>.png. A biome with one
+// picture is the ordinary case and its file is <prefix>_0.png.
+biome_image_path :: proc(table: Biome_Table, biome: Biome_Id, variant: int) -> string {
+	return image_path(table.image_paths[biome], variant)
+}
+
+image_path :: proc(prefix: string, variant: int) -> string {
+	return fmt.tprintf("%s_%d.png", prefix, variant)
 }
 
 biome_tile_path :: proc(table: Biome_Table, biome: Biome_Id, tile: Tile_Id) -> string {

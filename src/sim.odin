@@ -511,7 +511,7 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 
 	cpp := s.world.biomes.cells_per_pixel
 	ox := (0 - s.world.biomes.origin_pixel_x) * cpp
-	oy := (3 - s.world.biomes.origin_pixel_y) * cpp
+	oy := (4 - s.world.biomes.origin_pixel_y) * cpp  // row 4: coal, and no homeland over it
 	sim_open_sandbox(&s, 128, 128, ox, oy, 1, 0)
 
 	gold, _ := sim_material_index(&s, "Gold")

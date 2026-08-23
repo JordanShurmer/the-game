@@ -58,13 +58,28 @@ world_tile_at :: proc(world: World, b: Biome, wx, wy: i32) -> Tile_Id {
 	return wang_tile_at(world.seed, b, tile_slot(wx), tile_slot(wy))
 }
 
+// Which of an image biome's pictures a region draws. A wang biome picks
+// a variant per tile; an image biome picks one per region, off the same
+// hash, so a biome six regions long is six drawings out of the set and
+// another seed lays out another six.
+world_image_variant :: proc(world: World, b: Biome, region_x, region_y: i32) -> int {
+	if b.variants <= 1 do return 0
+	return int(wang_hash(world.seed, WANG_SALT_VARIANT, region_x, region_y) % u64(b.variants))
+}
+
+world_image_cells :: proc(world: World, id: Biome_Id, variant: int) -> []Cell {
+	cpp := world.biomes.cells_per_pixel
+	area := int(cpp) * int(cpp)
+	return world.images[id][variant * area:][:area]
+}
+
 world_cell_at :: proc(world: World, wx, wy: i32) -> Cell {
 	id := world_biome_at(world, wx, wy)
 	b := world.biomes.biomes[id]
 
 	if b.generator == .Image {
 		cpp := world.biomes.cells_per_pixel
-		img := world.images[id]
+		img := world_image_cells(world, id, world_image_variant(world, b, floor_div(wx, cpp), floor_div(wy, cpp)))
 		return world_pond_cell(world, wx, wy, img[int(region_offset(wy, cpp)) * int(cpp) + int(region_offset(wx, cpp))])
 	}
 
@@ -115,7 +130,7 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 					row[t] = tile_row[tile_offset(view.x + t * view.step)]
 				}
 			case .Image:
-				img := world.images[id]
+				img := world_image_cells(world, id, world_image_variant(world, b, region_x, floor_div(wy, cpp)))
 				img_row := img[int(region_offset(wy, cpp)) * int(cpp):][:cpp]
 				for t in tx ..< tx_end {
 					row[t] = img_row[region_offset(view.x + t * view.step, cpp)]
@@ -637,7 +652,9 @@ test_tile_edit_changes_only_its_own_biome :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-IMAGE_TEST_PNG :: "worldgen_image_biome.tmp.png"
+IMAGE_TEST_PREFIX :: "worldgen_image_biome.tmp"
+@(private = "file")
+IMAGE_TEST_PNG :: IMAGE_TEST_PREFIX + "_0.png"
 @(private = "file")
 IMAGE_TEST_TXT :: "worldgen_image_biome.tmp.txt"
 
@@ -669,7 +686,7 @@ make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, 
 		"[Map]\nbiome_off_map = Ground\norigin_pixel = 1 0\ncells_per_pixel = %d\n" +
 		"[Ground]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
 		"[Gallery]\ncolor = 0xFF000002\nfill_0 = Rock\ngenerator = image\nimage = %s\n",
-		TILE_SIZE, IMAGE_TEST_PNG,
+		TILE_SIZE, IMAGE_TEST_PREFIX,
 	)
 	if !testing.expect(t, os.write_entire_file(IMAGE_TEST_TXT, transmute([]byte)body) == nil, "write temp biomes.txt") {
 		delete(painted)

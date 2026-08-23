@@ -688,19 +688,27 @@ A hand painted region of rooms, one room per thing the sandbox does.
 
 ### `generator = image`
 
-A third biome generator. A biome names one PNG, and that PNG is the
-region, one pixel to one world cell, in material colors, the same way
-a tile is.
+A third biome generator. A biome names a prefix, and the PNGs under it
+are the region, one pixel to one world cell, in material colors, the
+same way a tile is. The files are `<prefix>_<variant>.png`, exactly as
+a wang set's are, and `variants` says how many there are.
 
 ```
 [Gallery]
 color     = 0xFF9B59B6
 generator = image
-image     = data/rooms/gallery.png
+image     = data/rooms/gallery      # data/rooms/gallery_0.png
 fill_0    = Bedrock
 ```
 
-The image must be `cells_per_pixel` square, which is 512. The loader
+A biome with more than one picture draws a different one in each of
+its regions: `world_image_variant` hashes the region and the world
+seed the same way `wang_tile_at` hashes a tile square, so a biome six
+regions long comes out as six drawings of its set and another seed
+lays out another six. The homelands are twelve pictures over six
+regions; see `docs/homelands.md`.
+
+Each image must be `cells_per_pixel` square, which is 512. The loader
 says so plainly when it is not. `generate` treats it like a uniform
 biome for the run limit, because the run cannot outlast the region
 either way, and reads the cell from the image instead of the fill.
@@ -761,7 +769,7 @@ with `struct` and `zlib`, a `--check` gate that holds the file on disk
 to the rules.
 
 ```sh
-tools/seed_gallery.py           # draws data/rooms/gallery.png
+tools/seed_gallery.py           # draws data/rooms/gallery_0.png
 tools/seed_gallery.py --check   # holds the file to the rules
 ```
 

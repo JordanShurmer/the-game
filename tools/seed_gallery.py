@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Paint the gallery: sixteen hand made rooms, one per thing the sandbox does.
 
-    tools/seed_gallery.py           # draws data/rooms/gallery.png
+    tools/seed_gallery.py           # draws data/rooms/gallery_0.png
     tools/seed_gallery.py --check   # holds the file on disk to the rules
 
 The gallery is one biome region, `generator = image`. Its picture is
@@ -39,7 +39,7 @@ file byte for byte every time it runs.
 
 from museum import GRID, INTERIOR, AIR, BEDROCK, Canvas, Room, door, shaft, run_cli
 
-OUT_PATH = "data/rooms/gallery.png"
+OUT_PATH = "data/rooms/gallery_0.png"
 
 # The entrance shaft, in the top edge of the whole image. It has to
 # reach at least 12 cells straight down from row 0: 4 to clear room

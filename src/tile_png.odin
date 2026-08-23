@@ -122,6 +122,9 @@ load_tile_set :: proc(
 	return set, {}, TILE_NONE
 }
 
+// An image biome owns `variants` pictures, one region square each, laid
+// end to end in one block so a biome is still one allocation and one
+// slice. `image_variant_cells` cuts a picture back out of it.
 load_image_set :: proc(
 	biomes: Biome_Table,
 	materials: Material_Table,
@@ -133,16 +136,20 @@ load_image_set :: proc(
 ) {
 	images = make([][]Cell, len(biomes.biomes), allocator)
 	size := biomes.cells_per_pixel
+	area := int(size) * int(size)
 
 	for b, i in biomes.biomes {
 		if b.generator != .Image do continue
 
-		cells := make([]Cell, int(size) * int(size), allocator)
-		r := load_tile_png(biomes.image_paths[i], materials, cells, size)
-		if r.err != .None {
-			delete(cells, allocator)
-			destroy_image_set(images, allocator)
-			return nil, r, Biome_Id(i)
+		cells := make([]Cell, area * int(b.variants), allocator)
+		for v in 0 ..< int(b.variants) {
+			path := biome_image_path(biomes, Biome_Id(i), v)
+			r := load_tile_png(path, materials, cells[v * area:][:area], size)
+			if r.err != .None {
+				delete(cells, allocator)
+				destroy_image_set(images, allocator)
+				return nil, r, Biome_Id(i)
+			}
 		}
 		images[i] = cells
 	}
@@ -320,13 +327,14 @@ test_load_image_set_refuses_the_wrong_size :: proc(t: ^testing.T) {
 		mipmaps = 1,
 		format  = .UNCOMPRESSED_R8G8B8A8,
 	}
-	path := "image_wrong_size.tmp.png"
+	prefix := "image_wrong_size.tmp"
+	path := image_path(prefix, 0)
 	defer os.remove(path)
 	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
 
 	table := Biome_Table {
-		biomes          = []Biome{{fill_0 = u16(rock), tile_base = TILE_NONE, generator = .Image, variants = 0}},
-		image_paths     = []string{path},
+		biomes          = []Biome{{fill_0 = u16(rock), tile_base = TILE_NONE, generator = .Image, variants = 1}},
+		image_paths     = []string{prefix},
 		cells_per_pixel = TILE_SIZE,
 	}
 
