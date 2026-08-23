@@ -718,16 +718,14 @@ one enum value, one loader field, one PNG reader that
 `load_tile_png` already almost is, and one branch in `world_cell_at`.
 
 The gallery goes at map pixel (8,3), which is world x 0 to 511 and y
--2560 to -2049. That is the region the wizard spawns above, and the
-entrance shaft goes in the top left of the image for a reason:
-`world_find_mouth` starts its search at world x 0 and grows outward,
-so a shaft near x 0 is the mouth it is most likely to find, and he
-starts on the roof of the museum beside its door.
+-2560 to -2049. The entrance shaft goes in the top left of the image,
+which is where `world_find_mouth` — the spawn rule the world had before
+there were homelands — would have been most likely to find it.
 
-He is not made to start there. A Coalmine mouth a few cells to the
-left of zero can win the search, and that is not a failure: the
-surface above the gallery is bedrock, which is a floor, so he walks or
-flies along it to the shaft. Step 8 shoots the picture and says where
+He no longer starts there. `[Map]` names the homelands as the spawn
+biome, so he starts six regions west of the gallery and reaches it by
+walking east past the pit and along the roof of the museum to its
+door. See `docs/homelands.md`. Step 8 shoots the picture and says where
 he actually lands.
 
 ### The rooms

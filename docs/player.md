@@ -375,15 +375,38 @@ could dig only the two directions he could walk, the hole opened
 beside him instead of out of him, and nothing on the screen said where
 the next hole would be until it was already there.
 
-## He spawns beside a hole, not in it
+## He spawns in a village, and beside a hole if there is none
 
-The starter map puts Sky in rows 0 to 2 and Coalmine in rows 3 to 6.
-With `origin_pixel = 8 8` and `cells_per_pixel = 512` the roof of the
-caves is world y -2560, and the sky above it is open air.
+The starter map puts Sky in rows 0 to 2 and the ground in rows 3 to 6.
+With `origin_pixel = 8 8` and `cells_per_pixel = 512` the surface is
+world y -2560, and the sky above it is open air.
 
 ```odin
 world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool)
 ```
+
+Where he starts is data, not code. `[Map]` in `data/biomes.txt` names
+a biome and which of its regions:
+
+```
+spawn_biome     = Homelands
+spawn_region    = 4
+```
+
+1. Count the regions of that biome west to east, row by row, and take
+   the fourth.
+2. Walk out from the middle of it — middle first, then one cell each
+   side, then two — looking for the first column with solid ground
+   under a clear body box. Out from the middle, so the yard the picture
+   keeps clear there is what he lands in, and a cottage he would
+   otherwise stand on the roof of moves him aside instead.
+3. Return that column, feet on the ground.
+
+`docs/homelands.md` says what he lands in and why the fourth.
+
+A map that names no `spawn_biome` — or one whose named region is solid
+all the way down — falls back to the rule the world had before there
+were homelands: **he spawns beside a hole, not in it**.
 
 1. Find the first map row a tiled biome owns. Its top edge is the
    surface.
@@ -398,9 +421,9 @@ world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool)
 the lip of the hole, and an 8 cell body placed there hangs half over
 the edge and falls in on the first tick.
 
-If nothing is found, the fallback stands him in the open sky above the
-first tiled region **and tests that place for solid** before using it.
-A repainted map must not spawn him inside rock.
+If nothing is found at all, the last fallback stands him in the open
+sky above the first tiled region **and tests that place for solid**
+before using it. A repainted map must not spawn him inside rock.
 
 ## A view the wizard is visible in
 

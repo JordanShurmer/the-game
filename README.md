@@ -75,8 +75,10 @@ scratch.
 
 ## Playing
 
-The window opens on the wizard, standing at the top of the world
-beside a hole into the caves.
+The window opens on the wizard, standing on the village green of the
+homelands: six regions of field and cottage along the surface, with a
+pond a short walk west of him and the mouth of the coal pit east of the
+last of them.
 
 | Key | Action |
 | --- | --- |
@@ -175,6 +177,7 @@ The authored data:
 | `data/biomes.txt` | The biomes: a key color, one fill material, and either a flat fill or a set of tiles |
 | `data/biome_map.png` | The world layout, one pixel a 512x512-cell region. The game writes a starter map if it is absent |
 | `data/tiles/` | The tile sets, one PNG a tile |
+| `data/rooms/` | The painted regions: the two galleries, and the twelve homelands and the cavemouth |
 | `data/sprites/wizard.png` | The player, one row an animation |
 | `data/sprites/drudge.png` | The drudge, the same way, with fewer rows: he only walks, stands, and throws |
 
@@ -223,6 +226,31 @@ A whole set is 32 pictures, which is not hand work, so
 every tile open. It reads the material and biome tables, so a new
 biome only needs `generator = wang` and a `tiles` prefix to be seeded,
 and `--check` holds the files on disk to the seam rule.
+
+### Painted regions
+
+A biome with `generator = image` is painted rather than generated: it
+names a prefix, and `<prefix>_<variant>.png` is a whole region, one
+pixel a world cell, in the material colors. `variants` says how many
+drawings the biome owns, and the world picks one per region off the
+same hash the tile lattice uses — so a biome one region long is one
+hand made room, and a biome six regions long is six drawings out of its
+set.
+
+That is what the **homelands** are: the surface the wizard starts on,
+six regions of field and cottage drawn from twelve pictures, with a
+seventh east of them where the ground climbs into a bluff and a mouth
+in its face drops into the coal. `[Map]` says where he starts —
+`spawn_biome = Homelands`, `spawn_region = 4` — so the walk east to the
+only way down is the longer half of the village.
+`tools/seed_homelands.py` draws the thirteen pictures and `--check`
+holds them to the two rules that matter: every picture's side edges
+agree, so two regions meet with no step, and the middle of every
+picture stays open, because that is where the wizard and his pond land.
+`docs/homelands.md` is the note.
+
+The two galleries are painted regions too, of one picture each; see
+`docs/physics.md` and `docs/alchemy.md`.
 
 ## The editors
 
@@ -294,7 +322,7 @@ cmd/shot/  the world as a PNG
 cmd/bench/ what a tick of the sandbox costs
 data/      the materials, the biomes, the biome map, the tiles, the sprites, the shaders
 docs/      the design notes and the toolchain
-tools/     the toolchain install, the tile seeder, and the wizard and drudge seeders
+tools/     the toolchain install, the tile and homelands seeders, and the wizard, drudge and gallery seeders
 ```
 
 | File | What it holds |
@@ -303,6 +331,7 @@ tools/     the toolchain install, the tile seeder, and the wizard and drudge see
 | `src/biome*.odin` | The biome table and the biome map |
 | `src/tile*.odin` | The tiles and their PNG files |
 | `src/wang.odin` | The tile lattice, the edge colors, the seam rule |
+| `src/homelands.odin` | The shape the world expects the village to have |
 | `src/editor.odin` | The world editor, model and window |
 | `src/tile_editor.odin` | The tile editor, model and window |
 | `src/player.odin` | The wizard: his body, his step, and where he starts |

@@ -44,11 +44,12 @@ holds the two paths to each other over the pond at three zooms.
 
 ## The pond is placed after the spawn is found
 
-`world_find_spawn` walks out from x=0 along the surface row looking for
-a **mouth**: ten cells of nothing, one under the other, which is a way
-down into the caves. Water is not solid, so a pond reads as a mouth,
-and a pond dug before the spawn is chosen can move the wizard to the
-edge of it.
+`world_find_spawn` puts him in the middle of the fourth homelands
+region, which `[Map]` names; see `docs/homelands.md`. Failing that it
+walks out from x=0 along the surface row looking for a **mouth**: ten
+cells of nothing, one under the other, which is a way down into the
+caves. Water is not solid, so a pond reads as a mouth, and a pond dug
+before the spawn is chosen can move the wizard to the edge of it.
 
 So the order in `sim_load` is: spawn first, then
 `pond_place(world, spawn_x, spawn_y)` puts the pond `POND_AWAY` (96)
