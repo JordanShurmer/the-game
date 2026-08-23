@@ -20,7 +20,7 @@
 #define M_ROLL 2.1
 
 const vec3 EMBER_BLACK = vec3(0.022, 0.015, 0.013); // the dead crust between the cracks
-const vec3 EMBER_ASH   = vec3(0.300, 0.290, 0.280); // pale ash, only on faces turned up
+const vec3 EMBER_ASH   = vec3(0.460, 0.440, 0.420); // pale ash, only on faces turned up
 const vec3 EMBER_SHEEN = vec3(0.340, 0.300, 0.280); // what little glassy sheen the crust has left
 
 const float EMBER_FACET = 0.20;  // the same facet size as cold coal
@@ -29,9 +29,9 @@ const float EMBER_SHEEN_GLOSS = 20.0;
 const float EMBER_SHEEN_STR   = 0.09; // dim: a dying crust, not a glassy one
 
 const float EMBER_ASH_SCALE = 0.16; // the ash gathers in patches, not a wash
-const float EMBER_ASH_LO = 0.36;
-const float EMBER_ASH_HI = 0.78;
-const float EMBER_ASH_STR = 0.55;
+const float EMBER_ASH_LO = 0.30;
+const float EMBER_ASH_HI = 0.62;
+const float EMBER_ASH_STR = 0.90;
 
 const vec3 EMBER_RED    = vec3(0.860, 0.095, 0.020); // the coolest a crack still shows
 const vec3 EMBER_ORANGE = vec3(1.000, 0.460, 0.050);
@@ -39,27 +39,66 @@ const vec3 EMBER_WHITE  = vec3(1.000, 0.920, 0.720); // the hottest, thinnest cr
 const float EMBER_HEAT_STR = 2.05;
 const float EMBER_THIN_MIN = 0.32; // a buried crack still glows, just banked down
 
-// One family of cracks, exactly as `coal_cleat`: parallel, walked off a
-// straight line, and gated so a crack fades and picks up again along its
-// own length. `id` comes back naming which stretch of the crack this
-// pixel falls in, so every stretch can flare on its own clock.
+// How far the plane is bent before a crack is measured, and how coarse
+// the bend is. This is what stops the two families reading as a lattice.
+const float EMBER_WARP = 26.0;
+const float EMBER_WARP_SCALE = 0.028;
+
+// How far past the crack the heat bleeds into the crust, as a multiple
+// of the crack's own width.
+const float EMBER_HALO_W = 7.0;
+const float EMBER_HALO_STR = 0.30;
+
+// A lump does not burn evenly. Some of it is dead crust and some of it
+// is blazing, in patches tens of cells across. Without this the cracks
+// cover the whole face at one strength and read as a net thrown over the
+// coal rather than as a coal that is alight.
+const float EMBER_REGION_SCALE = 0.020;
+const float EMBER_REGION_LO = 0.30;
+const float EMBER_REGION_HI = 0.74;
+const float EMBER_REGION_DEAD = 0.05;
+
+// One family of cracks.
+//
+// A straight family of parallel lines reads as a wireframe laid over the
+// coal, not as a coal that has split. Three things break it up. The
+// whole plane is warped by a slow noise before the line is measured, so
+// the family bends and the lines converge and part the way real cleats
+// do. The line then wobbles again along its own length. Last, a gate
+// breaks each line into stretches, so a crack runs, dies out, and picks
+// up again a few cells on.
+//
+// `id` comes back naming which stretch this pixel falls in, so every
+// stretch can flare on its own clock. `halo` comes back as the heat
+// bleeding into the crust either side of the crack, which is what stops
+// the glow reading as a drawn line.
 float ember_crack(vec2 c, float angle, float spacing, float width,
                    float jitter, float broken, float seed, float segment,
-                   out float id)
+                   out float id, out float halo)
 {
+    // Bend the whole family. This is the change that turns a lattice
+    // into a split.
+    vec2 warp = c + vec2(
+        m_fbm(c*EMBER_WARP_SCALE + seed, 3) - 0.5,
+        m_fbm(c*EMBER_WARP_SCALE + seed + 31.7, 3) - 0.5)*EMBER_WARP;
+
     vec2 dir = vec2(cos(angle), sin(angle));
     vec2 perp = vec2(-dir.y, dir.x);
-    float along = dot(c, dir);
-    float across = dot(c, perp);
+    float along = dot(warp, dir);
+    float across = dot(warp, perp);
 
-    float wobble = (m_noise(vec2(along*0.22, seed)) - 0.5)*jitter;
+    float wobble = (m_fbm(vec2(along*0.09, seed), 3) - 0.5)*jitter*spacing;
     float g = abs(fract((across + wobble)/spacing + 0.5) - 0.5)*spacing;
-    float line = 1.0 - smoothstep(width*0.35, width, g);
 
+    float line = 1.0 - smoothstep(width*0.35, width, g);
+    halo = 1.0 - smoothstep(width, width*EMBER_HALO_W, g);
+
+    // Break the line into stretches along its length.
     float gate = smoothstep(0.5 - broken*0.5, 0.5 + broken*0.5,
-                             m_fbm(vec2(along, across)*0.09 + seed*7.0, 2));
+                             m_fbm(vec2(along*0.16, across*0.05) + seed*7.0, 3));
 
     id = floor(along/segment) + seed*97.0;
+    halo *= gate;
     return line*gate;
 }
 
@@ -114,18 +153,30 @@ vec3 shade(Surf s)
     // The two cleat families, exactly as in cold coal, but read now as
     // the fire glowing up through the crust rather than a dark seam.
     float angle1 = 0.40;
-    float id1, id2b;
-    float c1 = ember_crack(s.cell, angle1, 11.0, 0.40, 0.9, 0.35, 1.3, 3.5, id1);
-    float c2 = ember_crack(s.cell, angle1 + 1.55, 7.5, 0.28, 0.6, 0.78, 5.7, 2.6, id2b)*0.75;
+    float id1, id2b, halo1, halo2;
+    float c1 = ember_crack(s.cell, angle1, 18.0, 0.55, 0.30, 0.94, 1.3, 3.5, id1, halo1);
+    float c2 = ember_crack(s.cell, angle1 + 1.55, 13.0, 0.38, 0.42, 0.97, 5.7, 2.6, id2b, halo2);
+    c2 *= 0.75;
+    halo2 *= 0.75;
 
     // A crack glows less the deeper it is buried under sound crust, but
     // even deep inside a lump it never quite goes out.
     float thin = mix(EMBER_THIN_MIN, 1.0, s.edge*0.6 + s.ao*0.4);
 
+    // Where this part of the lump has caught at all.
+    float region = smoothstep(EMBER_REGION_LO, EMBER_REGION_HI,
+                              m_fbm(s.cell*EMBER_REGION_SCALE, 4));
+    thin *= mix(EMBER_REGION_DEAD, 1.0, region);
+
     float heat1 = c1*ember_flicker(id1, 11.0)*thin;
     float heat2 = c2*ember_flicker(id2b, 47.0)*thin;
 
+    // The crust either side of a crack is hot too, and it is that bleed,
+    // not the crack itself, that says the whole lump is alight.
+    float bleed = (halo1*ember_flicker(id1, 11.0) + halo2*ember_flicker(id2b, 47.0))*thin;
+
     vec3 glow = ember_heat_color(heat1)*heat1 + ember_heat_color(heat2)*heat2*0.9;
+    glow += ember_heat_color(bleed*0.45)*bleed*EMBER_HALO_STR;
 
     // Added after `m_dress`, so the fire is the material's own light and
     // keeps burning even where nothing else in the cave is lit at all.
