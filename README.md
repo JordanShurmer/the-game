@@ -2,6 +2,8 @@
 
 A Noita-like game written in Odin from scratch.
 
+![The wizard at the pond, the orb on his staff the only light, and the crystals he left behind him](docs/images/hero.png)
+
 ## Vision
 
 Classical virtue and discovered narrative. Physics, chemistry, alchemy,
@@ -63,6 +65,10 @@ make game
 ./bin/the-game shot=shots/water.png frames=140 walk=-40
 ```
 
+The pictures in this README were drawn by those two commands and are
+kept in `docs/images/`. Shots themselves are not kept: `shots/` is
+scratch.
+
 ## Playing
 
 The window opens on the wizard, standing at the top of the world
@@ -98,6 +104,8 @@ explosion that scatters matter by weight and gives off a bang of light
 as bright as his own orb while it lasts. `docs/pot.md` says how it
 flies, how it breaks, and what this phase leaves out.
 
+![A pot breaking: the blast opens a crater, decays into fire, and the debris it threw falls back](docs/images/blast.gif)
+
 **The drudge.** A drudge patrols a stretch of the world, back and
 forth, and never gives up the walk to chase. Seen, he turns to face
 the wizard and lobs a pot of his own every four seconds, gentler and
@@ -114,6 +122,8 @@ and hangs where it fell, so the way he came stays lit behind him and
 everything he has not been is gloom. `docs/lighting.md` says how that
 is built and what it costs.
 
+![Walking left toward the pond, dropping a crystal of light every 21 cells](docs/images/walk.gif)
+
 **The pond.** A short walk to his left there is water, drawn by a
 shader: a rippling surface, depths that go dark and cold, and a net of
 caustics sliding over the bottom. A swarm of fireflies hangs over its
@@ -127,6 +137,8 @@ and coal make black powder in two steps, quicksilver takes gold up and
 fire gives it back, and a spell turns plain rock into a stone that
 answers water with light. `docs/alchemy.md` is the note, and the
 alchemy gallery is fourteen rooms of it running.
+
+![The alchemy gallery running: salt and water and the metals, a room to a reaction](docs/images/alchemy.gif)
 
 Light and explosions are rows in that file too. An explosion is
 `Blast`: strong luminosity and an expulsive force, sitting in the
@@ -170,6 +182,8 @@ of the set that owns it. One cell of a tile is one world cell, so what
 the author paints is what the wizard walks through. Borders between
 biomes stay hard cuts; inside one biome the lattice runs on unbroken,
 across region borders as well.
+
+![Coalmine terrain pulled back over several regions, the region borders drawn in orange and the caves running straight through them](docs/images/terrain.png)
 
 Which tile lands where is a Wang tiling. Every tile carries a color on
 each of its four sides. The lattice colors each of its edges from a
