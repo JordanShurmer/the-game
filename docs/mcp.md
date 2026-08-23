@@ -81,8 +81,9 @@ biome map a dot leaves a pixel alone as well, because a dot already
 means an empty pixel there.
 
 A biome glyph is the first letter of its name. Two biomes that start
-with the same letter would clash, so the later one falls back to its
-id: `Sky` keeps `S`, and `Sandcave` becomes `2`.
+with the same letter would clash, so the later one falls back to a
+digit, counted over the biomes that had to fall back: `Sky` keeps `S`,
+and `Sandcave` becomes `0`.
 
 ## The input queue
 

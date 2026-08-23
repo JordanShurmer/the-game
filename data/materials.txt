@@ -478,6 +478,108 @@ glyph       = ,
 crumbles_to = Ash
 
 # ------------------------------------------------------------
+# The homelands: what a village and its fields are made of. See
+# docs/homelands.md. Nothing here reacts on its own; the four organic
+# ones burn, so a fire in a wheat field runs, and the brick it stops
+# against does not.
+# ------------------------------------------------------------
+
+[Loam]
+# Tilled earth: the ploughed ridges of a field, darker and richer than
+# the dirt under them because it has been turned and manured.
+state       = Powder
+density     = 1.3
+fall_speed  = 2
+hardness    = 1
+flammability= 0
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF3F2A1A
+contact     =
+immersion   =
+tags        = Organic
+glyph       = l
+
+[Grass]
+# The green skin over the pasture. One cell thick where it is walked,
+# a few where it is not. It catches quickly and leaves the dirt bare.
+state       = Solid
+density     = 0.4
+fall_speed  = 0
+hardness    = 1
+flammability= 7
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF4F7A32
+contact     =
+immersion   =
+tags        = Fuel Organic
+glyph       = V
+burns_to    = Fire
+crumbles_to = Dirt
+
+[Wheat]
+# The standing crop. It is the most flammable thing in the world, so a
+# field is a fuse, and the fallow strips between the plots are what
+# stops it.
+state       = Solid
+density     = 0.3
+fall_speed  = 0
+hardness    = 1
+flammability= 9
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFD8B04A
+contact     =
+immersion   =
+tags        = Fuel Organic
+glyph       = Y
+burns_to    = Fire
+crumbles_to = Ash
+
+[Thatch]
+# A roof of reed and straw, bound and layered. It stands like timber
+# and burns like a crop, which is why a homeland roof is the thing that
+# goes first.
+state       = Solid
+density     = 0.5
+fall_speed  = 0
+hardness    = 2
+flammability= 8
+conductivity= 1
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFB58A3C
+contact     =
+immersion   =
+tags        = Fuel Organic
+glyph       = H
+burns_to    = Burning_Wood
+crumbles_to = Ash
+
+[Brick]
+# Fired clay, laid in courses. The walls of a homeland house: harder
+# than dirt and softer than rock, so a wall can be dug through and a
+# hillside cannot.
+state       = Solid
+density     = 1.9
+fall_speed  = 0
+hardness    = 6
+flammability= 0
+conductivity= 2
+toxicity    = 0
+lifetime    = -1
+color       = 0xFF9C4B32
+contact     =
+immersion   =
+tags        =
+glyph       = K
+crumbles_to = Gravel
+
+# ------------------------------------------------------------
 # The lights of the world. See docs/lighting.md, "Every light is a
 # material". Each one is a row here and nothing else: what it is made
 # of says how bright it burns, what colour it is, and how long it lasts.

@@ -478,7 +478,7 @@ rooms of a row, shafts down the ends.
 `tools/museum.py`: the canvas, the room, the doors, the shafts, the
 PNG reader and writer, and the three rules `--check` holds. Each
 gallery is then its own file with its own room table and nothing else.
-Moving that code must not move a pixel: `data/rooms/gallery.png` is
+Moving that code must not move a pixel: `data/rooms/gallery_0.png` is
 regenerated and has to come back byte for byte the same file.
 
 Rooms 1 to 6 are the first alchemy and rooms 7 to 14 are the second.

@@ -463,8 +463,70 @@ world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
 	return fx, fy, true
 }
 
+// The region the wizard starts in, when the map names one: the nth
+// region of the spawn biome, counted west to east along the row it
+// lies on. The homelands are six regions of one biome and he starts on
+// the fourth of them, so the walk east to the caves is the longer half
+// of the village.
+@(private = "file")
+world_find_spawn_region :: proc(world: World) -> (px, py: i32, found: bool) {
+	id := world.biomes.spawn_biome
+	if id == BIOME_EMPTY do return 0, 0, false
+
+	m := world.biome_map
+	seen := i32(0)
+	for y in 0 ..< m.height {
+		for x in 0 ..< m.width {
+			if biome_map_at(m, x, y) != id do continue
+			seen += 1
+			if seen == world.biomes.spawn_region do return x, y, true
+		}
+	}
+	return 0, 0, false
+}
+
+// The first standing place under the open sky in one column: the first
+// solid cell going down, if a body fits above it. A column that starts
+// buried has no standing place at all and is not one to search past,
+// because everything under it is inside the ground.
+@(private = "file")
+world_ground_in_column :: proc(t: Terrain, x, top, height: i32) -> (y: i32, found: bool) {
+	for cy in top ..< top + height {
+		if !player_solid_at(t, x, cy) do continue
+		if !player_body_clear(t, f32(x), f32(cy)) do return 0, false
+		return cy, true
+	}
+	return 0, false
+}
+
+// Out from the middle of the region, so the yard the picture keeps
+// clear in the middle is what he lands in, and a house he would
+// otherwise stand on the roof of moves him aside instead.
+@(private = "file")
+world_find_ground_in_region :: proc(t: Terrain, px, py: i32) -> (x, y: i32, found: bool) {
+	cpp := t.world.biomes.cells_per_pixel
+	left := (px - t.world.biomes.origin_pixel_x) * cpp
+	top := (py - t.world.biomes.origin_pixel_y) * cpp
+	middle := left + cpp / 2
+
+	for dist in i32(0) ..< cpp / 2 {
+		for side in ([2]i32{1, -1}) {
+			cx := middle + side * dist
+			if cy, ok := world_ground_in_column(t, cx, top, cpp); ok do return cx, cy, true
+			if dist == 0 do break
+		}
+	}
+	return 0, 0, false
+}
+
 world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	t := Terrain{world = world}
+
+	if px, py, region_found := world_find_spawn_region(world); region_found {
+		if gx, gy, ground_found := world_find_ground_in_region(t, px, py); ground_found {
+			return gx, gy, true
+		}
+	}
 
 	surface_row, row_found := world_find_surface_row(world)
 	if !row_found do return world_spawn_fallback(t)
@@ -1430,19 +1492,45 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 	testing.expect(t, player_solid_at(terrain, x, y), "the feet must be on solid ground")
 	testing.expect(t, player_body_clear(terrain, f32(x), f32(y)), "the whole body box must be clear")
 
-	surface_row, row_found := world_find_surface_row(s.world)
-	if !testing.expect(t, row_found) do return
-	cpp := s.world.biomes.cells_per_pixel
-	surface_y := (surface_row - s.world.biomes.origin_pixel_y) * cpp
-	testing.expectf(t, y == surface_y, "he must spawn on the surface row, got y=%d want %d", y, surface_y)
-
-	min_x := (0 - s.world.biomes.origin_pixel_x) * cpp
-	max_x := (s.world.biome_map.width - s.world.biomes.origin_pixel_x) * cpp - 1
-	mouth_x, mouth_found := world_find_mouth(terrain, surface_y, min_x, max_x)
-	if !testing.expect(t, mouth_found, "the shipped map must have a mouth into the caves") do return
+	// The map names the biome and the region he starts in, and the
+	// shipped map says the fourth of the homelands.
+	spawn_biome := s.world.biomes.spawn_biome
+	if !testing.expect(t, spawn_biome != BIOME_EMPTY, "the shipped map must name a spawn biome") do return
 	testing.expectf(
-		t, abs(x - mouth_x) < 200,
-		"the spawn must sit a sensible distance from the mouth it was found beside, got x=%d mouth=%d", x, mouth_x,
+		t, world_biome_at(s.world, x, y) == spawn_biome,
+		"he must stand in %s, and %d,%d is %s",
+		s.world.biomes.names[spawn_biome], x, y,
+		s.world.biomes.names[world_biome_at(s.world, x, y)],
+	)
+
+	cpp := s.world.biomes.cells_per_pixel
+	seen := i32(0)
+	region_x := i32(0)
+	for py in 0 ..< s.world.biome_map.height {
+		for px in 0 ..< s.world.biome_map.width {
+			if biome_map_at(s.world.biome_map, px, py) != spawn_biome do continue
+			seen += 1
+			if seen == s.world.biomes.spawn_region do region_x = px
+		}
+	}
+	testing.expectf(
+		t, seen == HOMELANDS_REGIONS,
+		"the homelands are %d regions long, and the map holds %d", HOMELANDS_REGIONS, seen,
+	)
+
+	left := (region_x - s.world.biomes.origin_pixel_x) * cpp
+	testing.expectf(
+		t, x >= left && x < left + cpp,
+		"he must stand in region %d, which is x %d to %d, and he is at %d",
+		s.world.biomes.spawn_region, left, left + cpp - 1, x,
+	)
+
+	// And in the middle of it, not at one end: the pond is dug 96 cells
+	// west of wherever he lands and it must land in the same region.
+	middle := left + cpp/2
+	testing.expectf(
+		t, abs(x - middle) < cpp/8,
+		"he must land near the middle of the region, at %d against %d", x, middle,
 	)
 }
 

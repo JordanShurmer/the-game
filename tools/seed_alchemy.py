@@ -3,7 +3,7 @@
 of each other, and then the salts, the metals and the two magics that
 came after, east of the physics gallery.
 
-    tools/seed_alchemy.py           # draws data/rooms/alchemy.png
+    tools/seed_alchemy.py           # draws data/rooms/alchemy_0.png
     tools/seed_alchemy.py --check   # holds the file on disk to the rules
 
 Same shape as tools/seed_gallery.py, sharing tools/museum.py: sixteen
@@ -28,7 +28,7 @@ runs.
 
 from museum import GRID, AIR, BEDROCK, Canvas, Room, door, shaft, run_cli
 
-OUT_PATH = "data/rooms/alchemy.png"
+OUT_PATH = "data/rooms/alchemy_0.png"
 
 # The entrance shaft, in the top edge of room 1, the same way the
 # physics gallery's is.

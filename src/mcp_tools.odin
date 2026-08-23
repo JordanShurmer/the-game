@@ -938,17 +938,29 @@ check_map_size :: proc(columns, rows: i32) -> (string, bool) {
 	), false
 }
 
+// A biome glyph is the first letter of its name. A name whose letter an
+// earlier biome already took falls back to a digit, counted over the
+// biomes that had to fall back rather than over the whole table, so
+// the eleventh biome and the thirteenth do not both land on '?'.
 biome_glyph :: proc(s: ^Sim, id: Biome_Id) -> u8 {
 	names := s.world.biomes.names
 	if int(id) >= len(names) || len(names[id]) == 0 do return '?'
 
-	wanted := upper_byte(names[id][0])
-	for i in 0 ..< int(id) {
-		if len(names[i]) > 0 && upper_byte(names[i][0]) == wanted {
-			return int(id) < 10 ? byte('0') + byte(id) : '?'
+	letter_taken :: proc(names: []string, id: int) -> bool {
+		wanted := upper_byte(names[id][0])
+		for i in 0 ..< id {
+			if len(names[i]) > 0 && upper_byte(names[i][0]) == wanted do return true
 		}
+		return false
 	}
-	return wanted
+
+	if !letter_taken(names, int(id)) do return upper_byte(names[id][0])
+
+	nth := 0
+	for i in 0 ..< int(id) {
+		if len(names[i]) > 0 && letter_taken(names, i) do nth += 1
+	}
+	return nth < 10 ? byte('0') + byte(nth) : '?'
 }
 
 biome_by_glyph :: proc(s: ^Sim, glyph: u8) -> (Biome_Id, bool) {
