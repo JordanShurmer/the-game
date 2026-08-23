@@ -31,15 +31,25 @@
 const vec3 OBS_F0 = vec3(0.052, 0.048, 0.062);
 const vec3 OBS_WHITE = vec3(0.99, 0.99, 1.0);    // the mirror it becomes at grazing angle
 
-const float OBS_SHELL = 0.145;    // scale of the conchoidal shells, about 7 cells across
-const float OBS_SHELL2 = 0.048;   // a second, larger family, about 21 cells
-const float OBS_RELIEF = 15.0;    // how steeply a shell rolls over near its rim
+// Glass breaks in broad, smooth, curved shells, and a broad shell is
+// the point: small ones read as a field of bubbles, not as fracture.
+const float OBS_SHELL = 0.052;    // the conchoidal shells, about 19 cells across
+const float OBS_SHELL2 = 0.019;   // a second, larger family, about 53 cells
+const float OBS_RELIEF = 10.0;    // how steeply a shell rolls over near its rim
 const float OBS_FACET = 0.78;     // fine glassy imperfection, a cell or two — never sub-cell
-const float OBS_FACET_RELIEF = 1.8;
+const float OBS_FACET_RELIEF = 0.65;
 const float OBS_ROUGH = 0.045;    // a very tight, hard, glassy speculum
 const float OBS_FRESNEL_POWER = 3.0;
 
 const vec3 OBS_GLOW = vec3(0.70, 0.22, 0.09);   // warm brown-red, the body lit from within
+
+// Obsidian reflects about a twentieth of what falls on it head on,
+// which makes it the darkest material in the world and the one that
+// collects the most of the world's haze. Dressed whole it comes out
+// grey, and grey glass is not glass: the fresnel swing from near black
+// to near white is the entire material, and haze flattens it. So it
+// gives back nearly all of the haze. See docs/material_shaders.md.
+const float OBS_HAZE_EAT = 0.16;
 
 // One conchoidal shell: the smooth dome of a curved fracture, built from
 // the distance to the nearest of a scatter of shell centres. `m_cells`
@@ -51,7 +61,7 @@ const vec3 OBS_GLOW = vec3(0.70, 0.22, 0.09);   // warm brown-red, the body lit 
 float obs_shell(vec2 p, float scale)
 {
     vec3 c = m_cells(p*scale);
-    float d = 1.0 - smoothstep(0.0, 0.62, c.x);
+    float d = 1.0 - smoothstep(0.0, 0.64, c.x);
     return d*d;
 }
 
@@ -137,20 +147,33 @@ vec3 shade(Surf s)
     // from it, because a mirror shows whatever it is turned toward. The
     // mirror colour itself already carries the fresnel swing, so the
     // rims of every shell go bright and the flat crowns stay near-black.
+    // A shell that turns toward the lit half of the cave shows it, and
+    // a shell turned away shows the dark half. In a flat world there is
+    // no room to reflect, so the swing is drawn from the shell normal
+    // against the light instead — but it has to be a hard swing. Shade
+    // it gently and the glass goes dead black and stops reading as
+    // glass at all; this sweep across the shells is what says the
+    // surface is polished rather than merely dark.
     float toward = dot(n, s.l)*0.5 + 0.5;
+    float sweep = pow(toward, 2.4);
     float sky = mix(0.35, 1.0, s.ao);
-    vec3 env = mirror*mix(0.15, 1.0, pow(toward, 1.6))*sky;
+    vec3 env = mix(mirror*0.10, mix(mirror, OBS_WHITE, 0.45), sweep)*sky;
 
     // The rolled edge of a fractured lump goes wide and pale, the way a
     // shard of glass catches the light along its broken lip.
     vec3 edgeGlow = OBS_WHITE*pow(1.0 - ndv, 3.0)*0.30*s.edge;
 
-    // Deep inside the body, thin obsidian passes a little light: a
-    // faint warm brown-red glow, strongest where the glass is buried
-    // and the surface faces the viewer square on (thickest path out).
-    float inner = s.bury*(1.0 - rim)*0.5;
-    vec3 glow = OBS_GLOW*inner*0.38;
+    // Deep inside the body, thin obsidian passes a little of the light
+    // that already falls on it: a faint warm brown-red glow, strongest
+    // where the glass is buried and faces the viewer square on (the
+    // thickest path out) and gone wherever nothing lights the cell —
+    // it is transmitted light, not light the glass makes for itself.
+    float inner = s.bury*(1.0 - rim);
+    vec3 glow = OBS_GLOW*inner*inner*0.10*s.lux;
 
     vec3 col = lamp + env + edgeGlow + glow;
-    return m_dress(col, s);
+
+    vec3 dressed = m_gloom(col, s.lux);
+    dressed += OBS_HAZE_EAT*vec3(0.306, 0.251, 0.149)*s.lux*(1.0 - dressed);
+    return m_bloom(dressed, s.glow);
 }
