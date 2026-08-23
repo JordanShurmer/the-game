@@ -127,10 +127,41 @@ of the whole world.
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
 | `cmd/bench/` | what a tick costs, on a real region |
+| `data/rooms/` | the painted regions: the galleries, the homelands, the cavemouth |
 | `data/shaders/materials/` | one shader a material, and the prelude they share |
 | `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
 | `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, and the gallery seeders |
+
+## The homelands
+
+`docs/homelands.md` is the design note: the six surface regions the
+wizard starts on, the twelve pictures they are drawn from, the mouth
+east of them, and where he is put. Read it before changing
+`tools/seed_homelands.py`, `src/homelands.odin`, or the `[Homelands]`
+and `[Cavemouth]` rows of `data/biomes.txt`.
+
+The village is data, not code. It is a `generator = image` biome, and
+an image biome names a **prefix**: its pictures are
+`<image>_<variant>.png`, the way a wang set's tiles are. `variants`
+says how many, and the world picks one per region off the world seed.
+
+```sh
+tools/seed_homelands.py           # draw the twelve and the cavemouth
+tools/seed_homelands.py --check   # hold the files to the two rules
+```
+
+Two rules there are easy to break and only visible in a shot of the
+whole strip, and `--check` holds the files to both:
+
+- **The side edges of every picture must agree.** Two homelands
+  regions sit side by side and nothing blends them, so every picture
+  draws its outermost 10 columns identically and the seeder stamps
+  them last, the way `seed_tiles.py` stamps a wang band last.
+- **The village green stays open.** The wizard lands in the middle of
+  the fourth region and `pond_place` digs the pond 96 cells west of
+  him. Which picture that region draws depends on the seed, so *every*
+  picture has to be one that can take a pond and a wizard.
 
 ## The player
 

@@ -1,0 +1,214 @@
+# The homelands
+
+The wizard starts in a village. Six regions of field and cottage lie
+west to east along the surface row of the world, with the sky over
+them and the coal under them, and east of the last of them the ground
+climbs into a bluff with a mouth in its face. That mouth is the way
+down, and everything the rest of the game is about is on the other
+side of it.
+
+This note says how the six regions are laid out, how twelve pictures
+become six of them, where the wizard is put and why there, and the two
+rules the pictures may not break.
+
+## Six regions, twelve pictures
+
+The homelands are a `generator = image` biome, the same generator the
+two galleries use. An image biome names a **prefix**, and the pictures
+under it are `<prefix>_<variant>.png`, exactly the way a wang biome's
+tiles are `<prefix>_<NESW>_<variant>.png`:
+
+```
+[Homelands]
+color     = 0xFF7CB342
+generator = image
+image     = data/rooms/homelands    # data/rooms/homelands_0.png .. _11.png
+variants  = 12
+fill_0    = Dirt
+```
+
+`variants` used to belong to the wang generator alone. It now says the
+same thing for both: how many drawings a biome owns. A wang biome
+picks one per tile square; an image biome picks one per region, and
+`world_image_variant` picks it off the world seed with the same hash
+`wang_tile_at` uses, so:
+
+- the six regions of the shipped map draw six of the twelve pictures;
+- another `seed` in `[Map]` draws another six;
+- and the same seed always gives the same village, so a shot of it is
+  a shot of what the player sees.
+
+`test_the_homelands_regions_are_not_all_the_same_picture` holds both
+ends of that: the six must not collapse to two or three, and every one
+of the twelve must be able to come up at all — a picture no lattice
+position can reach is a picture drawn for nothing.
+
+The pictures are one allocation: `load_image_set` reads the whole set
+into one block of cells per biome and `world_image_cells` cuts a
+picture back out of it. A gallery is a set of one and reads through
+the same path.
+
+## Where the wizard starts
+
+`[Map]` says it, rather than the code:
+
+```
+spawn_biome     = Homelands   # the wizard starts in this biome
+spawn_region    = 4           # the fourth of its regions, west to east
+```
+
+`world_find_spawn` finds the fourth region of that biome, counting west
+to east along the row it lies on, and then walks out from the middle of
+it looking for the first place a body fits over solid ground. Out from
+the middle, not in from one side, so the yard the picture keeps clear
+in the middle is what he lands in and a cottage he would otherwise
+stand on the roof of moves him aside instead.
+
+The fourth of six, so the walk east to the mouth is the longer half of
+the village: he passes two thirds of the fields on the way to the only
+way down.
+
+A map that names no `spawn_biome` falls back to what the world did
+before there were homelands: walk out from x=0 along the surface row
+looking for ten cells of nothing, one under the other, and stand
+beside it. That path is still tested, and it is what a hand made map
+with no village gets.
+
+## The two rules a picture may not break
+
+Both are held by `tools/seed_homelands.py --check`, which reads the
+files back off disk, and both are only ever visible in a shot of the
+whole strip.
+
+**The side edges of every picture must agree.** Two homelands regions
+sit side by side and the world does not blend them, so column 511 of
+one is the neighbour of column 0 of the next. Every picture therefore
+draws its outermost `EDGE` (10) columns identically: level ground at
+`EDGE_GROUND`, the grass on it, and the strata under it. The seeder
+stamps those columns last, after everything else is drawn, exactly the
+way `tools/seed_tiles.py` stamps a wang tile's bands last — so a field
+that runs into the border simply ends in a headland, and no picture
+has to be drawn around the rule.
+
+**The village green stays open.** The wizard lands in the middle of the
+fourth region, and `pond_place` digs the pond `POND_AWAY` (96) cells
+west of wherever he lands. Which of the twelve pictures the fourth
+region draws depends on the seed, so *every* picture has to be the one
+that can take a pond and a wizard:
+
+| Span | What may be there |
+| --- | --- |
+| `GREEN_X0`..`GREEN_X1` | no Brick, no Thatch, no Wheat: no building and no crop |
+| the pond band | soil, grass and the gravel track, and nothing else |
+| the yard | the same, so there is always somewhere to stand |
+
+That is why the middle of every picture is pasture with a track across
+it. It is not an oversight; it is the pond.
+
+## The strata, and why nothing under the fields is hollow
+
+The homelands sit on deep earth: topsoil, subsoil with stones turned up
+in it, a band of gravel, and the rock that roofs the coalmine in the
+region below. Nothing in a homelands picture is hollow except a well
+shaft, and there is no way down through a field.
+
+That is deliberate. If the fields were cave underneath, the mouth east
+of them would be one way down among many and the walk to it would be
+pointless. `stratum_at` is shared by the drawing and by the gate, so
+the strata a picture holds and the strata its edge columns hold can
+never drift apart.
+
+## The cavemouth
+
+One region, one picture, immediately east of the last homeland.
+`test_the_caves_open_east_of_the_last_homeland` holds all of it:
+
+- the pixel east of the last homeland is the cavemouth, and
+- an open way runs from the last field, in through the mouth, and out
+  of the bottom of the region into the coal under it.
+
+The picture's west edge holds the same profile every homeland does, so
+the last field runs straight into it. From there the ground climbs the
+whole height of the region — at the east edge it stands at the very top
+of the picture, which is exactly where the Coalmine region beside it
+starts, so the two meet with no step. It does not climb as a slope: it
+starts as a scarp `FACE` cells high, because a mouth needs a face to
+open in and a slope has none.
+
+The passage behind the mouth goes in level at the height of the fields,
+then back and down under the hill, widening the whole way into a cavern
+that is open along the whole bottom edge of the region. Open along the
+whole edge, because the Coalmine tile under it is whichever one the
+lattice lays there, and half of any of them is solid.
+
+## What the village is made of
+
+Five materials came with it, and not a line of Odin came with them:
+
+| Material | What it is | How it burns |
+| --- | --- | --- |
+| `Loam` | tilled earth, the ridges of a field | not at all |
+| `Grass` | the skin over the pasture | catches quickly, leaves bare Dirt |
+| `Wheat` | the standing crop | the most flammable thing in the world |
+| `Thatch` | a roof of reed and straw | stands like timber, burns like a crop |
+| `Brick` | fired clay, the walls of a house | not at all |
+
+So a homeland burns from the crop up, and the brick is what a fire
+stops against. The fallow strips between the plots are the firebreak,
+and they are there for that reason as much as for the look of them.
+
+Each brings a shader, in `data/shaders/materials/`. Two of them lean on
+something the prelude already hands every shader and neither needed a
+new field for it:
+
+- `wheat.fs` reads `s.depth` — how many cells of the same material
+  stand over this one — to know where the ear of a stalk is. Under
+  `WHEAT_EAR` cells of depth it draws grain and awns; below that it
+  draws straw. One row in `data/materials.txt` is the whole crop.
+- `thatch.fs` reads `s.n` to know which way the roof slopes, and lays
+  its courses across that. So the near slope, the far slope and a rick
+  standing in a field all come out right, and the file knows about none
+  of them.
+
+## Drawing them
+
+```sh
+tools/seed_homelands.py           # draws the twelve and the cavemouth
+tools/seed_homelands.py --check   # holds the files on disk to the rules
+```
+
+Then look at them. `bin/shot` draws the authored world through the same
+path the game window draws through, and `light=0` draws it flat, which
+is what terrain is judged by:
+
+```sh
+./bin/shot x=-2560 y=-2560 w=512 h=340 light=0 scale=1 out=shots/home.png
+./bin/shot x=-4096 y=-2620 w=896 h=300 step=4 light=0 out=shots/strip.png
+./bin/shot x=-1152 y=-2620 w=768 h=500 light=0 scale=1 out=shots/mouth.png
+./bin/shot player=1 out=shots/wizard.png
+```
+
+The material shaders need a GPU, so `bin/shot` cannot draw them. The
+bench is what a shader is judged by:
+
+```sh
+xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game look=Wheat shot=shots/wheat.png frames=25
+```
+
+## What this phase leaves out
+
+- **There is no daylight.** The surface is as dark as a cave, because
+  the only light in the world is the one the wizard carries and the
+  ones the world places. A village under an open sky wants a sky light,
+  and `docs/lighting.md` already says what it would take: a light is a
+  material, and nothing about the flood is tied to a point source.
+  Until then the homelands are judged flat, with `light=0`.
+- **Nobody lives there.** The cottages are empty and the fields are
+  untended. The drudge is the only other body in the world and he is
+  placed underground.
+- **The pond is in the village by accident of the spawn rule**, not
+  because a village was drawn around a pond. It lands 96 cells west of
+  the wizard wherever he stands, which is why every picture has to keep
+  that band clear rather than one picture having a pond drawn into it.
+- **Nothing grows and nothing is harvested.** Wheat is a material that
+  stands there and burns. There is no season and no yield.
