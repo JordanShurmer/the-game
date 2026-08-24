@@ -76,7 +76,15 @@ MOUTH_PATH = "data/rooms/cavemouth_0.png"
 
 EDGE = 10  # columns at each side drawn the same in every picture
 EDGE_GROUND = 168  # the row the grass starts on, at both side edges
-ROLL = 13  # how far the height field wanders either side of that
+ROLL = 13  # how far the fine height field wanders either side of that
+SWELL = 26  # how far the long, slow ground swell adds on top of that, out
+            # in the plot spans -- it is held at zero across the green,
+            # below, so the pond and the swarm over it keep the ground
+            # they always stood on
+GREEN_FADE = 70  # how gently the swell fades in from the edge of the green
+GREEN_SALT = 0x6E7E5F31  # keys the green's own dice, apart from the plots'
+SWELL_SALT = 0x51E11B0D  # keys the swell's own dice, apart from everything else
+PLOT_SALT = 0x2F8C6A19  # keys the plots' own dice, apart from the ground's
 SKIN = 3  # cells of Grass over the dirt
 
 # The village green: no cottage and no crop stands between these two,
@@ -117,6 +125,8 @@ BLUFF_X0 = 190
 FACE = 78  # the scarp at the foot of it, over the level of the fields
 
 # ------------------------------------------------------------ the buildings
+
+WELL_DEPTH = 40  # cells of dry shaft under the coping of a well
 
 WALL = 5  # cells the brick wall of a cottage is thick
 FOOTING = 4  # cells of rock under the wall
@@ -200,6 +210,7 @@ class Land:
     column of it."""
 
     def __init__(self, seed):
+        self.seed = seed
         self.rng = Rng(seed)
         self.cells = [[AIR] * IMG for _ in range(IMG)]
         self.top = [EDGE_GROUND] * IMG
@@ -280,11 +291,34 @@ def stamp_edges(land, sides="both"):
         land.top[x] = EDGE_GROUND
 
 
+def swell_hold(x):
+    """Zero across the village green, where the ground must stay at the
+    height it has always stood -- the pond is dug and the firefly swarm
+    hung from the ground line there -- fading up to full strength out
+    where the plots are, so there is no step at the edge of the green."""
+    if GREEN_X0 <= x <= GREEN_X1:
+        return 0.0
+    d = (GREEN_X0 - x) if x < GREEN_X0 else (x - GREEN_X1)
+    return min(1.0, d / GREEN_FADE)
+
+
 def lay_ground(land):
-    """The soil: a rolling grass line, faded flat before it reaches the
-    side edges so two regions meet without a step."""
+    """The soil: a rolling grass line -- a long slow swell of banks and
+    hollows out in the plot spans, with a finer roll on top of it that
+    runs everywhere including the green -- faded flat before it reaches
+    the side edges so two regions meet without a step."""
+    # roll and fine are drawn from the picture's own stream, in the same
+    # order and count the ground always drew them in, so every random
+    # choice downstream of them -- the stones in the soil, where the
+    # plots fall, the roll of a hedge or a chimney -- is exactly what it
+    # always was. swell is drawn from a stream of its own instead: it is
+    # a later addition, and if it drew from land.rng its extra draws
+    # would still shift everything after it even though it is held at
+    # zero over the green -- the green would be level, but nothing past
+    # it would be the picture it always was.
     roll = smooth_field(land.rng, IMG, 84, ROLL)
     fine = smooth_field(land.rng, IMG, 23, 2.2)
+    swell = smooth_field(Rng(land.seed ^ SWELL_SALT), IMG, 190, SWELL)
 
     for x in range(IMG):
         # Fade to the shared edge level over the last FADE columns, so
@@ -292,7 +326,8 @@ def lay_ground(land):
         FADE = 56
         near = min(x, IMG - 1 - x)
         hold = 0.0 if near < EDGE else min(1.0, (near - EDGE) / FADE)
-        land.top[x] = int(round(EDGE_GROUND + (roll[x] + fine[x]) * hold))
+        swell_amt = swell[x] * swell_hold(x)
+        land.top[x] = int(round(EDGE_GROUND + (swell_amt + roll[x] + fine[x]) * hold))
 
     for x in range(IMG):
         top = land.top[x]
@@ -304,21 +339,35 @@ def lay_ground(land):
 
 
 def scatter_soil(land):
-    """What is in the ground under a field: stones, and lenses of gravel
-    where the soil gives way to the coal under the region."""
+    """What is in the ground under a field: flecks of stone in the
+    topsoil where the eye actually reaches, stones turned up deeper,
+    and lenses of gravel where the soil gives way to the coal under
+    the region."""
     rng = land.rng
-    # Stones turned up in the subsoil, more of them the deeper it goes.
-    for _ in range(44):
+    # Right under the grass, where the top of the picture actually
+    # shows: fine flecks of stone and darker earth, not a blank fill.
+    for _ in range(70):
+        cx = rng.between(EDGE + 4, IMG - EDGE - 5)
+        depth = rng.between(4, 80)
+        cy = land.ground(cx) + SKIN + depth
+        blob(land, cx, cy, rng.between(1, 3), ROCK if rng.chance(0.6) else DIRT)
+
+    # Stones turned up in the subsoil, more of them the deeper it goes,
+    # laid in loose horizontal bands rather than scattered evenly, so
+    # the strata read as layers.
+    for _ in range(46):
+        band = rng.between(0, 2)
+        cy = rng.between(STONE_TOP + band * 34, STONE_TOP + band * 34 + 30)
         cx = rng.between(EDGE + 12, IMG - EDGE - 13)
-        cy = rng.between(STONE_TOP, GRAVEL_TOP)
-        blob(land, cx, cy, rng.between(3, 8), ROCK)
+        blob(land, cx, cy, rng.between(3, 9), ROCK, flat=rng.between(1, 3))
 
     # The gravel band is not a ruled line: it wanders, and lenses of it
-    # reach up into the soil and down into the rock.
-    for _ in range(30):
+    # reach up into the soil and down into the rock, flattened into
+    # sedimentary lenses rather than round lumps.
+    for _ in range(34):
         cx = rng.between(EDGE + 16, IMG - EDGE - 17)
-        cy = rng.between(GRAVEL_TOP - 22, GRAVEL_TOP + 30)
-        blob(land, cx, cy, rng.between(5, 14), GRAVEL, flat=2.6)
+        cy = rng.between(GRAVEL_TOP - 26, GRAVEL_TOP + 30)
+        blob(land, cx, cy, rng.between(5, 14), GRAVEL, flat=rng.between(2, 4))
 
     # And coal in the rock that roofs the mine, which is the first sight
     # of what the region under this one is made of.
@@ -346,45 +395,82 @@ def blob(land, cx, cy, r, name, flat=1.0):
 
 
 def plough(land, x0, x1, fallow):
-    """Tilled ground: ridges of loam with a furrow between them. A ridge
-    stands a little proud of the grass and the furrow cuts into it, which
-    is what makes a worked field read as worked from a distance."""
+    """Tilled ground: ridges of loam standing proud of the grass, trenched
+    apart by a furrow cut under it. Wheat, where the field is not fallow,
+    stands only on the ridge tops -- ranks of it, with the furrows bare
+    between -- which is what makes a worked field read as worked, both
+    close up and pulled back."""
     rng = land.rng
-    period = rng.pick([7, 8, 9])
+    period = rng.pick([12, 14, 16])
+    ridge_w = period - 5  # the ridge is most of the period, the furrow the rest
+    RIDGE_H = 4  # the ridge crowns this far over the grass line
+    FURROW_D = 4  # and the furrow is trenched this far under it
+    DEPTH = 15  # both run down to the same depth of loam
+    ridges = []
     x = x0
     while x <= x1:
-        ridge = min(x + period - 3, x1)
-        top = land.level(x, ridge)
-        # The ridge: loam heaped a little over the grass line.
-        land.fill(x, top - 2, ridge, top + 13, LOAM)
-        # The furrow beside it, cut down into the loam.
-        land.fill(ridge + 1, top + 1, min(x + period - 1, x1), top + 13, LOAM)
-        land.fill(ridge + 1, top - 2, min(x + period - 1, x1), top, AIR)
+        rend = min(x + ridge_w - 1, x1)
+        top = land.level(x, rend)
+        crown = top - RIDGE_H - rng.between(-1, 1)  # no two ridges heaped quite alike
+        # The ridge: a heaped crown, tapered at the shoulders over two
+        # steps so it reads as a mound and not a slab with a flat lid.
+        land.fill(x, crown + 2, rend, top + DEPTH, LOAM)
+        if rend - x >= 3:
+            land.fill(x + 1, crown + 1, rend - 1, crown + 1, LOAM)
+            land.fill(x + 2, crown, rend - 2, crown, LOAM)
+        else:
+            land.fill(x + 1, crown, rend - 1, crown, LOAM)
+        ridges.append((x, rend, crown))
+        fx0, fx1 = rend + 1, min(x + period - 1, x1)
+        if fx1 >= fx0:
+            ftop = top + FURROW_D
+            land.fill(fx0, crown, fx1, ftop - 1, AIR)
+            land.fill(fx0, ftop, fx1, top + DEPTH, LOAM)
         x += period
 
     if fallow:
         return
 
-    x = x0 + 1
-    while x <= x1 - 1:
-        if rng.chance(0.10):
-            x += rng.between(2, 5)
-            continue
-        stem = land.ground(x) - 3
-        h = rng.between(11, 17)
-        land.fill(x, stem - h, x, stem, WHEAT)
-        # The ear: a couple of cells wider at the top of the stalk.
-        land.fill(x - 1, stem - h, x + 1, stem - h + rng.between(2, 4), WHEAT)
-        x += rng.between(2, 3)
+    for rx0, rx1, crown in ridges:
+        cx = rx0 + 1
+        while cx <= rx1 - 1:
+            if rng.chance(0.08):
+                cx += 1
+                continue
+            h = rng.between(13, 20)
+            land.fill(cx, crown - h, cx, crown, WHEAT)
+            # The ear: a couple of cells wider at the top of the stalk.
+            land.fill(cx - 1, crown - h, cx + 1, crown - h + rng.between(2, 4), WHEAT)
+            cx += rng.between(2, 3)
 
 
 def hedge(land, x, height=None):
-    """A line of grass grown up between two plots."""
+    """A hedgerow: a low bank of thrown-up dirt with the hedge itself
+    grown up along the top of it, the way a field boundary that has
+    stood a long time looks."""
     rng = land.rng
-    h = height or rng.between(9, 15)
-    for dx in (-1, 0, 1):
+    h = height or rng.between(12, 19)
+    bank = 3
+    for dx in range(-2, 3):
         top = land.ground(x + dx)
-        land.fill(x + dx, top - h + abs(dx) * 2, x + dx, top, GRASS)
+        taper = 2 - abs(dx)
+        land.fill(x + dx, top - taper, x + dx, top, DIRT)
+        land.fill(x + dx, top - taper - h + abs(dx) * 3, x + dx, top - taper, GRASS)
+
+
+def ditch(land, x):
+    """A dry ditch cut along a field boundary, the spoil banked up on
+    the field side of it."""
+    rng = land.rng
+    depth = rng.between(6, 10)
+    for dx in range(-3, 4):
+        top = land.ground(x + dx)
+        cut = depth - abs(dx) * 2
+        if cut > 0:
+            land.fill(x + dx, top + 1, x + dx, top + cut, AIR)
+    for i, dx in enumerate(range(4, 7)):
+        top = land.ground(x + dx)
+        land.fill(x + dx, top - (i + 2), x + dx, top, DIRT)
 
 
 def fence(land, x0, x1):
@@ -440,15 +526,82 @@ def cottage(land, x0, w):
         land.fill(wx, sill - WINDOW, wx + WINDOW - 1, sill - 1, AIR)
         land.fill(wx - 1, sill - WINDOW - 1, wx + WINDOW, sill - WINDOW - 1, WOOD)
         land.fill(wx - 1, sill, wx + WINDOW, sill, WOOD)
+        land.column(wx - 1, sill - WINDOW, sill - 1, WOOD)  # the jambs, so
+        land.column(wx + WINDOW, sill - WINDOW, sill - 1, WOOD)  # it frames
 
     roof(land, x0, x1, top, rng)
-    return floor
+
+    # A lean-to porch over the door: two wood posts and a thatched
+    # pentice roof, standing out from the wall a wizard's width.
+    if rng.chance(0.55):
+        porch(land, door_x, floor, top)
+
+    return floor, door_x
 
 
-def roof(land, x0, x1, eave_y, rng):
+def porch(land, door_x, floor, wall_top):
+    """A lean-to roof over the doorway, on two posts."""
+    px0, px1 = door_x - 4, door_x + DOOR_W + 3
+    py = wall_top + (floor - wall_top) // 3
+    land.column(px0, py, floor - 1, WOOD)
+    land.column(px1, py, floor - 1, WOOD)
+    land.fill(px0, py - 2, px1, py - 1, THATCH)
+    land.fill(px0 - 2, py - 1, px0 - 1, py - 1, THATCH)
+    land.fill(px1 + 1, py - 1, px1 + 2, py - 1, THATCH)
+
+
+def dooryard(land, x0, w, floor, door_x, lo, hi, garden_p=0.5, woodpile_p=0.5):
+    """What stands around a cottage: a low garden wall with a gate
+    facing the track, a stack of cut wood against the gable, and the
+    ground worn to a cart track at the door. `lo`/`hi` are the plot
+    span's own bounds, and nothing here reaches past them -- the same
+    margin that keeps the cottage off the green keeps its yard off it
+    too."""
+    rng = land.rng
+    x1 = x0 + w - 1
+
+    # The cart track: gravel worn from the doorstep out to open ground.
+    away = 1 if door_x - x0 > x1 - door_x else -1
+    if away > 0:
+        path(land, max(door_x - 2, lo), min(door_x + DOOR_W + 12, hi))
+    else:
+        path(land, max(door_x - 12, lo), min(door_x + DOOR_W + 1, hi))
+
+    # A low brick garden wall closing a yard beside the house, with a
+    # wood gate in it.
+    if rng.chance(garden_p):
+        side = 1 if rng.chance(0.5) else -1
+        if side > 0:
+            wx0 = min(x1 + EAVES + 3, hi - 2)
+            wx1 = min(wx0 + rng.between(10, 16), hi)
+        else:
+            wx1 = max(x0 - EAVES - 3, lo + 2)
+            wx0 = max(wx1 - rng.between(10, 16), lo)
+        if wx1 > wx0:
+            for x in range(wx0, wx1 + 1):
+                top = land.ground(x)
+                land.fill(x, top - 5, x, top, BRICK)
+            gate_x = (wx0 + wx1) // 2
+            gtop = land.ground(gate_x)
+            land.fill(gate_x - 1, gtop - 5, gate_x + 1, gtop, AIR)
+            land.column(gate_x - 2, gtop - 7, gtop, WOOD)
+            land.column(gate_x + 2, gtop - 7, gtop, WOOD)
+
+    # A woodpile against the gable end away from the door.
+    if rng.chance(woodpile_p):
+        wxp = max(x0 - EAVES - rng.between(4, 8), lo + 8)
+        top = land.ground(wxp)
+        for i in range(rng.between(3, 5)):
+            land.fill(wxp - 8, top - 3 - i * 3, wxp, top - 1 - i * 3, WOOD)
+
+
+def roof(land, x0, x1, eave_y, rng, gable=None, chimney_on=True):
     """A pitched thatch roof: a wood ridge beam, rafters implied by the
     slope of the thatch itself, and eaves that oversail the wall so the
-    wall is in the roof's shadow."""
+    wall is in the roof's shadow. `gable` is what closes the triangle
+    under the thatch -- brick over a cottage's wall, wood over a barn's
+    boarding -- and a barn carries no chimney."""
+    gable = gable or BRICK
     left = x0 - EAVES
     right = x1 + EAVES
     span = right - left
@@ -467,14 +620,15 @@ def roof(land, x0, x1, eave_y, rng):
     land.fill(left, eave_y + THATCH_T - 2, left + 2, eave_y + THATCH_T - 1, WOOD)
     land.fill(right - 2, eave_y + THATCH_T - 2, right, eave_y + THATCH_T - 1, WOOD)
 
-    # The gable under the thatch is brick, so the roof is closed at the
-    # ends rather than open to the sky.
+    # The gable under the thatch closes the roof at the ends rather
+    # than leaving it open to the sky.
     for x in range(x0, x1 + 1):
         t = abs(x - mid) / (span * 0.5)
         y = int(ridge_y + (eave_y - ridge_y) * t)
-        land.fill(x, y + THATCH_T, x, eave_y - 1, BRICK)
+        land.fill(x, y + THATCH_T, x, eave_y - 1, gable)
 
-    chimney(land, x0, x1, ridge_y, eave_y, rng)
+    if chimney_on:
+        chimney(land, x0, x1, ridge_y, eave_y, rng)
 
 
 def chimney(land, x0, x1, ridge_y, eave_y, rng):
@@ -483,6 +637,36 @@ def chimney(land, x0, x1, ridge_y, eave_y, rng):
     land.fill(cx, top, cx + 6, eave_y + 4, BRICK)
     land.fill(cx + 2, top, cx + 4, top + 3, AIR)  # the flue
     land.fill(cx - 1, top, cx + 7, top + 2, BRICK)  # the cap, wider than the stack
+    land.fill(cx - 1, top - 1, cx + 7, top - 1, COAL)  # soot, smoke-blackened
+
+
+def barn(land, x0, w):
+    """A barn: bigger than a cottage's one room, wood-framed and
+    thatched over like it, but standing open across the front on posts
+    so a cart can shelter under the roof -- no wall, no chimney, hay
+    spilling out of it."""
+    rng = land.rng
+    x1 = x0 + w - 1
+    floor = land.level(x0 - EAVES, x1 + EAVES)
+    h = rng.between(38, 48)
+    top = floor - h
+
+    land.fill(x0, floor, x1, floor + FOOTING, ROCK)
+    # The two gable ends and a head plate tying them are close-boarded
+    # wood; the long front between them is left open on posts.
+    land.fill(x0, top, x0 + WALL - 1, floor - 1, WOOD)
+    land.fill(x1 - WALL + 1, top, x1, floor - 1, WOOD)
+    land.fill(x0 + WALL, top, x1 - WALL, top + 3, WOOD)
+    third = (x1 - x0) // 3
+    land.column(x0 + third, top + 4, floor - 1, WOOD)
+    land.column(x0 + 2 * third, top + 4, floor - 1, WOOD)
+    land.fill(x0 + WALL, floor - 2, x1 - WALL, floor - 1, WOOD)  # the plank floor
+
+    if rng.chance(0.7):
+        stook(land, x0 + w // 2 + rng.between(-6, 6))
+
+    roof(land, x0, x1, top, rng, gable=WOOD, chimney_on=False)
+    return floor
 
 
 # ----------------------------------------------------------- the small things
@@ -493,8 +677,14 @@ def well(land, x):
     windlass across it."""
     top = land.level(x, x + 15)
     land.fill(x, top - 11, x + 15, top + 2, ROCK)
-    land.fill(x + 4, top - 11, x + 11, IMG - 1, AIR)
-    land.fill(x + 4, top + 40, x + 11, IMG - 1, DIRT)
+    # The shaft, and the ground closed again under the bottom of it. It
+    # is closed back to the strata and not to Dirt: a shaft backfilled
+    # with soil is a soft column punched through the gravel and the rock
+    # all the way to the floor of the region, which reads as a seam in
+    # every shot pulled back and digs like one too.
+    land.fill(x + 4, top - 11, x + 11, top + WELL_DEPTH, AIR)
+    for y in range(top + WELL_DEPTH + 1, IMG):
+        land.fill(x + 4, y, x + 11, y, stratum_at(y))
     land.fill(x, top - 13, x + 15, top - 12, ROCK)  # the coping
     land.fill(x + 1, top - 22, x + 2, top - 13, WOOD)  # the posts
     land.fill(x + 13, top - 22, x + 14, top - 13, WOOD)
@@ -538,20 +728,55 @@ def path(land, x0, x1):
 # ----------------------------------------------------------- laying a picture
 
 
-def span_of(rng, x0, x1):
-    """Fill one span with plots, end to end, with a gap between them. A
-    plot is a start, a width and a kind."""
+# Twelve stretches of one village, not twelve shuffles of the same
+# stretch: how eagerly plots cluster into a village knot (cluster_p),
+# how big a knot runs (sizes), how often its first building is a barn
+# rather than a home (barn_p), how much of the tilled ground stands
+# fallow, hedged with a tree instead of a hedge (orchard_p), walled
+# into a garden (garden_p), and how wide one field is let run.
+THEMES = [
+    dict(name="pasture",  cluster_p=0.12, sizes=[1],    barn_p=0.0,  fallow_p=0.65, orchard_p=0.08, garden_p=0.30, field_max=70),
+    dict(name="village",  cluster_p=0.85, sizes=[2, 3], barn_p=0.35, fallow_p=0.15, orchard_p=0.05, garden_p=0.55, field_max=48),
+    dict(name="wheat",    cluster_p=0.10, sizes=[1],    barn_p=0.0,  fallow_p=0.05, orchard_p=0.00, garden_p=0.10, field_max=120),
+    dict(name="barnyard", cluster_p=0.55, sizes=[2],    barn_p=0.80, fallow_p=0.30, orchard_p=0.05, garden_p=0.30, field_max=70),
+    dict(name="orchard",  cluster_p=0.25, sizes=[1, 2], barn_p=0.10, fallow_p=0.35, orchard_p=0.55, garden_p=0.20, field_max=50),
+    dict(name="garden",   cluster_p=0.35, sizes=[1, 2], barn_p=0.10, fallow_p=0.20, orchard_p=0.10, garden_p=0.75, field_max=60),
+    dict(name="mixed",    cluster_p=0.45, sizes=[1, 2], barn_p=0.30, fallow_p=0.28, orchard_p=0.15, garden_p=0.40, field_max=75),
+    dict(name="hedgerow", cluster_p=0.28, sizes=[1],    barn_p=0.05, fallow_p=0.20, orchard_p=0.10, garden_p=0.20, field_max=42),
+    dict(name="fallow",   cluster_p=0.18, sizes=[1],    barn_p=0.0,  fallow_p=0.80, orchard_p=0.05, garden_p=0.15, field_max=90),
+    dict(name="cluster",  cluster_p=0.90, sizes=[2],    barn_p=0.15, fallow_p=0.20, orchard_p=0.10, garden_p=0.60, field_max=55),
+    dict(name="harvest",  cluster_p=0.08, sizes=[1],    barn_p=0.0,  fallow_p=0.00, orchard_p=0.00, garden_p=0.10, field_max=140),
+    dict(name="mixed2",   cluster_p=0.40, sizes=[1, 2], barn_p=0.25, fallow_p=0.25, orchard_p=0.30, garden_p=0.35, field_max=65),
+]
+
+
+def span_of(rng, x0, x1, theme):
+    """Fill one span with plots, end to end. Buildings come in a knot
+    of one to three, close together with a yard between them, and then
+    open field runs before the next knot -- a village clusters, it does
+    not scatter one thing, gap, one thing, gap."""
     out = []
     x = x0 + rng.between(2, 12)
     while x1 - x > 34:
         room = x1 - x
-        if room > 92 and rng.chance(0.45):
-            w = rng.between(62, min(86, room - 4))
-            out.append((x, w, "home"))
+        if room > 90 and rng.chance(theme["cluster_p"]):
+            n = rng.pick(theme["sizes"])
+            for k in range(n):
+                room = x1 - x
+                if room < 40:
+                    break
+                if k == 0 and rng.chance(theme["barn_p"]):
+                    w = rng.between(70, min(94, room - 4))
+                    out.append((x, w, "barn"))
+                else:
+                    w = rng.between(56, min(84, room - 4))
+                    out.append((x, w, "home"))
+                x += w + rng.between(3, 9)  # tight: a knot, not a scatter
+            x += rng.between(22, 52)  # open ground before the next knot
         else:
-            w = rng.between(34, min(96, room - 2))
+            w = rng.between(34, min(theme["field_max"], max(35, room - 2)))
             out.append((x, w, "field"))
-        x += w + rng.between(8, 18)
+            x += w + rng.between(8, 18)
     return out
 
 
@@ -561,41 +786,71 @@ def span_of(rng, x0, x1):
 MARGIN = EAVES + 4
 
 
-def plots(rng):
+def plots(rng, theme):
     """The row of plots across one picture, west of the green and east
     of it, each with the span it may not reach out of."""
     west = (EDGE + 2, GREEN_X0 - 1 - MARGIN)
     east = (GREEN_X1 + 1 + MARGIN, IMG - EDGE - 3)
-    return [(west, span_of(rng, west[0], west[1])), (east, span_of(rng, east[0], east[1]))]
+    return [
+        (west, span_of(rng, west[0], west[1], theme)),
+        (east, span_of(rng, east[0], east[1], theme)),
+    ]
 
 
-def paint_homeland(seed):
+def paint_homeland(seed, i=0):
     land = Land(seed)
-    rng = land.rng
+    theme = THEMES[i % len(THEMES)]
     lay_ground(land)
 
-    for (lo, hi), row in plots(rng):
+    # The plots are drawn from a stream of their own, apart from the
+    # ground's: a plot's layout is a stylistic choice, not a physical
+    # one, and keeping it off the ground's stream means a change here
+    # never reaches back to perturb the soil, the strata or the green.
+    rng = Rng(seed ^ PLOT_SALT)
+    land.rng = rng
+
+    for (lo, hi), row in plots(rng, theme):
         for x, w, kind in row:
             if kind == "home":
-                cottage(land, x, w)
+                floor, door_x = cottage(land, x, w)
+                dooryard(land, x, w, floor, door_x, lo, hi, garden_p=theme["garden_p"])
                 if rng.chance(0.5):
                     fence(land, min(x + w + EAVES + 2, hi), min(x + w + EAVES + 22, hi))
+            elif kind == "barn":
+                barn(land, x, w)
+                if rng.chance(0.6):
+                    fence(land, min(x + w + EAVES + 2, hi), min(x + w + EAVES + 20, hi))
             else:
-                plough(land, x, x + w - 1, fallow=rng.chance(0.28))
-                if rng.chance(0.55):
-                    hedge(land, max(x - 3, lo))
+                plough(land, x, x + w - 1, fallow=rng.chance(theme["fallow_p"]))
+                # A field is hedged, ditched, treed or fenced at both
+                # ends, so it reads as a bounded plot and not tilled
+                # ground running loose into whatever is next to it.
+                for end_x in (max(x - 3, lo), min(x + w + 2, hi)):
+                    if rng.chance(theme["orchard_p"]):
+                        tree(land, end_x)
+                    elif rng.chance(0.42):
+                        hedge(land, end_x)
+                    elif rng.chance(0.3):
+                        ditch(land, end_x)
+                    else:
+                        fence(land, end_x - 1, end_x + 1)
                 if rng.chance(0.45):
                     stook(land, x + rng.between(6, max(7, w - 6)))
 
     # The green: a gravel track worn the length of it, and off the track
     # a fence line, a well or a tree, but never over the pond and never
-    # in the yard he lands in.
+    # in the yard he lands in. Drawn off a stream of its own, keyed only
+    # to the picture's seed, so nothing about how the fields or cottages
+    # roll their dice ever moves what stands on the green -- the pond
+    # and the swarm above it are keyed to this same ground.
+    green_rng = Rng(seed ^ GREEN_SALT)
+    land.rng = green_rng
     path(land, GREEN_X0 + 2, GREEN_X1 - 2)
-    if rng.chance(0.7):
+    if green_rng.chance(0.7):
         fence(land, POND_X1 + 4, YARD_X0 - 6)
-    if rng.chance(0.5):
+    if green_rng.chance(0.5):
         well(land, YARD_X1 + 3)
-    if rng.chance(0.5):
+    if green_rng.chance(0.5):
         tree(land, GREEN_X0 - 34)
 
     stamp_edges(land)
@@ -624,6 +879,56 @@ def carve_run(land, points):
             carve(land, int(x0 + (x1 - x0) * t), int(y0 + (y1 - y0) * t), int(r0 + (r1 - r0) * t))
 
 
+def mouth_point(points, x):
+    """Where the mouth passage's centre line and radius are at column
+    x, interpolated along the same waypoints `carve_run` widened it
+    from -- so the timber that frames it fits the hole that is
+    actually there."""
+    for i in range(len(points) - 1):
+        x0, y0, r0 = points[i]
+        x1, y1, r1 = points[i + 1]
+        lo, hi = (x0, x1) if x0 <= x1 else (x1, x0)
+        if lo <= x <= hi:
+            t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
+            return y0 + (y1 - y0) * t, r0 + (r1 - r0) * t
+    return points[-1][1], points[-1][2]
+
+
+def timber_mouth(land, cx, cy, r):
+    """Timber at the mouth: two props either side of the opening and a
+    lintel beam across the top of it, as if someone had shored the hole
+    up to walk in under."""
+    dx = int(r * 0.6)
+    half_h = int((r * r - dx * dx) ** 0.5)
+    for px in (cx - dx, cx + dx):
+        land.column(px, cy - half_h + 3, cy + half_h, WOOD)
+    land.fill(cx - dx, cy - half_h, cx + dx, cy - half_h + 2, WOOD)
+
+
+def cart_rail(land, x0, x1):
+    """A cart rail worn out of the mouth: a gravel bed with a wood
+    sleeper set across it every few cells."""
+    for x in range(x0, x1 + 1):
+        top = land.ground(x)
+        land.set(x, top, GRAVEL)
+        if (x - x0) % 5 == 0:
+            land.fill(x, top - 1, x, top - 1, WOOD)
+
+
+def spoil_heap(land, cx, rng):
+    """A heap of spoil dumped outside the mouth by whoever dug it:
+    gravel and a fleck of coal, banked up in courses."""
+    top = land.ground(cx)
+    for i in range(4):
+        w = max(2, rng.between(12, 20) - i * 4)
+        h = 4 - min(i, 3)
+        land.fill(cx - w // 2, top - i * 3 - h, cx + w // 2, top - i * 3, GRAVEL)
+    for _ in range(8):
+        px = cx + rng.between(-9, 9)
+        py = top - rng.between(1, 9)
+        land.set(px, py, COAL)
+
+
 def paint_cavemouth():
     """Where the fields end.
 
@@ -640,14 +945,25 @@ def paint_cavemouth():
     # The hillside. It does not start level with the fields: it starts
     # as a scarp FACE cells high, because a mouth needs a face to open
     # in and a slope has none. From the top of that scarp it climbs on
-    # to the top of the region, where the coal begins.
+    # to the top of the region, where the coal begins. A jagged, finer
+    # noise rides on top near the face, so the rock reads as broken
+    # rock and not a ruled wedge.
     roll = smooth_field(rng, IMG, 60, 6)
-    scarp = smooth_field(rng, IMG, 21, 4)
+    scarp = smooth_field(rng, IMG, 21, 9)
+    jag = smooth_field(rng, IMG, 7, 5.0)
+    crag = smooth_field(rng, IMG, 4, 3.0)
     for x in range(BLUFF_X0, IMG):
         t = (x - BLUFF_X0) / (IMG - 1 - BLUFF_X0)
         foot = EDGE_GROUND - FACE
         climb = t ** 0.6
-        crest = int(foot * (1.0 - climb) + roll[x] * (1.0 - abs(2 * t - 1)) + scarp[x] * (1.0 - t))
+        broken = max(0.0, 1.0 - t * 1.3)
+        crest = int(
+            foot * (1.0 - climb)
+            + roll[x] * (1.0 - abs(2 * t - 1))
+            + scarp[x] * (1.0 - t)
+            + jag[x] * broken
+            + crag[x] * broken
+        )
         crest = max(0, min(EDGE_GROUND, crest))
         land.fill(x, 0, x, crest - 1, AIR)
         land.fill(x, crest, x, IMG - 1, ROCK)
@@ -657,19 +973,25 @@ def paint_cavemouth():
             land.fill(x, crest + SKIN, x, crest + SKIN + int((0.42 - t) * 40), DIRT)
         land.top[x] = crest
 
+    # Texture on the exposed face itself, not just its skyline: lenses
+    # of gravel breaking up what would otherwise be a flat grey wall.
+    for _ in range(30):
+        cx = rng.between(BLUFF_X0 + 4, BLUFF_X0 + 260)
+        cy = rng.between(EDGE_GROUND - FACE - 10, EDGE_GROUND + 120)
+        if land.at(cx, cy) == ROCK:
+            blob(land, cx, cy, rng.between(4, 10), GRAVEL, flat=rng.between(1, 3))
+
     # The mouth, and the passage behind it: in level at the height of
     # the fields, then back and down under the hill, widening the whole
     # way to the cavern at the bottom.
-    carve_run(
-        land,
-        (
-            (BLUFF_X0 - 8, EDGE_GROUND - 17, 19),
-            (BLUFF_X0 + 54, EDGE_GROUND - 15, 21),
-            (BLUFF_X0 + 116, EDGE_GROUND + 40, 27),
-            (BLUFF_X0 + 168, EDGE_GROUND + 150, 34),
-            (BLUFF_X0 + 196, IMG - 96, 42),
-        ),
+    mouth_run = (
+        (BLUFF_X0 - 8, EDGE_GROUND - 17, 19),
+        (BLUFF_X0 + 54, EDGE_GROUND - 15, 21),
+        (BLUFF_X0 + 116, EDGE_GROUND + 40, 27),
+        (BLUFF_X0 + 168, EDGE_GROUND + 150, 34),
+        (BLUFF_X0 + 196, IMG - 96, 42),
     )
+    carve_run(land, mouth_run)
 
     # The cavern the passage lets out into. It is open along the whole
     # bottom edge, so the coal in the region under this one is met
@@ -693,6 +1015,14 @@ def paint_cavemouth():
             if land.at(x, y) in (ROCK, DIRT, GRASS):
                 land.fill(x, y, x, y + 2, GRAVEL)
                 break
+
+    # The mouth itself, timbered: two props either side of the opening
+    # in the rock face and a lintel beam across the top of it, and a
+    # cart rail and a heap of spoil outside where the diggings came out.
+    cy, r = mouth_point(mouth_run, BLUFF_X0 + 10)
+    timber_mouth(land, BLUFF_X0 + 10, int(cy), int(r))
+    cart_rail(land, BLUFF_X0 - 48, BLUFF_X0 + 6)
+    spoil_heap(land, BLUFF_X0 - 26, rng)
 
     # Coal in the rock, so the reason to go down is visible from inside
     # the mouth.
@@ -839,7 +1169,7 @@ def main():
         return
 
     for i, name in enumerate(HOME_PATHS):
-        land = paint_homeland(0x480E + i * 7919)
+        land = paint_homeland(0x480E + i * 7919, i)
         museum.write_png(name, museum.render(land, materials))
         print(f"{name}: {IMG}x{IMG}")
 
