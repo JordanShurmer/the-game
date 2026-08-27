@@ -171,15 +171,31 @@ sandbox_mark_all :: proc(sb: ^Sandbox) {
 }
 
 sandbox_mark :: proc(sb: ^Sandbox, x, y: i32) {
-	lo_x := max(x-1, 0)
-	hi_x := min(x+1, sb.width-1)
-	lo_y := max(y-1, 0)
-	hi_y := min(y+1, sb.height-1)
+	sandbox_mark_box(sb, x-1, y-1, x+1, y+1)
+}
+
+// Wake the cells of a box, and their chunks with them. Nearly every box
+// sits inside one chunk, and that case is four compares; only a box on
+// a chunk border pays for the walk below.
+sandbox_mark_box :: proc(sb: ^Sandbox, x0, y0, x1, y1: i32) {
+	lo_x := max(x0, 0)
+	hi_x := min(x1, sb.width-1)
+	lo_y := max(y0, 0)
+	hi_y := min(y1, sb.height-1)
 
 	cx0 := lo_x / SANDBOX_CHUNK
 	cx1 := hi_x / SANDBOX_CHUNK
 	cy0 := lo_y / SANDBOX_CHUNK
 	cy1 := hi_y / SANDBOX_CHUNK
+
+	if cx0 == cx1 && cy0 == cy1 {
+		r := &sb.next_dirty[cy0*sb.chunks_x + cx0]
+		r.min_x = min(r.min_x, lo_x)
+		r.min_y = min(r.min_y, lo_y)
+		r.max_x = max(r.max_x, hi_x)
+		r.max_y = max(r.max_y, hi_y)
+		return
+	}
 
 	for cy in cy0 ..= cy1 {
 		chunk_y0 := cy * SANDBOX_CHUNK

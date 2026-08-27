@@ -46,6 +46,7 @@ main :: proc() {
 	}
 
 	game.sim_run(&sim, options.warm)
+	game.prof_reset()
 
 	start := time.now()
 	game.sim_run(&sim, options.ticks)
@@ -60,6 +61,7 @@ main :: proc() {
 		options.ticks,
 		game.sandbox_checksum(&sim.sandbox),
 	)
+	fmt.print(game.prof_report(context.temp_allocator))
 }
 
 read_options :: proc(options: ^Options) -> bool {
