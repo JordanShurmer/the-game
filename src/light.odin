@@ -1171,6 +1171,45 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_the_orb_is_out_in_the_field_and_lit_under_the_ground :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+
+	// Where he starts: a field, under an open sky.
+	sim_step_player(&s, {}, false)
+	ox, oy := light_orb_source(sim_terrain(&s), s.player)
+	testing.expectf(
+		t, light_day_at(&s.light, ox, oy) >= LIGHT_ORB_WAKES,
+		"the day must be full on the village green, and it is %d",
+		light_day_at(&s.light, ox, oy),
+	)
+	testing.expect(t, !s.light.orb_lit, "he does not carry a lit lamp across a field at noon")
+	testing.expect(t, light_live_lux(&s.light, ox, oy) == 0, "and an orb that is out throws nothing")
+
+	crystals := s.light.count
+	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
+	testing.expectf(
+		t, s.light.count == crystals,
+		"nothing falls from an orb that is not lit, and %d crystals did",
+		s.light.count - crystals,
+	)
+
+	// And under the coal, where the only light is the one he brought.
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
+	sim_step_player(&s, {}, false)
+	ox, oy = light_orb_source(sim_terrain(&s), s.player)
+	testing.expectf(
+		t, light_day_at(&s.light, ox, oy) == 0,
+		"no day may reach the coal, and %d of it does",
+		light_day_at(&s.light, ox, oy),
+	)
+	testing.expect(t, s.light.orb_lit, "in the dark he lights it")
+	testing.expect(t, light_live_lux(&s.light, ox, oy) > 0, "and a lit orb throws light")
+}
+
+@(test)
 test_the_crystals_he_drops_keep_the_place_lit_after_he_leaves :: proc(t: ^testing.T) {
 	s: Sim
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
