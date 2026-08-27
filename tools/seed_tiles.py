@@ -1722,10 +1722,71 @@ def room_well(grid, rng, colors):
 
 # Keyed by biome name, signature and variant: only the Coalmine set has
 # rooms so far, and only their second variant carries one.
+# The water level of the Grotto, in tile cells from the top of its
+# tile. The Odin side reads the water back out of the tile to home the
+# fireflies over it, so this number lives only here; what the game
+# knows is GROTTO_SIGNATURE and GROTTO_VARIANT in src/pond.odin, which
+# name the tile, and a test holds the tile to actually holding water.
+GROTTO_LEVEL = 300
+
+
+def room_grotto(grid, rng, colors):
+    """coalmine_0100_1: the Grotto. See the module docstring.
+
+    Not a built thing: a dome of cave over a deep rock bowl of still
+    water, sealed on every side but the east, where a doorway and a
+    tunnel join it to the cave. This is where the fireflies of the
+    world live -- the game homes the swarm over the water it finds in
+    this tile -- so the room is dark, wet and empty, and the only light
+    it ever has is the one thing it is for.
+
+    The water must not leak. The bowl is the shell's own rounded
+    bottom, rock like everything else here, and the one doorway is cut
+    well over the waterline. --check holds every cell of Water in the
+    saved tile to having nothing but Water or solid on every side of
+    it but the top."""
+    x0, x1, y0, y1 = 120, 392, 200, 396
+    top_rx, top_ry = (x1 - x0) // 2, 58   # a dome over the whole chamber
+    bot_rx, bot_ry = (x1 - x0) // 2, 50   # and a round bowl under it
+    overlay = {}
+    inside, shell_mask = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+
+    cut_doorway(grid, overlay, colors, "Rock", "E", x1 + SHELL_T + 6, x1 - 30, x1)
+    carve_mouth_tunnel(grid, rng, "E", x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+
+    # The water, to a flat level below the doorway's sill.
+    for y in range(GROTTO_LEVEL, y1 + bot_ry + 4):
+        for x in range(x0 - bot_rx - 4, x1 + bot_rx + 4):
+            if inside(x, y) and band_of(x, y) is None:
+                overlay[(x, y)] = colors["Water"]
+
+    # A shelf of rock at the water's edge under the doorway, so what
+    # comes in through it can stand and look before it swims.
+    fit_rect(grid, overlay, colors, "Rock", inside, x1 - 74, x1, GROTTO_LEVEL - 8, GROTTO_LEVEL)
+
+    # The fireflies. A cell of Firefly_Light in a tile is not matter --
+    # a phantom can never reach the cell grid -- it is a mark saying a
+    # firefly lives here. The loader lifts every such cell out of the
+    # tile as a swarm home and leaves Air, so the tile is the whole of
+    # where the swarm hangs and how it is shaped, and nothing in the
+    # game names this room at all.
+    # They hang over open water only: the span stops short of the
+    # shelf, or the eastmost of them would be a firefly over dry rock.
+    for k in range(7):
+        mx = x0 + 36 + k * (x1 - 90 - x0 - 36) // 6
+        my = GROTTO_LEVEL - 14 - [0, 5, 9, 11, 8, 4, 1][k]
+        if inside(mx, my) and band_of(mx, my) is None:
+            overlay[(mx, my)] = colors["Firefly_Light"]
+
+    reconnect_outside_shell(grid, rng, shell_mask)
+    return overlay
+
+
 ROOMS = {
     ("Coalmine", (1, 1, 1, 1), 1): room_cistern,
     ("Coalmine", (0, 1, 0, 1), 1): room_magazine,
     ("Coalmine", (1, 0, 1, 0), 1): room_well,
+    ("Coalmine", (0, 1, 0, 0), 1): room_grotto,
 }
 
 # ------------------------------------------------------------------- the sets

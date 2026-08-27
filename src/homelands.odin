@@ -130,6 +130,44 @@ test_the_homelands_regions_are_not_all_the_same_picture :: proc(t: ^testing.T) {
 	)
 }
 
+// How far east a wizard must get in twenty seconds of walking and
+// jumping, which is what a player does in the first seconds of a game.
+//
+// It is deliberately short of the whole village. He clears about
+// twenty-eight cells from a standing jump, so a fence, a hedge bank and
+// a garden wall are all things he goes over without thinking; a cottage
+// stands higher than that and he flies over it, which is what the
+// jetpack is for. So this asks one thing only: that he is not walled in
+// where he lands, and gets clear of the green and into the fields.
+//
+// The rule about the ground itself -- that nothing worked into a field
+// may stand higher than PLAYER_CLIMB -- is held precisely, on every one
+// of the twelve pictures, by `tools/seed_homelands.py --check`. This is
+// the same rule asked of the running game, where it is coarse but real:
+// it read 44 when the crops were solid and the furrows were eight cells
+// deep, which is the state it exists to catch.
+HOMELANDS_WALK :: 90
+
+@(test)
+test_walking_east_out_of_the_village_gets_him_somewhere :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+
+	start := s.player.x
+	for i in 0 ..< 60 * 20 {
+		sim_step_player(&s, {.Right}, i % 24 == 0)
+	}
+	walked := s.player.x - start
+
+	testing.expectf(
+		t, walked >= HOMELANDS_WALK,
+		"twenty seconds of walking and jumping east took him %.0f cells and it must take him %d; something is standing in the ground of the village where he lands",
+		walked, HOMELANDS_WALK,
+	)
+}
+
 @(test)
 test_the_caves_open_east_of_the_last_homeland :: proc(t: ^testing.T) {
 	s: Sim

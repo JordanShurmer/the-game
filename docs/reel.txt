@@ -1,0 +1,46 @@
+# The README reel: one deterministic run from the village green to the
+# firefly pond. Film it with
+#
+#     ./bin/the-game script=docs/reel.txt record=shots/reel
+#
+# and fold the frames with ffmpeg; see docs/toolchain.md. The skips are
+# the cuts: the world runs on through them and nothing is filmed. The
+# tick counts are a route, tuned leg by leg against the shipped seed --
+# reshaping one changes where every later leg lands. The first flight
+# is cut because it crosses a light-square boundary, and the film would
+# catch the dark beyond the square's edge.
+
+70 wait  # the village green at noon
+90 skip
+240 walk  # east up the green, to the fence
+120 run jump  # the jump over it, through the wheat
+150 skip run fly
+90 skip run
+150 skip run fly
+90 skip run
+150 run fly  # up and over the farmhouse
+120 run  # down the far field
+25 skip walk left
+170 skip run fly
+90 skip run
+25 skip walk left
+170 skip run fly
+90 skip run
+25 skip walk left
+170 skip run fly
+120 skip run
+30 skip walk left
+150 skip run fly
+60 skip walk
+50 walk left  # off the ledge
+200 walk  # in past the timber shoring; the orb lights
+200 walk  # the passage turns and drops
+70 walk left  # to the digging spot on the cavern floor
+160 dig aim=125 walk left  # a stair cut down through the coal
+40 dig aim=90  # punch through the crown of the grotto
+40 wait  # the fall and the splash
+150 fly run  # jet out of the water, east onto the shelf
+40 walk
+80 wait
+3 walk left  # turn to face the pond
+240 wait  # the fireflies

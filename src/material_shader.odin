@@ -191,6 +191,13 @@ material_shaders_unload :: proc(ms: ^Material_Shaders) {
 // its own colour sinks into the dark exactly as the flat picture does.
 // The alpha channel holds the raw light, which is what says how close a
 // cell stands to a lamp.
+// Four bytes a texel: the material, the light on it, how deep it sits
+// in a body of its own material, and the part of that light a *lamp*
+// threw. The response curve moved into the shader prelude to free the
+// fourth byte: a shader needs lamp and sky apart, because the day
+// fills open air with its own cold colour and never blows a cell out
+// -- a bloom is the blow-out of standing close to a light, and nobody
+// stands close to the sky.
 material_gbuffer_fill :: proc(
 	cells: []Cell,
 	lux: []u8,
@@ -200,6 +207,7 @@ material_gbuffer_fill :: proc(
 	out: []u8,
 	seen: ^[256]bool,
 	box: ^[256]Sandbox_Rect,
+	sky: []u8 = nil,
 ) {
 	for i in 0 ..< 256 {
 		seen[i] = false
@@ -215,6 +223,7 @@ material_gbuffer_fill :: proc(
 	for y in 0 ..< int(h) {
 		row := cells[y * int(w):][:w]
 		line := lux[y * int(w):][:w]
+		day := sky == nil ? nil : sky[y * int(w):][:w]
 		texel_row := texels[y * int(w):][:w]
 
 		for x in 0 ..< int(w) {
@@ -233,19 +242,21 @@ material_gbuffer_fill :: proc(
 			b.max_x = max(b.max_x, i32(x))
 			b.max_y = i32(y)
 
-			// One store a texel: material, the response, the run, the
-			// raw light, in the byte order the R8G8B8A8 texture reads.
+			// One store a texel: material, the raw light, the run, the
+			// lamp's part of the light, in the byte order the R8G8B8A8
+			// texture reads.
+			lamp := day == nil ? line[x] : line[x] - min(day[x], line[x])
 			texel_row[x] = u32le(c) |
-				u32le(light_response[line[x]]) << 8 |
+				u32le(line[x]) << 8 |
 				u32le(run[x]) << 16 |
-				u32le(line[x]) << 24
+				u32le(lamp) << 24
 		}
 	}
 }
 
-material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32) {
+material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32, sky: []u8 = nil) {
 	if !ms.on do return
-	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen, &ms.box)
+	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen, &ms.box, sky)
 	rl.UpdateTextureRec(ms.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(ms.gbuf))
 }
 
@@ -327,14 +338,29 @@ test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^test
 
 	for c, i in cells {
 		testing.expectf(t, out[i * 4] == u8(c), "texel %d holds material %d and the buffer says %d", i, c, out[i * 4])
-		testing.expectf(t, out[i * 4 + 3] == lux[i], "texel %d has light %d and the buffer says %d", i, lux[i], out[i * 4 + 3])
+		testing.expectf(t, out[i * 4 + 1] == lux[i], "texel %d has light %d and the buffer says %d", i, lux[i], out[i * 4 + 1])
 		testing.expectf(
 			t,
-			out[i * 4 + 1] == light_response[lux[i]],
-			"texel %d shades by the response to %d and the buffer says %d",
+			out[i * 4 + 3] == lux[i],
+			"with no day on it, every bit of the light on texel %d is a lamp's, and the buffer says %d of %d",
 			i,
+			out[i * 4 + 3],
 			lux[i],
-			out[i * 4 + 1],
+		)
+	}
+
+	// And with the day on it, the fourth byte is what is left after the
+	// sky, which is what stops a shader blooming a field at noon.
+	sky := [W * H]u8{0, 10, 5, 30, 0, 20, 60, 80, 40, 0, 100, 55}
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box, sky[:])
+
+	for _, i in cells {
+		want := lux[i] - min(sky[i], lux[i])
+		testing.expectf(
+			t,
+			out[i * 4 + 3] == want,
+			"texel %d has %d of light and %d of day, so a lamp threw %d, and the buffer says %d",
+			i, lux[i], sky[i], want, out[i * 4 + 3],
 		)
 	}
 }

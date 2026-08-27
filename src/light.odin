@@ -22,6 +22,17 @@ LIGHT_ORB_SEEK :: 8
 LIGHT_ORB_REACH :: 27
 LIGHT_CRYSTAL_REACH :: 18
 
+// What the day loses once it has to turn a corner. Straight down it
+// loses nothing at all -- `light_throw_sky` walks the columns rather
+// than flooding them -- so this is only what reaches under an overhang,
+// down a bank and into the mouth of a cave. It dies fast in rock, which
+// is what keeps a cave dark under a lit field.
+LIGHT_DAY_FALL :: Light_Fall{open = 236, open_diag = 228, dense = 92, dense_diag = 62}
+
+// How much day has to be falling on the orb before it goes out. He does
+// not carry a lit lamp across a field at noon.
+LIGHT_ORB_WAKES :: 110
+
 // Every light in the world is a material, and how bright it burns is the
 // luminosity of that material. The order they burn in is a rule, held by
 // test_the_lights_of_the_world_are_ordered rather than by an #assert,
@@ -51,9 +62,17 @@ LIGHT_GLOOM_LIFT_R :: 3
 LIGHT_GLOOM_LIFT_G :: 3
 LIGHT_GLOOM_LIFT_B :: 6
 
+// The haze is the light a space is full of, and it takes the colour of
+// whatever is doing the lighting. A flame fills a cave with warm air;
+// the sky fills a field with cold air. One haze for both turned a lit
+// sky the colour of smoke.
 LIGHT_HAZE_R :: 78
 LIGHT_HAZE_G :: 64
 LIGHT_HAZE_B :: 38
+
+LIGHT_DAY_HAZE_R :: 108
+LIGHT_DAY_HAZE_G :: 146
+LIGHT_DAY_HAZE_B :: 205
 
 LIGHT_BLOOM_KNEE :: 96
 LIGHT_BLOOM_STRENGTH :: 150
@@ -82,6 +101,7 @@ Crystal :: struct {
 Light :: struct {
 	stat:     []u8,
 	live:     []u8,
+	day:      []u8,
 	flood:    []i32,
 	crystals: []Crystal,
 
@@ -99,6 +119,12 @@ Light :: struct {
 	last_y:  f32,
 	dropped: bool,
 
+	// Ticks since the day was last thrown, and whether the orb is
+	// burning. He puts it out in the light and lights it in the dark,
+	// so the draw path has to be told which.
+	sky_age: i32,
+	orb_lit: bool,
+
 	seed: u64,
 }
 
@@ -106,6 +132,7 @@ light_make :: proc(seed: u64) -> Light {
 	return Light {
 		stat = make([]u8, LIGHT_SAMPLES),
 		live = make([]u8, LIGHT_SAMPLES),
+		day = make([]u8, LIGHT_SAMPLES),
 		flood = make([]i32, LIGHT_QUEUE),
 		crystals = make([]Crystal, LIGHT_CRYSTALS),
 		seed = seed,
@@ -115,12 +142,13 @@ light_make :: proc(seed: u64) -> Light {
 light_destroy :: proc(l: ^Light) {
 	delete(l.stat)
 	delete(l.live)
+	delete(l.day)
 	delete(l.flood)
 	delete(l.crystals)
 	l^ = {}
 }
 
-light_move :: proc(l: ^Light, origin_x, origin_y: i32) {
+light_move :: proc(l: ^Light, t: Terrain, origin_x, origin_y: i32) {
 	if l.stat == nil do return
 	l.origin_x = origin_x
 	l.origin_y = origin_y
@@ -130,14 +158,45 @@ light_move :: proc(l: ^Light, origin_x, origin_y: i32) {
 	l.count = 0
 	l.next = 0
 	l.dropped = false
+
+	// The day is static light, like a crystal, so it is thrown once
+	// with the square rather than sixty times a second.
+	light_throw_sky(l, t)
+	l.sky_age = 0
 }
 
-light_follow :: proc(l: ^Light, x, y: i32) {
+light_follow :: proc(l: ^Light, t: Terrain, x, y: i32) {
 	if l.stat == nil do return
 	origin_x := floor_div(x, SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	origin_y := floor_div(y, SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	if l.origin_x == origin_x && l.origin_y == origin_y do return
-	light_move(l, origin_x, origin_y)
+	light_move(l, t, origin_x, origin_y)
+}
+
+// The day is thrown with the square, but a wizard digs, and a hole he
+// opens to the sky must let the day in. Re-throwing it every tick would
+// cost a flood over the whole square sixty times a second, so it is
+// re-thrown on a stride: often enough that a hole lights up while he is
+// still standing in it, rarely enough to be free.
+LIGHT_SKY_STRIDE :: 20
+
+light_sky_age :: proc(l: ^Light, t: Terrain) {
+	if l.stat == nil do return
+	l.sky_age += 1
+	if l.sky_age < LIGHT_SKY_STRIDE do return
+	l.sky_age = 0
+	light_throw_sky(l, t)
+}
+
+// How much day falls on a world cell. This is the whole of what says
+// whether the wizard is out in the open or under the ground, and the
+// orb reads it to know whether to burn.
+light_day_at :: proc(l: ^Light, wx, wy: i32) -> u8 {
+	if l.day == nil do return 0
+	lx := light_slot(wx - l.origin_x)
+	ly := light_slot(wy - l.origin_y)
+	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
+	return l.day[int(ly) * LIGHT_W + int(lx)]
 }
 
 light_orb_at :: proc(p: Player) -> (x, y: f32) {
@@ -179,6 +238,111 @@ light_clear_box :: proc(grid: []u8, lx, ly, reach: i32) {
 	}
 }
 
+// The day.
+//
+// A biome may be a light (`light = Daylight` on [Sky] in
+// data/biomes.txt), and the day is not thrown from a point the way a
+// lamp is. Sunlight falls straight down and does not dim on the way:
+// what it costs is what it passes *through*, and open air costs it
+// nothing. So each column of the grid is walked from the top down,
+// holding full power the whole way while the air is open, and stops at
+// the first solid sample -- which takes the light, because that is the
+// ground the sun lands on. Nothing below it is under the sky.
+//
+// Only then is it flooded, from the samples on that boundary, so the
+// day still turns into an overhang, down a bank and a little way into
+// the mouth of a cave, and dies fast in rock.
+//
+// Flooding it instead of dropping it -- which is what the first draft
+// did, seeding the whole Sky *biome* and letting it fall -- put a
+// hundred and sixty cells of open air between the sky and the fields,
+// and two per cent lost a sample over forty samples is what turned noon
+// into dusk.
+//
+// It gets a grid of its own rather than sharing `stat` with the
+// crystals, because the orb reads the day to know whether to burn: with
+// the two mixed, a trail of crystals would read as daylight and put out
+// the very lamp that dropped them.
+light_throw_sky :: proc(l: ^Light, t: Terrain) {
+	if l.day == nil do return
+	mem.zero_slice(l.day)
+
+	// How far down each column the sky reaches, and the light it
+	// carries there.
+	//
+	// The grid is walked a row at a time rather than a column at a
+	// time, carrying a flag for each column saying whether the sky has
+	// reached it yet. It is the same walk either way and gives the same
+	// answer, but a column is a stride of two thousand cells through
+	// the sandbox and every step of it misses the cache, where the
+	// cells of a row are neighbours. Two hundred and eighteen thousand
+	// of these are asked to throw the day over a surface square: 1.94
+	// ms down the columns, 1.23 ms across the rows.
+	depth: [LIGHT_W]i32
+	power: [LIGHT_W]u8
+	open: [LIGHT_W]bool
+
+	lit := false
+	for lx in i32(0) ..< LIGHT_W {
+		depth[lx] = -1
+		power[lx] = light_sky_at(l, t, lx)
+		open[lx] = power[lx] > 0
+		if open[lx] do lit = true
+	}
+	if !lit do return
+
+	for ly in i32(0) ..< LIGHT_H {
+		row := int(ly) * LIGHT_W
+		reaching := false
+		for lx in i32(0) ..< LIGHT_W {
+			if !open[lx] do continue
+			l.day[row + int(lx)] = power[lx]
+			depth[lx] = ly
+			if light_dense_at(l, t, lx, ly) {
+				open[lx] = false
+			} else {
+				reaching = true
+			}
+		}
+		// Every column has met its ground; there is no more sky to fall.
+		if !reaching do break
+	}
+
+	// The frontier: the sample the sky stops at in each column, and
+	// wherever a column reaches lower than the one beside it. Every
+	// other lit sample has nothing but full daylight around it and
+	// nowhere to spread to, so pushing it would only be work.
+	head, tail := 0, 0
+	for lx in i32(0) ..< LIGHT_W {
+		if depth[lx] < 0 do continue
+
+		shallowest := depth[lx]
+		if lx > 0 do shallowest = min(shallowest, depth[lx - 1] < 0 ? 0 : depth[lx - 1])
+		if lx < LIGHT_W - 1 do shallowest = min(shallowest, depth[lx + 1] < 0 ? 0 : depth[lx + 1])
+
+		for ly in max(shallowest - 1, 0) ..= depth[lx] {
+			if tail >= len(l.flood) do break
+			l.flood[tail] = i32(int(ly) * LIGHT_W + int(lx))
+			tail += 1
+		}
+	}
+
+	light_spread(l, l.day, t, head, tail, 0, 0, LIGHT_W - 1, LIGHT_H - 1, LIGHT_DAY_FALL)
+}
+
+// What the sky over one column throws, read at the top of the square.
+// Zero says this column has no sky over it at all, which is the whole
+// of why a light square deep in the coal costs nothing: every column
+// answers zero and there is nothing to walk.
+@(private = "file")
+light_sky_at :: proc(l: ^Light, t: Terrain, lx: i32) -> u8 {
+	wx := l.origin_x + lx * LIGHT_CELL + LIGHT_CELL / 2
+	wy := l.origin_y + LIGHT_CELL / 2
+	b := t.world.biomes.biomes[world_biome_at(t.world^, wx, wy)]
+	if b.light == 0 do return 0
+	return light_lumens(t.world.materials, b.light)
+}
+
 light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, reach: i32, fall: Light_Fall) {
 	start_x := light_slot(wx - l.origin_x)
 	start_y := light_slot(wy - l.origin_y)
@@ -194,7 +358,30 @@ light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, r
 	grid[start] = power
 
 	l.flood[0] = i32(start)
-	head, tail := 0, 1
+	light_spread(l, grid, t, 0, 1, x0, y0, x1, y1, fall, start)
+}
+
+// The spread every light in the world shares: a queue of samples that
+// are already lit, each pushing what is left of itself into the eight
+// around it, dimmer for a step through anything solid than for a step
+// through air. A lamp seeds it with one sample and the day seeds it
+// with the line where the sky meets the ground; past that they are the
+// same walk, so there is one answer to how light turns a corner and
+// not two that can drift apart.
+//
+// `source` is the one sample allowed to spread as though it stood in
+// open air whatever it stands in, so a lamp buried a cell deep still
+// lights the hole it is in. The day has no such sample and passes -1.
+light_spread :: proc(
+	l: ^Light,
+	grid: []u8,
+	t: Terrain,
+	head_in, tail_in: int,
+	x0, y0, x1, y1: i32,
+	fall: Light_Fall,
+	source := -1,
+) {
+	head, tail := head_in, tail_in
 
 	for head < tail {
 		at := int(l.flood[head])
@@ -205,7 +392,7 @@ light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, r
 
 		ax := i32(at % LIGHT_W)
 		ay := i32(at / LIGHT_W)
-		dense := at != start && light_dense_at(l, t, ax, ay)
+		dense := at != source && light_dense_at(l, t, ax, ay)
 
 		for dy in i32(-1) ..= 1 {
 			ny := ay + dy
@@ -241,7 +428,7 @@ light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, r
 light_corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
 	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
 	i := int(ly) * LIGHT_W + int(lx)
-	return u32(max(l.stat[i], l.live[i]))
+	return u32(max(l.stat[i], l.live[i], l.day[i]))
 }
 
 light_response: [256]u8
@@ -251,6 +438,40 @@ light_response_init :: proc "contextless" () {
 	for i in LIGHT_FAINT + 1 ..< 256 {
 		light_response[i] = u8(255 * math.pow(f32(i - LIGHT_FAINT) / f32(255 - LIGHT_FAINT), LIGHT_RESPONSE_GAMMA))
 	}
+}
+
+// What the moving lights throw this tick, with the static light -- the
+// day and the crystals -- left out. A test about one lamp reads this,
+// so the day standing over the whole square cannot answer for it.
+light_live_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
+	if l.live == nil do return 0
+	lx := light_slot(wx - l.origin_x)
+	ly := light_slot(wy - l.origin_y)
+	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
+	return l.live[int(ly) * LIGHT_W + int(lx)]
+}
+
+// The day on a world cell, read the same interpolated way `light_lux`
+// reads the light, so the haze does not step from warm to cold across
+// the seam of a sample.
+light_sky_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
+	if l.day == nil do return 0
+
+	fx := wx - l.origin_x - LIGHT_CELL / 2
+	fy := wy - l.origin_y - LIGHT_CELL / 2
+	lx := light_slot(fx)
+	ly := light_slot(fy)
+	tx := u32(fx - lx * LIGHT_CELL)
+	ty := u32(fy - ly * LIGHT_CELL)
+
+	corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
+		return u32(l.day[int(ly) * LIGHT_W + int(lx)])
+	}
+
+	top := corner(l, lx, ly) * (LIGHT_CELL - tx) + corner(l, lx + 1, ly) * tx
+	bottom := corner(l, lx, ly + 1) * (LIGHT_CELL - tx) + corner(l, lx + 1, ly + 1) * tx
+	return u8((top * (LIGHT_CELL - ty) + bottom * ty) / (LIGHT_CELL * LIGHT_CELL))
 }
 
 light_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
@@ -269,7 +490,17 @@ light_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
 	return u8((top * (LIGHT_CELL - ty) + bottom * ty) / (LIGHT_CELL * LIGHT_CELL))
 }
 
-light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
+// `sky` is how much of `lux` came from the day. It decides two things
+// the light on a cell cannot say on its own:
+//
+//   - the colour of the haze, warm for a flame and cold for the sky, so
+//     a lit field reads as open air and a lit cave as firelight;
+//   - whether the cell blooms. A bloom is the blow-out of standing close
+//     to a light, and the sky is not a thing you can stand close to, so
+//     only the part of the light that is not the day may bloom. Without
+//     that, every cell of a daylit field is bleached to the same warm
+//     white and the picture goes flat.
+light_shade :: proc(c: rl.Color, lux: u8, sky: u8 = 0) -> rl.Color {
 	mix :: #force_inline proc(dark, lit, l: u32) -> u32 {
 		return (dark * (255 - l) + lit * l) / 255
 	}
@@ -280,13 +511,40 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 		return v + fill * l * (255 - v) / (255 * 255)
 	}
 
-	l := u32(light_response[lux])
-	r := haze(mix(gloom(u32(c.r), LIGHT_GLOOM_R, LIGHT_GLOOM_LIFT_R), u32(c.r), l), l, LIGHT_HAZE_R)
-	g := haze(mix(gloom(u32(c.g), LIGHT_GLOOM_G, LIGHT_GLOOM_LIFT_G), u32(c.g), l), l, LIGHT_HAZE_G)
-	b := haze(mix(gloom(u32(c.b), LIGHT_GLOOM_B, LIGHT_GLOOM_LIFT_B), u32(c.b), l), l, LIGHT_HAZE_B)
+	// The sky fills empty air with its own colour and leaves the ground
+	// its own. A lamp's haze grows as a material darkens; the day's
+	// grows as the *cube* of that, so air -- which has no colour at all
+	// -- comes out sky blue, and anything that does have a colour keeps
+	// it. Scaled the way a lamp's is, full daylight first bleached a
+	// field to pale sand and then drowned it in blue.
+	sky_haze :: #force_inline proc(v, l, fill: u32) -> u32 {
+		// Cubed a step at a time. Written out as one product it is
+		// fill*l*room^3, which is four hundred billion and does not fit
+		// in a u32: it wrapped, and the sky came out black.
+		room := 255 - v
+		k := room * room / 255
+		k = k * room / 255
+		return v + fill * l * k / (255 * 255)
+	}
 
-	if lux > LIGHT_BLOOM_KNEE {
-		over := u32(lux - LIGHT_BLOOM_KNEE) * LIGHT_BLOOM_STRENGTH / (255 - LIGHT_BLOOM_KNEE)
+	l := u32(light_response[lux])
+
+	day := u32(min(sky, lux))
+	share := lux == 0 ? u32(0) : day * 255 / u32(lux)
+	lamp_l := l * (255 - share) / 255
+	day_l := l * share / 255
+
+	lift :: #force_inline proc(base, lamp_l, day_l, warm, cold: u32) -> u32 {
+		return sky_haze(haze(base, lamp_l, warm), day_l, cold)
+	}
+
+	r := lift(mix(gloom(u32(c.r), LIGHT_GLOOM_R, LIGHT_GLOOM_LIFT_R), u32(c.r), l), lamp_l, day_l, LIGHT_HAZE_R, LIGHT_DAY_HAZE_R)
+	g := lift(mix(gloom(u32(c.g), LIGHT_GLOOM_G, LIGHT_GLOOM_LIFT_G), u32(c.g), l), lamp_l, day_l, LIGHT_HAZE_G, LIGHT_DAY_HAZE_G)
+	b := lift(mix(gloom(u32(c.b), LIGHT_GLOOM_B, LIGHT_GLOOM_LIFT_B), u32(c.b), l), lamp_l, day_l, LIGHT_HAZE_B, LIGHT_DAY_HAZE_B)
+
+	lamp := lux - u8(day)
+	if lamp > LIGHT_BLOOM_KNEE {
+		over := u32(lamp - LIGHT_BLOOM_KNEE) * LIGHT_BLOOM_STRENGTH / (255 - LIGHT_BLOOM_KNEE)
 		r = mix(r, u32(LIGHT_BLOOM.r), over)
 		g = mix(g, u32(LIGHT_BLOOM.g), over)
 		b = mix(b, u32(LIGHT_BLOOM.b), over)
@@ -297,12 +555,22 @@ light_shade :: proc(c: rl.Color, lux: u8) -> rl.Color {
 
 light_step :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil, drudges: ^Drudge_Bag = nil) {
 	if l.stat == nil do return
+	light_sky_age(l, t)
 	light_drop(l, t, p)
 	light_throw(l, t, p, flies, pots, enemy_pots, drudges)
 }
 
 light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	x, y := light_orb_source(t, p)
+
+	// Nothing falls from an orb that is not lit. The trail is the thing
+	// he leaves in the dark to find his way back, so a walk across a
+	// field in the day must not lay one.
+	if light_day_at(l, x, y) >= LIGHT_ORB_WAKES {
+		l.dropped = false
+		return
+	}
+
 	fx, fy := f32(x), f32(y)
 
 	if l.dropped {
@@ -333,12 +601,20 @@ light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = ni
 	light_forget_bangs(l, t)
 	light_forget_sparks(l, t)
 
+	// The orb only burns in the dark. A wizard does not carry a lit
+	// lamp across a field at noon, and a halo drawn over a daylit
+	// village reads as a fault in the picture rather than as a light.
 	x, y := light_orb_source(t, p)
-	l.live_x = light_slot(x - l.origin_x)
-	l.live_y = light_slot(y - l.origin_y)
-	l.live_on = true
+	l.orb_lit = light_day_at(l, x, y) < LIGHT_ORB_WAKES
 
-	light_flood(l, l.live, t, x, y, light_lumens(table, table.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	if l.orb_lit {
+		l.live_x = light_slot(x - l.origin_x)
+		l.live_y = light_slot(y - l.origin_y)
+		l.live_on = true
+		light_flood(l, l.live, t, x, y, light_lumens(table, table.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
+	} else {
+		l.live_on = false
+	}
 	light_throw_flies(l, t, flies)
 	light_throw_pots(l, t, pots)
 	light_throw_pots(l, t, enemy_pots)
@@ -670,11 +946,11 @@ test_a_bang_lights_the_cave_it_goes_off_in :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
 
 	table := s.world.materials
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	p := light_test_player(20, 20, 1)
 
 	// Far enough from the wizard that nothing he carries reaches it.
@@ -836,12 +1112,12 @@ test_rock_stops_the_light_and_a_corridor_carries_it :: proc(t: ^testing.T) {
 	if !testing.expect(t, found, "Rock must exist") do return
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, Cell(rock))
 	light_fill_box(&s.sandbox, 0, 248, 511, 263, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	light_flood(&s.light, s.light.live, terrain, 32, 256, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	source := light_lux(&s.light, 32, 256)
@@ -871,10 +1147,10 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	light_flood(&s.light, s.light.live, terrain, 1024, 1024, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	centre_x := light_slot(1024)
@@ -895,11 +1171,51 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 }
 
 @(test)
+test_the_orb_is_out_in_the_field_and_lit_under_the_ground :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+	sim_play_begin(&s)
+
+	// Where he starts: a field, under an open sky.
+	sim_step_player(&s, {}, false)
+	ox, oy := light_orb_source(sim_terrain(&s), s.player)
+	testing.expectf(
+		t, light_day_at(&s.light, ox, oy) >= LIGHT_ORB_WAKES,
+		"the day must be full on the village green, and it is %d",
+		light_day_at(&s.light, ox, oy),
+	)
+	testing.expect(t, !s.light.orb_lit, "he does not carry a lit lamp across a field at noon")
+	testing.expect(t, light_live_lux(&s.light, ox, oy) == 0, "and an orb that is out throws nothing")
+
+	crystals := s.light.count
+	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
+	testing.expectf(
+		t, s.light.count == crystals,
+		"nothing falls from an orb that is not lit, and %d crystals did",
+		s.light.count - crystals,
+	)
+
+	// And under the coal, where the only light is the one he brought.
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
+	sim_step_player(&s, {}, false)
+	ox, oy = light_orb_source(sim_terrain(&s), s.player)
+	testing.expectf(
+		t, light_day_at(&s.light, ox, oy) == 0,
+		"no day may reach the coal, and %d of it does",
+		light_day_at(&s.light, ox, oy),
+	)
+	testing.expect(t, s.light.orb_lit, "in the dark he lights it")
+	testing.expect(t, light_live_lux(&s.light, ox, oy) > 0, "and a lit orb throws light")
+}
+
+@(test)
 test_the_crystals_he_drops_keep_the_place_lit_after_he_leaves :: proc(t: ^testing.T) {
 	s: Sim
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 	sim_play_begin(&s)
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
 
 	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
 
@@ -909,7 +1225,7 @@ test_the_crystals_he_drops_keep_the_place_lit_after_he_leaves :: proc(t: ^testin
 	x := i32(math.floor(c.x))
 	y := i32(math.floor(c.y))
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	s.player.x += 4 * LIGHT_ORB_REACH * LIGHT_CELL
 	light_step(&s.light, terrain, s.player)
 
@@ -932,6 +1248,7 @@ test_the_trail_he_leaves_never_outshines_the_orb_he_carries :: proc(t: ^testing.
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 	sim_play_begin(&s)
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
 
 	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
 
@@ -960,12 +1277,13 @@ test_leaving_the_square_forgets_the_light_the_way_the_sandbox_forgets_the_diggin
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 	sim_play_begin(&s)
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
 
 	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
 	if !testing.expect(t, s.light.count > 0, "walking must shake crystals out of the orb") do return
 
 	before := s.light.origin_x
-	light_follow(&s.light, before + SANDBOX_PLAY_SIZE, s.light.origin_y)
+	light_follow(&s.light, sim_terrain(&s), before + SANDBOX_PLAY_SIZE, s.light.origin_y)
 
 	testing.expect(t, s.light.origin_x == before + SANDBOX_PLAY_SIZE, "the grid must move with him")
 	testing.expect(t, s.light.count == 0, "the crystals of the square he left must be forgotten")
@@ -988,7 +1306,7 @@ test_the_orb_finds_open_air_when_the_staff_head_is_buried :: proc(t: ^testing.T)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, Cell(rock))
 	light_fill_box(&s.sandbox, 240, 250, 280, 263, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	p := light_test_player(256, 263, 1)
 
 	ox, oy := light_orb_at(p)

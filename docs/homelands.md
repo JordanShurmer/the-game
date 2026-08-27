@@ -84,26 +84,25 @@ whole strip.
 sit side by side and the world does not blend them, so column 511 of
 one is the neighbour of column 0 of the next. Every picture therefore
 draws its outermost `EDGE` (10) columns identically: level ground at
-`EDGE_GROUND`, the grass on it, and the strata under it. The seeder
+`EDGE_GROUND`, the grass over it, and the strata under it. The seeder
 stamps those columns last, after everything else is drawn, exactly the
 way `tools/seed_tiles.py` stamps a wang tile's bands last — so a field
 that runs into the border simply ends in a headland, and no picture
 has to be drawn around the rule.
 
 **The village green stays open.** The wizard lands in the middle of the
-fourth region, and `pond_place` digs the pond `POND_AWAY` (96) cells
-west of wherever he lands. Which of the twelve pictures the fourth
-region draws depends on the seed, so *every* picture has to be the one
-that can take a pond and a wizard:
+fourth region, and which of the twelve pictures that region draws
+depends on the seed, so *every* picture has to be one he can land in:
 
 | Span | What may be there |
 | --- | --- |
 | `GREEN_X0`..`GREEN_X1` | no Brick, no Thatch, no Wheat: no building and no crop |
-| the pond band | soil, grass and the gravel track, and nothing else |
-| the yard | the same, so there is always somewhere to stand |
+| the yard | soil, grass and the gravel track, so there is always somewhere to stand |
 
 That is why the middle of every picture is pasture with a track across
-it. It is not an oversight; it is the pond.
+it. It is not an oversight; it is where he lands. The pond used to be
+the other reason — it was dug into the green beside him — but the pond
+lives in the caves now; see `docs/water.md`.
 
 ## The strata, and why nothing under the fields is hollow
 
@@ -141,6 +140,44 @@ that is open along the whole bottom edge of the region. Open along the
 whole edge, because the Coalmine tile under it is whichever one the
 lattice lays there, and half of any of them is solid.
 
+## The ground of a village is ground a wizard can walk
+
+He steps up `PLAYER_CLIMB` (3) cells and jumps about twenty-eight. So
+everything worked into the ground of a homeland -- a ridge, a furrow, a
+hedge bank, a ditch, the coping of a well -- is cut to three, and what
+people *built* -- a wall, a roof, a fence, a stack of cut wood -- may
+stop him, because he goes over it.
+
+`check_walkable` in the seeder holds every picture to that: it walks
+the surface of each and fails on any rise over three cells made of
+ground. `test_walking_east_out_of_the_village_gets_him_somewhere` asks
+the same of the running game, coarsely: twenty seconds of walking and
+jumping east must take him ninety cells.
+
+Both exist because the first draft broke it everywhere at once. Furrows
+four cells under ridges four cells proud, every dozen cells, the length
+of every field; a well built to the waist standing across the road out
+of the village; and crops that were `state = Solid`, so a field of
+wheat was a wall eleven cells high. Holding one key walked him
+forty-four cells and then nothing.
+
+Three rules came out of fixing it, and they are the ones to keep:
+
+- **Growth grows out of the ground and does not replace it.** A stalk
+  written into the cell it stands on takes the ground out from under
+  itself -- Wheat is Brush, which he walks through, so what he then
+  walks on is the loam a cell lower, and a stook puts a step in the
+  middle of a field that the field never had.
+- **Grass stands on the soil line rather than being the top of it.**
+  Grown the other way, every solid thing laid at the ground line stands
+  on a three-cell pedestal, and walking off a meadow onto a footpath is
+  a step he cannot take.
+- **Nothing is levelled after the fact.** Shaving a column against a
+  neighbour that is itself still to be shaved walks a whole hillside
+  down to the level of its lowest point; an attempt at it dug a pit
+  through the middle of a field. Each thing is cut to the step where it
+  is drawn.
+
 ## What the village is made of
 
 Five materials came with it, and not a line of Odin came with them:
@@ -148,10 +185,16 @@ Five materials came with it, and not a line of Odin came with them:
 | Material | What it is | How it burns |
 | --- | --- | --- |
 | `Loam` | tilled earth, the ridges of a field | not at all |
-| `Grass` | the skin over the pasture | catches quickly, leaves bare Dirt |
+| `Grass` | the skin over the pasture, and the hedges | catches quickly, leaves bare Dirt |
 | `Wheat` | the standing crop | the most flammable thing in the world |
 | `Thatch` | a roof of reed and straw | stands like timber, burns like a crop |
 | `Brick` | fired clay, the walls of a house | not at all |
+
+Grass and Wheat are `state = Brush`, which is new with the homelands:
+matter that holds its cell against sand and water the way a solid does,
+and burns and crumbles like anything else, but is too slight to stop a
+man. It is a state and not a flag because it is a way of being matter,
+the same as being a powder is. Without it a field is a wall.
 
 So a homeland burns from the crop up, and the brick is what a fire
 stops against. The fallow strips between the plots are the firebreak,
@@ -197,18 +240,11 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game look=Wheat shot=shots/whea
 
 ## What this phase leaves out
 
-- **There is no daylight.** The surface is as dark as a cave, because
-  the only light in the world is the one the wizard carries and the
-  ones the world places. A village under an open sky wants a sky light,
-  and `docs/lighting.md` already says what it would take: a light is a
-  material, and nothing about the flood is tied to a point source.
-  Until then the homelands are judged flat, with `light=0`.
+- **There is no night.** The day is one number that never changes, and
+  the village is always at noon. See `docs/lighting.md`, "The day is a
+  biome", for how the sky throws it and why the orb goes out under it.
 - **Nobody lives there.** The cottages are empty and the fields are
   untended. The drudge is the only other body in the world and he is
   placed underground.
-- **The pond is in the village by accident of the spawn rule**, not
-  because a village was drawn around a pond. It lands 96 cells west of
-  the wizard wherever he stands, which is why every picture has to keep
-  that band clear rather than one picture having a pond drawn into it.
 - **Nothing grows and nothing is harvested.** Wheat is a material that
   stands there and burns. There is no season and no yield.

@@ -36,11 +36,13 @@ App :: struct {
 
 	shaders: Material_Shaders,
 	lux:     []u8,
+	sky:     []u8,   // how much of `lux` is the day, so a shader can tell them apart
 
 	// light_shade of every material at every lux, so the shade loop is
 	// one lookup a pixel. See app_shade.
 	shade_lut:     []rl.Color,
 	shade_corners: []u32,
+	sky_corners:   []u32, // the day's own row of corners, beside shade_corners
 
 	look:  Look,
 	clock: f32,
@@ -56,7 +58,8 @@ App :: struct {
 
 	color_lut: [256]rl.Color,
 
-	dirty: bool,
+	dirty:   bool,
+	hud_off: bool, // a reel films the game, not the debug readout
 }
 
 WINDOW_SHOT_FRAMES :: 90
@@ -69,6 +72,9 @@ Window_Shot :: struct {
 	aim:     u8,
 	ticks:   int,
 	look:    string,
+	script:  string,
+	record:  string,
+	every:   int,
 	on:      bool,
 	profile: bool,
 }
@@ -103,10 +109,32 @@ main :: proc() {
 	if shot.on && !app.look.on do app_walk(&app, shot.walk)
 	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
 
+	reel: Reel
+	if shot.script != "" {
+		loaded, reel_ok := reel_load(shot.script)
+		if !reel_ok {
+			fmt.eprintfln("the script %s could not be read", shot.script)
+			os.exit(1)
+		}
+		reel = loaded
+		reel.dir = shot.record
+		if shot.every > 0 do reel.every = shot.every
+		if reel.dir != "" do os.make_directory(reel.dir)
+		app.hud_off = true
+	}
+
 	frames := 0
 	for !rl.WindowShouldClose() {
-		app.clock = app.look.on ? f32(frames) / 60 : f32(rl.GetTime())
-		if !shot.on do app_handle_input(&app)
+		// A reel must come out the same twice, so its clock is the
+		// frame count and not the wall.
+		app.clock = app.look.on || reel.on ? f32(frames) / 60 : f32(rl.GetTime())
+		if !shot.on && !reel.on do app_handle_input(&app)
+
+		filming := false
+		if reel.on && !reel_done(reel) {
+			filming = reel_step(&reel, &app)
+			app_follow_player(&app)
+		}
 
 		playing := !app.editor.open && !app.tile_edit.open
 		if app.dirty || (playing && app.follow_player) {
@@ -138,7 +166,7 @@ main :: proc() {
 			app_draw_bangs(&app)
 			app_draw_sparks(&app)
 			app_draw_player(&app)
-			draw_hud(&app)
+			if !app.hud_off do draw_hud(&app)
 			draw_prof(&app)
 			editor_draw(&app)
 			tile_editor_draw(&app)
@@ -156,6 +184,29 @@ main :: proc() {
 		}
 
 		frames += 1
+
+		if reel.on {
+			if filming {
+				if reel.dir != "" && reel.shown % reel.every == 0 {
+					frame_path := fmt.tprintf("%s/frame_%05d.png", reel.dir, reel.wrote)
+					rl.TakeScreenshot(strings.clone_to_cstring(frame_path, context.temp_allocator))
+					reel.wrote += 1
+				}
+				reel.shown += 1
+			}
+			if reel_done(reel) {
+				// Where he ended is how a route is tuned: run the reel,
+				// read the landing, move the digging a few cells.
+				fmt.printfln(
+					"%s: %d frames from %d segments, wizard at %.0f,%.0f",
+					reel.dir != "" ? reel.dir : "(unrecorded)",
+					reel.wrote, len(reel.segments), app.player.x, app.player.y,
+				)
+				free_all(context.temp_allocator)
+				break
+			}
+		}
+
 		if shot.on && frames >= shot.frames {
 			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
 			if shot.profile {
@@ -215,6 +266,12 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			if n, ok := strconv.parse_int(value); ok do shot.ticks = max(n, 0)
 		case "look":
 			shot.look = value
+		case "script":
+			shot.script = value
+		case "record":
+			shot.record = value
+		case "every":
+			if n, ok := strconv.parse_int(value); ok do shot.every = max(n, 1)
 		case "profile":
 			if n, ok := strconv.parse_int(value); ok do shot.profile = n != 0
 		}
@@ -281,8 +338,10 @@ app_init_view :: proc(app: ^App) {
 	app.cells = make([]Cell, WINDOW_W * WINDOW_H)
 	app.pixels = make([]rl.Color, WINDOW_W * WINDOW_H)
 	app.lux = make([]u8, WINDOW_W * WINDOW_H)
+	app.sky = make([]u8, WINDOW_W * WINDOW_H)
 	app.water_run = make([]u8, WINDOW_W)
 	app.shade_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
+	app.sky_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
 
 	blank := rl.Image {
 		data    = raw_data(app.pixels),
@@ -353,8 +412,10 @@ app_destroy_view :: proc(app: ^App) {
 	delete(app.cells)
 	delete(app.pixels)
 	delete(app.lux)
+	delete(app.sky)
 	delete(app.water_run)
 	delete(app.shade_corners)
+	delete(app.sky_corners)
 }
 
 app_view_cells :: proc(app: ^App) -> (w, h: i32) {
@@ -411,7 +472,7 @@ app_regenerate :: proc(app: ^App) {
 		prof_end(.Water_Mark, at)
 
 		at = prof_begin()
-		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h)
+		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h, app.sky)
 		prof_end(.Shader_Mark, at)
 	}
 }
@@ -464,12 +525,15 @@ app_shade :: proc(app: ^App, view: World_View) {
 		out := app.pixels[int(ty) * int(view.w):][:view.w]
 
 		lit := app.lux[int(ty) * int(view.w):][:view.w]
+		day := app.sky[int(ty) * int(view.w):][:view.w]
 
 		for tx in i32(0) ..< view.w {
 			wx := view.x + tx * view.step
 			lux := light_lux(&app.light, wx, wy)
+			sky := light_sky_lux(&app.light, wx, wy)
 			lit[tx] = lux
-			out[tx] = app.shade_lut[int(row[tx]) * 256 + int(lux)]
+			day[tx] = sky
+			out[tx] = sky == 0 ? app.shade_lut[int(row[tx]) * 256 + int(lux)] : light_shade(app.color_lut[row[tx]], lux, sky)
 		}
 	}
 }
@@ -479,6 +543,9 @@ app_shade :: proc(app: ^App, view: World_View) {
 // instead of light_lux fetching all four again for every pixel. The
 // blend is the same sum light_lux computes, so the two paths agree to
 // the bit; test_the_fine_shade_matches_light_lux holds them together.
+// The day rides the same machinery: a second corner row from the day
+// grid, so a pixel knows how much of its light is the sky's without a
+// second interpolation path existing anywhere.
 @(private = "file")
 app_shade_fine :: proc(app: ^App, view: World_View) {
 	l := &app.light
@@ -487,6 +554,11 @@ app_shade_fine :: proc(app: ^App, view: World_View) {
 	lx0 := floor_div(fx0, LIGHT_CELL)
 	tx0 := u32(fx0 - lx0 * LIGHT_CELL)
 	corners := int(floor_div(fx0 + view.w - 1, LIGHT_CELL) - lx0) + 2
+
+	day_corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
+		return u32(l.day[int(ly) * LIGHT_W + int(lx)])
+	}
 
 	for ty in i32(0) ..< view.h {
 		wy := view.y + ty
@@ -499,11 +571,16 @@ app_shade_fine :: proc(app: ^App, view: World_View) {
 			top := light_corner(l, cx, ly)
 			bottom := light_corner(l, cx, ly + 1)
 			app.shade_corners[k] = top * (LIGHT_CELL - wy_t) + bottom * wy_t
+
+			sky_top := day_corner(l, cx, ly)
+			sky_bottom := day_corner(l, cx, ly + 1)
+			app.sky_corners[k] = sky_top * (LIGHT_CELL - wy_t) + sky_bottom * wy_t
 		}
 
 		row := app.cells[int(ty) * int(view.w):][:view.w]
 		out := app.pixels[int(ty) * int(view.w):][:view.w]
 		lit := app.lux[int(ty) * int(view.w):][:view.w]
+		day := app.sky[int(ty) * int(view.w):][:view.w]
 
 		k := 0
 		t := tx0
@@ -511,8 +588,10 @@ app_shade_fine :: proc(app: ^App, view: World_View) {
 			left := app.shade_corners[k]
 			right := app.shade_corners[k + 1]
 			lux := u8((left * (LIGHT_CELL - t) + right * t) / (LIGHT_CELL * LIGHT_CELL))
+			sky := u8((app.sky_corners[k] * (LIGHT_CELL - t) + app.sky_corners[k + 1] * t) / (LIGHT_CELL * LIGHT_CELL))
 			lit[tx] = lux
-			out[tx] = app.shade_lut[int(row[tx]) * 256 + int(lux)]
+			day[tx] = sky
+			out[tx] = sky == 0 ? app.shade_lut[int(row[tx]) * 256 + int(lux)] : light_shade(app.color_lut[row[tx]], lux, sky)
 
 			t += 1
 			if t == LIGHT_CELL {
@@ -928,6 +1007,8 @@ app_draw_sparks :: proc(app: ^App) {
 @(private = "file")
 app_draw_orb :: proc(app: ^App) {
 	if !app_lighting(app) do return
+	// He puts it out in the daylight, so it must not be drawn there.
+	if !app.light.orb_lit do return
 
 	x, y := light_orb_at(app.player)
 	app_draw_glow(app, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK, 1, LIGHT_GLOW, LIGHT_CORE)
@@ -1056,13 +1137,17 @@ test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
 	app.cells = make([]Cell, int(w) * int(h))
 	app.pixels = make([]rl.Color, int(w) * int(h))
 	app.lux = make([]u8, int(w) * int(h))
+	app.sky = make([]u8, int(w) * int(h))
 	app.shade_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
+	app.sky_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
 	app.shade_lut = make([]rl.Color, 256 * 256)
 	defer {
 		delete(app.cells)
 		delete(app.pixels)
 		delete(app.lux)
+		delete(app.sky)
 		delete(app.shade_corners)
+		delete(app.sky_corners)
 		delete(app.shade_lut)
 	}
 	for m in 0 ..< 256 {

@@ -1,69 +1,58 @@
 # The water
 
-There is a pond a short walk from the point the wizard starts at, and
-the water in it is drawn by a shader: the surface ripples, the depths
-go dark and cold, and a net of caustics slides over the bottom. A
-swarm of fireflies hangs over the mouth of the pond and is the only
-light on it until he walks up with the orb.
+There is a pond in the caves under the village, and the water in it is
+drawn by a shader: the surface ripples, the depths go dark and cold,
+and a net of caustics slides over the bottom. A swarm of fireflies
+hangs over the mouth of the pond and is the only light on it until he
+walks up with the orb.
 
-This note says how the pond is dug, where the shader came from, what
-it draws, and what the phase leaves out. `docs/lighting.md` says how
-the fireflies light the place, because they are a light and belong to
-the same machinery as the orb and the crystals.
+This note says where the pond is and how the fireflies find it, where
+the shader came from, what it draws, and what the phase leaves out.
+`docs/lighting.md` says how the fireflies light the place, because
+they are a light and belong to the same machinery as the orb and the
+crystals.
 
-## The pond is an overlay, not a biome and not a tile
+## The pond is a tile
 
-A biome fills a whole region of 512 cells, so a `Lake` pixel on the
-biome map is a lake and can never be a pond. A tile belongs to a whole
-biome, so a pond painted into one is a pond in every region of the
-Coalmine. A pond is one thing in one place, so it is neither.
+It used to be an overlay, dug beside the spawn after the spawn was
+found, because the spawn was beside a cave mouth and the pond was the
+one landmark the surface had. The surface is a village now and the
+village is daylit, and a pond of fireflies belongs in the dark. So the
+pond moved underground, and it stopped being code on the way: it is
+the **Grotto**, one authored tile of the Coalmine's wang set
+(`coalmine_0100_1`), painted by `tools/seed_tiles.py` beside the
+Cistern and the Well — a dome of cave over a rock bowl of still water,
+sealed on every side but the east, where a doorway over the waterline
+joins it to the cave.
 
-`src/pond.odin` holds it. A `Pond` is six numbers — a middle, two
-radiuses, and the two materials it is made of — and `pond_cell` turns
-those into the material of a cell:
+The lattice decides where its instances lie, the same as any other
+tile, so every world has its own ponds in its own places and another
+seed moves them. On the shipped seed one lies under the village and
+another under the cavemouth, which is the one the way down walks past.
 
-| Where | What |
-| --- | --- |
-| inside the lower half ellipse | water |
-| within `POND_SHELL` (5) cells outside it | the bank, which is rock |
-| in the upper half ellipse, `POND_LIP` (8) cells high | air |
+The water must not leak: the play sandbox runs it like any other
+liquid, and a bowl with a hole in it empties into the caves below
+within seconds. The bowl is the shell's own rock and the one doorway
+is cut well over the waterline;
+`test_the_grotto_holds_its_water_in_a_bowl_that_cannot_leak` walks
+every water cell of the shipped tile and fails if any neighbour but
+the one above it is neither water nor solid.
 
-So the pond is a bowl of water in a shell of rock with its mouth cut
-open to the sky, whatever the tile under it was painted as. **The
-shell is what makes it hold.** The play sandbox runs the water like any
-other liquid; a bowl with a hole in it empties into the caves below
-within a few seconds. `test_the_pond_holds_its_water_in_a_bowl_that_cannot_leak`
-walks every water cell of the shipped pond and fails if any neighbour
-but the one above it is neither water nor bank.
+## The fireflies are painted in the tile too
 
-The overlay is applied in both paths that read the world:
-`world_cell_at` for one cell, and `generate` once a row, over the run
-of texels the pond covers and no others. It costs nothing anywhere
-else, and `test_the_pond_reaches_the_world_the_same_way_down_both_paths`
-holds the two paths to each other over the pond at three zooms.
+A cell of `Firefly_Light` in a tile is not matter — a phantom can
+never reach the cell grid — it is a **mark**, saying a firefly lives
+here. `load_tile_png` lifts every phantom cell out of a tile as a
+`Tile_Mark` and leaves the air the light hangs in, so the grid keeps
+its invariant; saving a tile stamps the marks back into the file, so
+an editor save cannot lose them.
 
-## The pond is placed after the spawn is found
-
-`world_find_spawn` puts him in the middle of the fourth homelands
-region, which `[Map]` names; see `docs/homelands.md`. Failing that it
-walks out from x=0 along the surface row looking for a **mouth**: ten
-cells of nothing, one under the other, which is a way down into the
-caves. Water is not solid, so a pond reads as a mouth, and a pond dug
-before the spawn is chosen can move the wizard to the edge of it.
-
-So the order in `sim_load` is: spawn first, then
-`pond_place(world, spawn_x, spawn_y)` puts the pond `POND_AWAY` (96)
-cells to his left, then the swarm gathers over it. The spawn search
-also skips whatever a pond carves, so asking it a second time — which
-`bin/shot` and the tests both do — gives the same answer as the first.
-`test_the_pond_leaves_the_spawn_where_it_was` compares the spawn of the
-world with the pond against the spawn of the same world without it, and
-fails if the pond moved him.
-
-The distance is a rule too, not a taste: the pond must open more than a
-body width from his feet and less than half a play square away, so it
-is neither under him nor out of reach. `test_the_pond_is_close_enough_to_the_spawn_to_walk_to`
-holds both ends.
+`firefly_gather` walks the tile slots around the spawn, asks the
+lattice which tiles lie there, and homes a fly on every firefly mark
+it finds, nearest first, up to the swarm's `FIREFLY_MAX`. Nothing in
+the game names the Grotto: the tile that carries firefly marks is the
+pond, whichever tile that is, and a pond painted into any tile of any
+biome gathers its own swarm without a line of code changing.
 
 ## What was read before the shader was written
 

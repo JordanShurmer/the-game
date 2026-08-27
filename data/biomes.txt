@@ -25,6 +25,15 @@ spawn_region    = 4           # the fourth of its regions, west to east
 # would cut a tile in half. A tile is 512 cells, so that is a multiple
 # of 512, and at 512 a region is exactly one tile.
 
+# A biome may also be a light:
+#
+#   light = <material>    the biome throws that material's luminosity
+#
+# The sky throws Daylight. Everything under it is lit by the day
+# reaching it, which is what makes a field bright, a wood dim and a
+# cave dark, and it costs the world no light source at all. See
+# docs/lighting.md, "The day is a biome".
+
 # A biome fills its regions one of three ways.
 #
 #   generator = uniform   the whole region is fill_0
@@ -66,6 +75,7 @@ spawn_region    = 4           # the fourth of its regions, west to east
 color     = 0xFF87CEEB
 generator = uniform
 fill_0    = Air
+light     = Daylight   # a biome may be a light, and this one is the day
 
 [Coalmine]
 color     = 0xFFD57917

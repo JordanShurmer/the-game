@@ -22,6 +22,15 @@ Biome :: struct {
 	key_color: u32,
 	fill_0:    u16,
 	tile_base: Tile_Id,
+
+	// A biome may be a light. `light` is the material it throws, and
+	// how bright that is is the luminosity of that material, exactly as
+	// it is for the orb and the crystals -- see docs/lighting.md,
+	// "Every light is a material". The sky throws Daylight. Air is
+	// material 0 and its luminosity is 0, so a biome that names nothing
+	// throws nothing and needs no sentinel.
+	light:     u16,
+
 	variants:  u8,
 	generator: Biome_Generator,
 }

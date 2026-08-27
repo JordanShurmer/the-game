@@ -108,15 +108,12 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 	editor_init(s)
 
 	s.light = light_make(biomes.world_seed)
-	s.player = player_spawn(s.world)
+	s.player = player_spawn(&s.world)
 
-	if pond, dug := pond_place(s.world, i32(s.player.x), i32(s.player.y)); dug {
-		world_add_pond(&s.world, pond)
-	}
-	s.flies = firefly_gather(s.world)
-	s.drudges = drudge_place(s.world, i32(s.player.x), i32(s.player.y))
+	s.flies = firefly_gather(&s.world, i32(s.player.x), i32(s.player.y))
+	s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
 
-	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
+	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 	s.loaded = true
 
 	sim_open_sandbox(s, SANDBOX_DEFAULT_WIDTH, SANDBOX_DEFAULT_HEIGHT, 0, 0, 1, SANDBOX_DEFAULT_DELAY)
@@ -198,8 +195,60 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 	return find_material_index(s.world.materials, name)
 }
 
+// The world the wizard is standing in: the generated picture, and the
+// sandbox over it wherever one is open on him.
+sim_terrain :: proc(s: ^Sim) -> Terrain {
+	return Terrain{world = &s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+}
+
+// Two regions under the village, which is coal on every side and has no
+// sky anywhere in the square the light grid covers.
+SIM_DARK_X :: -2304
+SIM_DARK_Y :: -1536
+
+// Put the wizard on the first standing ground in a box, and move the
+// square and the light with him. It answers false when the box holds
+// no standing place at all, which is itself worth failing a test over.
+sim_stand_near :: proc(s: ^Sim, cx, cy, w, h: i32) -> bool {
+	t := Terrain{world = &s.world}
+	for dy in i32(0) ..< h {
+		for dx in i32(0) ..< w {
+			for side in ([2]i32{1, -1}) {
+				x := cx + side * dx
+				y := cy + dy
+				if !player_solid_at(t, x, y) do continue
+				if !player_body_clear(t, f32(x), f32(y)) do continue
+
+				s.player.x = f32(x)
+				s.player.y = f32(y)
+				s.player.vx = 0
+				s.player.vy = 0
+				sim_follow_player(s)
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Somewhere dark. The homelands are daylit, so a test about the lamp
+// he carries or the trail he leaves has to be run under them: on the
+// surface the orb is out, nothing falls from it, and what a grid scan
+// finds is the day.
+sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
+	return sim_stand_near(s, SIM_DARK_X, SIM_DARK_Y, 240, 480)
+}
+
+// At the water's edge of the pond the swarm hangs over, so the light
+// square covers the flies a test is about to read.
+sim_stand_by_the_swarm :: proc(s: ^Sim) -> bool {
+	if s.flies.count == 0 do return false
+	f := s.flies.flies[0]
+	return sim_stand_near(s, i32(f.home_x), i32(f.home_y) - 8, 160, 80)
+}
+
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
-	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+	terrain := sim_terrain(s)
 
 	at := prof_begin()
 	player_step(&s.player, terrain, held, jump_pressed, aim)
@@ -236,7 +285,7 @@ sim_play_begin :: proc(s: ^Sim) {
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
 
-	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
+	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 
 	ox := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	oy := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE

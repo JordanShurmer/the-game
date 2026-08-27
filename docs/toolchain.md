@@ -148,4 +148,30 @@ libxi-dev libgl1-mesa-dev`.
 Nothing in the test suite opens a window. The tests read and write
 PNG files through raylib, and `bin/shot` draws the world into a PNG,
 both of which work with no X server and no graphics driver. Only
-`bin/the-game` needs a display.
+`bin/the-game` needs a display, and `xvfb-run` stands in for one:
+
+```sh
+xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/window.png
+```
+
+## Filming the reel
+
+The README's video is the game played by a script -- see the header of
+`src/reel.odin` for the script language, and `docs/reel.txt` for the
+route it currently plays. The window writes every second frame as a
+PNG, and ffmpeg folds them into the two files the README uses:
+
+```sh
+xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game script=docs/reel.txt record=shots/reel
+ffmpeg -framerate 30 -i shots/reel/frame_%05d.png \
+    -c:v libx264 -pix_fmt yuv420p -crf 20 -movflags +faststart docs/images/reel.mp4
+ffmpeg -framerate 30 -i shots/reel/frame_%05d.png \
+    -vf "fps=10,scale=480:-1:flags=lanczos,split[s0][s1];[s0]palettegen=max_colors=64[p];[s1][p]paletteuse=dither=bayer:bayer_scale=5" \
+    docs/images/reel.gif
+```
+
+The run is deterministic, so the same script films the same video --
+until the world changes under it. The tick counts in the script are a
+route, tuned leg by leg against the shipped seed; after a change to
+the terrain, expect to re-tune the legs from the point the world
+diverged.

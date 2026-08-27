@@ -125,7 +125,17 @@ player_centre :: proc(p: Player) -> (x, y: i32) {
 }
 
 Terrain :: struct {
-	world:   World,
+	// A pointer, not the world itself. A terrain is a *view* of a world
+	// with a sandbox laid over part of it, and a view that carries a
+	// copy of what it views is a snapshot that stops following the
+	// world it claims to describe.
+	//
+	// It is not the speed. Seven hundred and fifty bytes by value into
+	// a call made hundreds of thousands of times a frame looks like the
+	// cost of the day, and it is not -- measured at -o:speed the two
+	// are the same, because the compiler passes a struct that large by
+	// reference anyway.
+	world:   ^World,
 	sandbox: ^Sandbox,
 }
 
@@ -137,7 +147,7 @@ terrain_cell_at :: proc(t: Terrain, wx, wy: i32) -> Cell {
 			return sandbox_cell(t.sandbox, sx, sy)
 		}
 	}
-	return world_cell_at(t.world, wx, wy)
+	return world_cell_at(t.world^, wx, wy)
 }
 
 player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
@@ -147,10 +157,10 @@ player_solid_at :: proc(t: Terrain, x, y: i32) -> bool {
 		if sandbox_in_bounds(t.sandbox, sx, sy) {
 			i := sandbox_index(t.sandbox, sx, sy)
 			if t.sandbox.moved[i] do return false
-			return material_stops_him(t.world.materials, t.sandbox.cells[i])
+			return material_stops_him(&t.world.materials, t.sandbox.cells[i])
 		}
 	}
-	return material_stops_him(t.world.materials, world_cell_at(t.world, x, y))
+	return material_stops_him(&t.world.materials, world_cell_at(t.world^, x, y))
 }
 
 // Walks the straight line between two points in steps of at most one cell,
@@ -174,8 +184,12 @@ terrain_line_clear :: proc(t: Terrain, x0, y0, x1, y1: f32) -> bool {
 	return true
 }
 
+// By pointer because a table is not a value to hand around, not because
+// it is faster: measured both ways over four hundred thousand calls at
+// -o:speed there is nothing between them, so the compiler is already
+// passing the four hundred and seventy-two bytes by reference.
 @(private = "file")
-material_stops_him :: proc(table: Material_Table, c: Cell) -> bool {
+material_stops_him :: proc(table: ^Material_Table, c: Cell) -> bool {
 	if int(c) >= len(table.materials) do return false
 	state := table.materials[c].state
 	return state == .Solid || state == .Powder
@@ -421,7 +435,6 @@ world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
 	is_mouth :: proc(t: Terrain, x, surface_y: i32) -> bool {
 		for dy in i32(0) ..< SPAWN_MOUTH_DEPTH {
-			if world_pond_carves(t.world, x, surface_y + dy) do return false
 			if player_solid_at(t, x, surface_y + dy) do return false
 		}
 		return true
@@ -441,7 +454,6 @@ world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, 
 	for dist := i32(SPAWN_CLEARANCE); dist < SPAWN_SEARCH_RANGE; dist += 1 {
 		for side in ([2]i32{1, -1}) {
 			cx := mouth_x + side * dist
-			if world_pond_carves(t.world, cx, surface_y) do continue
 			if !player_solid_at(t, cx, surface_y) do continue
 			if !player_body_clear(t, f32(cx), f32(surface_y)) do continue
 			return cx, true
@@ -452,7 +464,7 @@ world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, 
 
 @(private = "file")
 world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
-	surface_row, row_found := world_find_surface_row(t.world)
+	surface_row, row_found := world_find_surface_row(t.world^)
 	if !row_found do return 0, 0, false
 
 	cpp := t.world.biomes.cells_per_pixel
@@ -519,16 +531,16 @@ world_find_ground_in_region :: proc(t: Terrain, px, py: i32) -> (x, y: i32, foun
 	return 0, 0, false
 }
 
-world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
+world_find_spawn :: proc(world: ^World) -> (x, y: i32, found: bool) {
 	t := Terrain{world = world}
 
-	if px, py, region_found := world_find_spawn_region(world); region_found {
+	if px, py, region_found := world_find_spawn_region(world^); region_found {
 		if gx, gy, ground_found := world_find_ground_in_region(t, px, py); ground_found {
 			return gx, gy, true
 		}
 	}
 
-	surface_row, row_found := world_find_surface_row(world)
+	surface_row, row_found := world_find_surface_row(world^)
 	if !row_found do return world_spawn_fallback(t)
 
 	cpp := world.biomes.cells_per_pixel
@@ -547,7 +559,7 @@ world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool) {
 	return ground_x, surface_y, true
 }
 
-player_spawn :: proc(world: World) -> Player {
+player_spawn :: proc(world: ^World) -> Player {
 	x, y, found := world_find_spawn(world)
 	if !found do x, y = 0, 0
 
@@ -622,7 +634,7 @@ test_a_dropped_wizard_lands_on_the_floor :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 40)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 32, y = 10, facing = 1}
 	for _ in 0 ..< 300 do player_step(&p, terrain, {}, false)
@@ -642,7 +654,7 @@ test_he_does_not_pass_through_a_wall :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 20 {
 		for x in i32(60) ..< 70 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 10, y = 20, facing = 1}
 	for _ in 0 ..< 400 {
@@ -664,7 +676,7 @@ test_hitting_a_wall_does_not_cancel_a_fall :: proc(t: ^testing.T) {
 	for y in i32(0) ..< 2000 {
 		for x in i32(15) ..< 25 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_ROCK)
 	}
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 5, y = 1000, facing = 1}
 	for _ in 0 ..< 60 do player_step(&p, terrain, {.Right, .Run}, false)
@@ -680,7 +692,7 @@ test_walking_and_running_hold_their_speeds :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 20)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	walk := Player{x = 100, y = 20, facing = 1}
 	max_walk := f32(0)
@@ -707,7 +719,7 @@ test_a_jump_from_the_ground_rises_and_returns_to_the_ground :: proc(t: ^testing.
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 150)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 20, y = 150, facing = 1}
 	start_y := p.y
@@ -732,7 +744,7 @@ test_a_jump_press_with_no_ground_and_no_coyote_does_not_change_vy :: proc(t: ^te
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_all_air(world)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 10, y = 10, vy = 50, facing = 1}
 	before := p.vy
@@ -754,7 +766,7 @@ test_coyote_time_lets_him_jump_soon_after_a_ledge_but_not_later :: proc(t: ^test
 	for y in i32(20) ..< 250 {
 		for x in i32(40) ..< 100 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 30, y = 20, facing = 1}
 	for _ in 0 ..< 500 {
@@ -798,7 +810,7 @@ test_he_climbs_a_step_of_exactly_the_climb_height_and_is_stopped_by_a_taller_one
 		world, ok := make_step_world(t, PLAYER_CLIMB)
 		if !ok do return
 		defer destroy_flat_world(world)
-		terrain := Terrain{world = world}
+		terrain := Terrain{world = &world}
 
 		p := Player{x = 30, y = 20, facing = 1}
 		for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
@@ -814,7 +826,7 @@ test_he_climbs_a_step_of_exactly_the_climb_height_and_is_stopped_by_a_taller_one
 		world, ok := make_step_world(t, PLAYER_CLIMB + 1)
 		if !ok do return
 		defer destroy_flat_world(world)
-		terrain := Terrain{world = world}
+		terrain := Terrain{world = &world}
 
 		p := Player{x = 30, y = 20, facing = 1}
 		for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
@@ -838,7 +850,7 @@ test_a_climb_under_a_low_ceiling_is_refused :: proc(t: ^testing.T) {
 	for y in i32(4) ..< 20 - PLAYER_CLIMB {
 		for x in i32(50) ..< 120 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 30, y = 20, facing = 1}
 	for _ in 0 ..< 300 do player_step(&p, terrain, {.Right}, false)
@@ -854,7 +866,7 @@ test_the_jetpack_lifts_him_drains_the_tank_and_he_falls_when_empty :: proc(t: ^t
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_all_air(world)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 20, y = 5000, fuel = PLAYER_FUEL_MAX, facing = 1}
 	start_y := p.y
@@ -890,7 +902,7 @@ test_the_tank_fills_on_the_ground_more_slowly_in_the_air_and_not_while_thrusting
 	if !ok1 do return
 	defer destroy_flat_world(ground_world)
 	carve_open_floor(ground_world, 20)
-	ground_terrain := Terrain{world = ground_world}
+	ground_terrain := Terrain{world = &ground_world}
 
 	standing := Player{x = 20, y = 20, fuel = 0, facing = 1}
 	player_step(&standing, ground_terrain, {}, false)
@@ -904,7 +916,7 @@ test_the_tank_fills_on_the_ground_more_slowly_in_the_air_and_not_while_thrusting
 	if !ok2 do return
 	defer destroy_flat_world(air_world)
 	carve_all_air(air_world)
-	air_terrain := Terrain{world = air_world}
+	air_terrain := Terrain{world = &air_world}
 
 	falling := Player{x = 20, y = 1000, fuel = 0, facing = 1}
 	player_step(&falling, air_terrain, {}, false)
@@ -931,7 +943,7 @@ test_a_player_buried_in_rock_reaches_open_air_within_dig_out_and_is_not_frozen :
 		for x in i32(0) ..< 60 do biome_map_set(world.biome_map, x, y, PLAYER_TEST_AIR)
 	}
 	buried_y := i32(200) + PLAYER_DIG_OUT
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 30, y = f32(buried_y), facing = 1}
 	testing.expect(t, !player_body_clear(terrain, p.x, p.y), "the setup must actually start him buried")
@@ -952,7 +964,7 @@ test_the_same_input_list_gives_the_same_position_twice :: proc(t: ^testing.T) {
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 200)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	Recorded_Input :: struct {
 		held: Player_Input,
@@ -994,7 +1006,7 @@ test_terrain_cell_at_reads_the_sandbox_inside_its_rect_and_the_world_outside_it 
 	sb.origin_y = -2
 	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(sand)
 
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 
 	testing.expect(
 		t, terrain_cell_at(terrain, sb.origin_x, sb.origin_y) == Cell(sand),
@@ -1037,8 +1049,8 @@ test_he_stands_on_sand_that_exists_only_in_the_sandbox :: proc(t: ^testing.T) {
 		}
 	}
 
-	terrain_no_sandbox := Terrain{world = world}
-	terrain_with_sandbox := Terrain{world = world, sandbox = &sb}
+	terrain_no_sandbox := Terrain{world = &world}
+	terrain_with_sandbox := Terrain{world = &world, sandbox = &sb}
 
 	px := f32(sb.origin_x + 32)
 	py := f32(sb.origin_y + 40)
@@ -1065,7 +1077,7 @@ test_digging_the_floor_out_from_under_him_makes_him_fall :: proc(t: ^testing.T) 
 	defer sandbox_destroy(&sb)
 	sandbox_fill_from_world(&sb, world, 40, 70)
 
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 
 	p := Player{x = 72, y = 100, facing = 1}
 	for _ in 0 ..< 10 do player_step(&p, terrain, {}, false)
@@ -1114,7 +1126,7 @@ test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.
 	defer sandbox_destroy(&sb)
 
 	rock := sandbox_cell(&sb, 0, 0)
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 	removed := player_dig(p, terrain)
 	testing.expect(t, removed > 0, "the beam must remove something")
 
@@ -1148,7 +1160,7 @@ test_the_kerf_is_wide_enough_for_his_body :: proc(t: ^testing.T) {
 	defer sandbox_destroy(&sb)
 
 	rock := sandbox_cell(&sb, 0, 0)
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 	player_dig(p, terrain)
 
 	cx, cy := player_centre(p)
@@ -1192,7 +1204,7 @@ test_the_digger_stops_at_what_it_cannot_cut :: proc(t: ^testing.T) {
 	wall := sx + PLAYER_DIG_RANGE / 2
 	for y in i32(0) ..< sb.height do sb.cells[sandbox_index(&sb, wall, y)] = Cell(bedrock)
 
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 	player_dig(p, terrain)
 
 	testing.expect(
@@ -1224,7 +1236,7 @@ test_the_digger_throws_its_cuttings_back_down_the_hole :: proc(t: ^testing.T) {
 	gravel, gravel_found := find_material_index(world.materials, "Gravel")
 	if !testing.expect(t, gravel_found, "Gravel must exist in the material table") do return
 
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 	removed := player_dig(p, terrain)
 	testing.expect(t, removed > 0, "the beam must cut the rock: rock is exactly PLAYER_DIG_POWER")
 
@@ -1272,7 +1284,7 @@ test_holding_dig_cuts_the_sandbox_where_the_aim_points :: proc(t: ^testing.T) {
 	defer sandbox_destroy(&sb)
 
 	rock := sandbox_cell(&sb, 0, 0)
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 
 	cx, cy := player_centre(p)
 	sx := cx - sb.origin_x
@@ -1320,7 +1332,7 @@ test_a_jump_pressed_just_before_he_lands_is_not_thrown_away :: proc(t: ^testing.
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 150)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	falling := Player{x = 20, y = 100, facing = 1}
 	for _ in 0 ..< 200 {
@@ -1362,7 +1374,7 @@ test_the_jump_buffer_changes_nothing_about_a_jump_from_the_ground :: proc(t: ^te
 	if !ok do return
 	defer destroy_flat_world(world)
 	carve_open_floor(world, 150)
-	terrain := Terrain{world = world}
+	terrain := Terrain{world = &world}
 
 	p := Player{x = 20, y = 150, facing = 1}
 	player_step(&p, terrain, {.Jump}, true)
@@ -1394,7 +1406,7 @@ test_a_falling_grain_is_not_a_floor_and_a_landed_one_is :: proc(t: ^testing.T) {
 	for x in i32(0) ..< sb.width do sandbox_paint(&sb, world.materials, x, floor_row, 0, Cell(rock))
 	sandbox_paint(&sb, world.materials, 16, 4, 0, Cell(sand))
 
-	terrain := Terrain{world = world, sandbox = &sb}
+	terrain := Terrain{world = &world, sandbox = &sb}
 
 	sandbox_step(&sb, world.materials)
 	grain_y := i32(-1)
@@ -1443,7 +1455,7 @@ test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc
 	sandbox_step(&falling_sb, world.materials)
 
 	falling := start
-	player_step(&falling, Terrain{world = world, sandbox = &falling_sb}, {.Right, .Run}, false)
+	player_step(&falling, Terrain{world = &world, sandbox = &falling_sb}, {.Right, .Run}, false)
 
 	landed_sb, landed_ok := sandbox_make(128, 128, 1)
 	if !testing.expect(t, landed_ok, "the sandbox must open") do return
@@ -1454,7 +1466,7 @@ test_he_crosses_a_grain_that_is_falling_and_stops_at_one_that_has_landed :: proc
 	}
 
 	landed := start
-	player_step(&landed, Terrain{world = world, sandbox = &landed_sb}, {.Right, .Run}, false)
+	player_step(&landed, Terrain{world = &world, sandbox = &landed_sb}, {.Right, .Run}, false)
 
 	testing.expectf(
 		t, falling.x > start.x,
@@ -1484,9 +1496,9 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
-	terrain := Terrain{world = s.world}
+	terrain := Terrain{world = &s.world}
 
-	x, y, found := world_find_spawn(s.world)
+	x, y, found := world_find_spawn(&s.world)
 	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return
 
 	testing.expect(t, player_solid_at(terrain, x, y), "the feet must be on solid ground")
@@ -1525,8 +1537,8 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 		s.world.biomes.spawn_region, left, left + cpp - 1, x,
 	)
 
-	// And in the middle of it, not at one end: the pond is dug 96 cells
-	// west of wherever he lands and it must land in the same region.
+	// And in the middle of it, not at one end: the middle is the yard
+	// every picture keeps clear for him.
 	middle := left + cpp/2
 	testing.expectf(
 		t, abs(x - middle) < cpp/8,
@@ -1540,8 +1552,8 @@ test_a_fresh_wizard_stands_where_he_spawned :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
 
-	terrain := Terrain{world = s.world}
-	p := player_spawn(s.world)
+	terrain := Terrain{world = &s.world}
+	p := player_spawn(&s.world)
 	testing.expect(t, p.on_ground, "a wizard spawned on solid ground must know he is standing")
 
 	start_x, start_y := p.x, p.y

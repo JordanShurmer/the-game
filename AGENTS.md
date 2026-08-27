@@ -68,9 +68,11 @@ the lattice left. Arguments are `key=value`: `out biome x y w h step
 scale grid player light walk ticks ignite explode`. Shots are not kept
 in the repository.
 
-`player=1` lights the shot, because the wizard carries nearly all the
-light there is; `light=0` turns that off and draws the world flat, which is
-what terrain is judged by. `walk=N` walks him N ticks first (negative
+`player=1` lights the shot; `light=0` turns that off and draws the
+world flat, which is what terrain is judged by. Underground the wizard
+carries nearly all the light there is. On the surface the sky throws
+the day and his orb is out -- see `docs/lighting.md`, "The day is a
+biome". `walk=N` walks him N ticks first (negative
 walks left), which is the way to see the trail of crystals he leaves.
 
 A room lit by nothing but its own reaction has no wizard in it at
@@ -96,6 +98,16 @@ Shader files are read at load, so nothing needs building between one
 picture and the next. Read `docs/material_shaders.md` before writing one:
 it holds the contract, the helpers, and what makes a material read as
 itself.
+
+## Film the reel
+
+`docs/reel.txt` is the scripted run the README's video is filmed from,
+and `src/reel.odin` is the player: timed input segments driven through
+the same procedures the keys drive, one tick a frame, with `skip`
+segments as the cuts. `docs/toolchain.md`, "Filming the reel", holds
+the commands. The run is deterministic; the tick counts are a route
+tuned against the shipped seed, so a terrain change means re-tuning
+the legs from where the world diverged.
 
 ## Iterate on the world
 
@@ -175,9 +187,14 @@ whole strip, and `--check` holds the files to both:
   draws its outermost 10 columns identically and the seeder stamps
   them last, the way `seed_tiles.py` stamps a wang band last.
 - **The village green stays open.** The wizard lands in the middle of
-  the fourth region and `pond_place` digs the pond 96 cells west of
-  him. Which picture that region draws depends on the seed, so *every*
-  picture has to be one that can take a pond and a wizard.
+  the fourth region, and which picture that region draws depends on
+  the seed, so *every* picture has to be one he can land in.
+- **The ground of a village is ground he can walk.** He steps up
+  `PLAYER_CLIMB` (3) cells. Everything worked into the ground -- ridge,
+  furrow, hedge bank, ditch, well coping -- is cut to that; what people
+  built may stop him, because he jumps about twenty-eight cells and
+  flies further. Growth grows *out of* the ground rather than replacing
+  it, or the cell it stands on stops holding him up.
 
 ## The player
 
@@ -189,7 +206,8 @@ fireflies over the pond, for the bang an explosion gives off, and for
 the sparkle a poison throws off meeting water. Read it before changing
 `src/light.odin`, `src/firefly.odin`, `src/bang.odin` or
 `src/sparkle.odin`, and note the third rule below. `docs/water.md` is
-the note for the pond and the water shader; read it before changing
+the note for the pond -- a tile in the caves now, with its fireflies
+painted in it -- and for the water shader; read it before changing
 `src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
 `docs/alchemy.md` is the note for the whole alchemy: the poison, the
 water and the neutral liquid the two leave, and then the salts, the

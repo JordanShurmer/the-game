@@ -19,6 +19,7 @@ void main()
     s.base = texture(texture0, uv).rgb;
     s.lux = g_lux(uv);
     s.glow = g_glow(uv);
+    s.sky = g_share(uv);
     s.depth = g_depth(uv);
 
     vec2 g;

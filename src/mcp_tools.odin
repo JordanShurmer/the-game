@@ -847,7 +847,7 @@ tool_queue_peek :: proc(s: ^Sim, arguments: json.Object) -> string {
 
 tool_player_status :: proc(s: ^Sim) -> string {
 	p := s.player
-	t := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+	t := Terrain{world = &s.world, sandbox = s.follow_player ? &s.sandbox : nil}
 
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "wizard at (%.1f,%.1f), facing %s\n", p.x, p.y, p.facing > 0 ? "right" : "left")

@@ -79,7 +79,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 			c := lut[row[tx]]
 
 			if shot.light != nil {
-				c = light_shade(c, light_lux(shot.light, wx, wy))
+				c = light_shade(c, light_lux(shot.light, wx, wy), light_sky_lux(shot.light, wx, wy))
 			}
 
 			if in_frame_row {
@@ -317,6 +317,9 @@ shot_draw_sparks :: proc(world: World, shot: Shot, pixels: []rl.Color, width, he
 
 @(private = "file")
 shot_draw_orb :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, p: Player) {
+	// He puts it out in the daylight, so it must not be drawn there.
+	if shot.light != nil && !shot.light.orb_lit do return
+
 	x, y := light_orb_at(p)
 	shot_draw_glow(
 		shot, pixels, width, height, x, y,
@@ -444,7 +447,7 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-shot_test_player :: proc(t: ^testing.T, world: World) -> (p: Player, ok: bool) {
+shot_test_player :: proc(t: ^testing.T, world: ^World) -> (p: Player, ok: bool) {
 	x, y, found := world_find_spawn(world)
 	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return {}, false
 	return Player{x = f32(x), y = f32(y), facing = 1, on_ground = true}, true
@@ -460,7 +463,7 @@ test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^t
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	ox, oy := sprite_frame_origin(player)
@@ -502,7 +505,7 @@ test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^tes
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	motion := player_motion(player)
@@ -555,7 +558,7 @@ test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: pro
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	shot := Shot {
@@ -668,6 +671,10 @@ test_the_orb_lights_what_is_near_him_and_the_gloom_keeps_the_rest :: proc(t: ^te
 	if !testing.expectf(t, result.err == .None, "the shipped sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
+	// Under the village, where the gloom is the thing being measured.
+	// On the surface the day lights the far corner as well as the near
+	// one and the orb is out, so there is no gloom to keep anything.
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
 	for _ in 0 ..< 30 do sim_step_player(&s, {}, false)
 
 	player := s.player
