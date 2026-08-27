@@ -20,7 +20,7 @@ LIGHT_ORB_MIRROR :: -0.5
 LIGHT_ORB_SEEK :: 8
 
 LIGHT_ORB_REACH :: 27
-LIGHT_CRYSTAL_REACH :: 46
+LIGHT_CRYSTAL_REACH :: 31
 
 // What the day loses once it has to turn a corner. Straight down it
 // loses nothing at all -- `light_throw_sky` walks the columns rather
@@ -51,17 +51,16 @@ Light_Fall :: struct {
 
 LIGHT_ORB_FALL :: Light_Fall{open = 212, open_diag = 196, dense = 108, dense_diag = 75}
 
-// A crystal's light falls off far more gently than the orb's own, so
-// one crystal lights a broad dim pool over a full screen across --
-// about 356 cells against the 320 the game opens on -- and the trail
-// is a chain of such pools rather than a dotted line of small bright
-// ones. The reach grows with the falloff:
+// A crystal's light falls off more gently than the orb's own, and it
+// burns low, so a tiny gem soaks a wide patch of ground in faint light
+// without filling the cave with glow: the trail says "explored", it
+// does not stage the scene. The reach grows with the falloff:
 // test_every_reach_outlasts_the_falloff_it_bounds holds the two
 // together.
-// The diagonal keeps pace with the straight fall (240^sqrt2 in the
+// The diagonal keeps pace with the straight fall (234^sqrt2 in the
 // 256ths), because at a falloff this gentle a lossier diagonal draws
 // the pool as a four-pointed star instead of a pool.
-LIGHT_CRYSTAL_FALL :: Light_Fall{open = 240, open_diag = 234, dense = 108, dense_diag = 75}
+LIGHT_CRYSTAL_FALL :: Light_Fall{open = 234, open_diag = 225, dense = 108, dense_diag = 75}
 
 LIGHT_CRYSTALS :: 1024
 
@@ -70,13 +69,16 @@ LIGHT_CRYSTALS :: 1024
 // flood's own falloff -- walls counted -- so reading it under the orb
 // is what "how close is the nearest crystal" means here. Bright enough
 // says this place is already left lit and nothing falls; dim says the
-// trail has all but run out, and one falls to carry it on. The bar is
-// set close to LIGHT_FAINT, so down an open gallery the crystals hang
-// more than half a screen apart -- about 164 cells against the 320 the
-// game opens on -- with the last of each pool still readable between
-// them, and through cut rock, where the light behind him dies in a few
-// samples, they fall much closer together.
+// trail has all but run out, and one falls to carry it on.
 LIGHT_DROP_BELOW :: 6
+
+// And never nearer than this to a crystal already hanging, whatever
+// the light says: half the 320 cell view the game opens on. Through
+// cut rock and around a corner the light behind him dies in a few
+// samples, and without a floor the darkness rule bunches gems down
+// every winding stair; with it the trail stays a scatter of small far
+// lights whichever way the path bends.
+LIGHT_DROP_APART :: 160.0
 
 LIGHT_GLOOM_R :: 30
 LIGHT_GLOOM_G :: 30
@@ -105,13 +107,13 @@ LIGHT_ORB_HALO :: 10
 LIGHT_ORB_BLAZE :: 3
 LIGHT_ORB_PEAK :: 0.92
 
-// A crystal is a patch of glow soaked into the place, not a lamp hung
-// in it: a wide faint halo and no core at all. A blaze below zero is
-// how a light says it has no heart to draw -- both draw paths keep
-// that rule.
-LIGHT_CRYSTAL_HALO :: 12
+// The halo around the gem is small and faint: the rupee is the thing
+// you see, and the flood on the ground is the light it gives. A blaze
+// below zero is how a light says it has no bright heart to draw --
+// both draw paths keep that rule.
+LIGHT_CRYSTAL_HALO :: 8
 LIGHT_CRYSTAL_BLAZE :: -1
-LIGHT_CRYSTAL_PEAK :: 0.26
+LIGHT_CRYSTAL_PEAK :: 0.16
 
 LIGHT_CORE :: rl.Color{255, 251, 233, 255}
 LIGHT_GLOW :: rl.Color{255, 208, 122, 255}
@@ -600,6 +602,14 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	ly := light_slot(y - l.origin_y)
 	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return
 	if l.stat[int(ly) * LIGHT_W + int(lx)] >= LIGHT_DROP_BELOW do return
+
+	// And never beside one that already hangs, however dark the rock
+	// between them keeps the reading.
+	for i in 0 ..< int(l.count) {
+		dx := f32(x) - l.crystals[i].x
+		dy := f32(y) - l.crystals[i].y
+		if dx * dx + dy * dy < LIGHT_DROP_APART * LIGHT_DROP_APART do return
+	}
 
 	l.crystals[l.next] = Crystal{x = f32(x), y = f32(y), twinkle = u8(wang_hash(l.seed, LIGHT_SALT_CRYSTAL, x, y))}
 	l.next = (l.next + 1) % LIGHT_CRYSTALS

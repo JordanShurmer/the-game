@@ -653,7 +653,8 @@ luminosity  = 255
 [Light_Crystal]
 # What falls out of the orb as he walks and hangs where it fell. It has
 # no physical interaction at all, so nothing can touch one and one can
-# touch nothing.
+# touch nothing. It burns low: the trail is there to say "explored",
+# not to light the cave the way the orb does.
 state       = Phantom
 density     = 0.0
 fall_speed  = 0
@@ -667,7 +668,7 @@ contact     =
 immersion   =
 tags        = Magical
 glyph       = ^
-luminosity  = 168
+luminosity  = 110
 
 [Firefly_Light]
 # The cold green light a firefly carries over a pond.
