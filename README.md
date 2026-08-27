@@ -174,6 +174,7 @@ The authored data:
 | Path | What it holds |
 | --- | --- |
 | `data/materials.txt` | The materials, the lights among them |
+| `data/shaders/materials/` | One shader a material, and the prelude they share |
 | `data/biomes.txt` | The biomes: a key color, one fill material, and either a flat fill or a set of tiles |
 | `data/biome_map.png` | The world layout, one pixel a 512x512-cell region. The game writes a starter map if it is absent |
 | `data/tiles/` | The tile sets, one PNG a tile |

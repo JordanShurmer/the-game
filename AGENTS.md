@@ -52,9 +52,11 @@ the lattice left. Arguments are `key=value`: `out biome x y w h step
 scale grid player light walk ticks ignite explode`. Shots are not kept
 in the repository.
 
-`player=1` lights the shot, because the wizard carries nearly all the
-light there is; `light=0` turns that off and draws the world flat, which is
-what terrain is judged by. `walk=N` walks him N ticks first (negative
+`player=1` lights the shot; `light=0` turns that off and draws the
+world flat, which is what terrain is judged by. Underground the wizard
+carries nearly all the light there is. On the surface the sky throws
+the day and his orb is out -- see `docs/lighting.md`, "The day is a
+biome". `walk=N` walks him N ticks first (negative
 walks left), which is the way to see the trail of crystals he leaves.
 
 A room lit by nothing but its own reaction has no wizard in it at
@@ -162,6 +164,12 @@ whole strip, and `--check` holds the files to both:
   the fourth region and `pond_place` digs the pond 96 cells west of
   him. Which picture that region draws depends on the seed, so *every*
   picture has to be one that can take a pond and a wizard.
+- **The ground of a village is ground he can walk.** He steps up
+  `PLAYER_CLIMB` (3) cells. Everything worked into the ground -- ridge,
+  furrow, hedge bank, ditch, well coping -- is cut to that; what people
+  built may stop him, because he jumps about twenty-eight cells and
+  flies further. Growth grows *out of* the ground rather than replacing
+  it, or the cell it stands on stops holding him up.
 
 ## The player
 

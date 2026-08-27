@@ -335,8 +335,7 @@ def stratum_at_col(land, x, y):
     profile still holds."""
     gt = GRAVEL_TOP + int(land.gravel_wander[x])
     rt = ROCK_TOP + int(land.rock_wander[x])
-    if rt < gt + 14:
-        rt = gt + 14  # the rock roof never rides up into the gravel band
+    rt = max(rt, gt + 14)  # the rock roof never rides up into the gravel band
     if y >= rt:
         return ROCK
     if y >= gt:
@@ -406,7 +405,7 @@ def lay_ground(land):
         near = min(x, IMG - 1 - x)
         hold = 0.0 if near < EDGE else min(1.0, (near - EDGE) / FADE)
         swell_amt = swell[x] * swell_hold(x)
-        land.top[x] = int(round(EDGE_GROUND + (swell_amt + roll[x] + fine[x]) * hold))
+        land.top[x] = round(EDGE_GROUND + (swell_amt + roll[x] + fine[x]) * hold)
         land.gravel_wander[x] = gravel_wander[x] * hold
         land.rock_wander[x] = rock_wander[x] * hold
 
@@ -506,7 +505,7 @@ def coal_seam(land, cx, cy, rng, length=None, thick=None):
     for i in range(length):
         x = x0 + i
         wob = 5.0 * math.sin(slow * i + phase) + 1.8 * math.sin(fine * i)
-        y = cy + int(round(wob))
+        y = cy + round(wob)
         t = i / max(1, length - 1)
         pinch = 1.0 - abs(2.0 * t - 1.0)  # 0 at both ends, 1 at the middle
         h = max(1, round(thick * (0.25 + 0.75 * pinch)))

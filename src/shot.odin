@@ -447,7 +447,7 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 }
 
 @(private = "file")
-shot_test_player :: proc(t: ^testing.T, world: World) -> (p: Player, ok: bool) {
+shot_test_player :: proc(t: ^testing.T, world: ^World) -> (p: Player, ok: bool) {
 	x, y, found := world_find_spawn(world)
 	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return {}, false
 	return Player{x = f32(x), y = f32(y), facing = 1, on_ground = true}, true
@@ -463,7 +463,7 @@ test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^t
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	ox, oy := sprite_frame_origin(player)
@@ -505,7 +505,7 @@ test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^tes
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	motion := player_motion(player)
@@ -558,7 +558,7 @@ test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: pro
 	if !testing.expectf(t, result.err == .None, "the sprite sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
-	player, ok := shot_test_player(t, s.world)
+	player, ok := shot_test_player(t, &s.world)
 	if !ok do return
 
 	shot := Shot {

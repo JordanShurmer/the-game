@@ -269,23 +269,44 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 
 	// How far down each column the sky reaches, and the light it
 	// carries there.
+	//
+	// The grid is walked a row at a time rather than a column at a
+	// time, carrying a flag for each column saying whether the sky has
+	// reached it yet. It is the same walk either way and gives the same
+	// answer, but a column is a stride of two thousand cells through
+	// the sandbox and every step of it misses the cache, where the
+	// cells of a row are neighbours. Two hundred and eighteen thousand
+	// of these are asked to throw the day over a surface square: 1.94
+	// ms down the columns, 1.23 ms across the rows.
 	depth: [LIGHT_W]i32
-	lit := false
+	power: [LIGHT_W]u8
+	open: [LIGHT_W]bool
 
+	lit := false
 	for lx in i32(0) ..< LIGHT_W {
 		depth[lx] = -1
-
-		power := light_sky_at(l, t, lx)
-		if power == 0 do continue
-
-		for ly in i32(0) ..< LIGHT_H {
-			l.day[int(ly) * LIGHT_W + int(lx)] = power
-			depth[lx] = ly
-			if light_dense_at(l, t, lx, ly) do break
-		}
-		lit = true
+		power[lx] = light_sky_at(l, t, lx)
+		open[lx] = power[lx] > 0
+		if open[lx] do lit = true
 	}
 	if !lit do return
+
+	for ly in i32(0) ..< LIGHT_H {
+		row := int(ly) * LIGHT_W
+		reaching := false
+		for lx in i32(0) ..< LIGHT_W {
+			if !open[lx] do continue
+			l.day[row + int(lx)] = power[lx]
+			depth[lx] = ly
+			if light_dense_at(l, t, lx, ly) {
+				open[lx] = false
+			} else {
+				reaching = true
+			}
+		}
+		// Every column has met its ground; there is no more sky to fall.
+		if !reaching do break
+	}
 
 	// The frontier: the sample the sky stops at in each column, and
 	// wherever a column reaches lower than the one beside it. Every
@@ -317,7 +338,7 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 light_sky_at :: proc(l: ^Light, t: Terrain, lx: i32) -> u8 {
 	wx := l.origin_x + lx * LIGHT_CELL + LIGHT_CELL / 2
 	wy := l.origin_y + LIGHT_CELL / 2
-	b := t.world.biomes.biomes[world_biome_at(t.world, wx, wy)]
+	b := t.world.biomes.biomes[world_biome_at(t.world^, wx, wy)]
 	if b.light == 0 do return 0
 	return light_lumens(t.world.materials, b.light)
 }
@@ -925,11 +946,11 @@ test_a_bang_lights_the_cave_it_goes_off_in :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, Terrain{world = s.world, sandbox = &s.sandbox}, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
 
 	table := s.world.materials
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	p := light_test_player(20, 20, 1)
 
 	// Far enough from the wizard that nothing he carries reaches it.
@@ -1091,12 +1112,12 @@ test_rock_stops_the_light_and_a_corridor_carries_it :: proc(t: ^testing.T) {
 	if !testing.expect(t, found, "Rock must exist") do return
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, Terrain{world = s.world, sandbox = &s.sandbox}, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, Cell(rock))
 	light_fill_box(&s.sandbox, 0, 248, 511, 263, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	light_flood(&s.light, s.light.live, terrain, 32, 256, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	source := light_lux(&s.light, 32, 256)
@@ -1126,10 +1147,10 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
-	light_move(&s.light, Terrain{world = s.world, sandbox = &s.sandbox}, 0, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	light_flood(&s.light, s.light.live, terrain, 1024, 1024, light_lumens(s.world.materials, s.world.materials.orb), LIGHT_ORB_REACH, LIGHT_ORB_FALL)
 
 	centre_x := light_slot(1024)
@@ -1165,7 +1186,7 @@ test_the_crystals_he_drops_keep_the_place_lit_after_he_leaves :: proc(t: ^testin
 	x := i32(math.floor(c.x))
 	y := i32(math.floor(c.y))
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	s.player.x += 4 * LIGHT_ORB_REACH * LIGHT_CELL
 	light_step(&s.light, terrain, s.player)
 
@@ -1246,7 +1267,7 @@ test_the_orb_finds_open_air_when_the_staff_head_is_buried :: proc(t: ^testing.T)
 	light_fill_box(&s.sandbox, 0, 0, 511, 511, Cell(rock))
 	light_fill_box(&s.sandbox, 240, 250, 280, 263, MATERIAL_AIR)
 
-	terrain := Terrain{world = s.world, sandbox = &s.sandbox}
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
 	p := light_test_player(256, 263, 1)
 
 	ox, oy := light_orb_at(p)

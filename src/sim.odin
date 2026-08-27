@@ -108,13 +108,13 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 	editor_init(s)
 
 	s.light = light_make(biomes.world_seed)
-	s.player = player_spawn(s.world)
+	s.player = player_spawn(&s.world)
 
 	if pond, dug := pond_place(s.world, i32(s.player.x), i32(s.player.y)); dug {
 		world_add_pond(&s.world, pond)
 	}
 	s.flies = firefly_gather(s.world)
-	s.drudges = drudge_place(s.world, i32(s.player.x), i32(s.player.y))
+	s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
 
 	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 	s.loaded = true
@@ -201,7 +201,7 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 // The world the wizard is standing in: the generated picture, and the
 // sandbox over it wherever one is open on him.
 sim_terrain :: proc(s: ^Sim) -> Terrain {
-	return Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+	return Terrain{world = &s.world, sandbox = s.follow_player ? &s.sandbox : nil}
 }
 
 // Two regions under the village, which is coal on every side and has no
@@ -216,7 +216,7 @@ SIM_DARK_Y :: -1536
 // It answers false if there is no standing place down there at all,
 // which is itself worth failing a test over.
 sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
-	t := Terrain{world = s.world}
+	t := Terrain{world = &s.world}
 	for dy in i32(0) ..< 480 {
 		for dx in i32(0) ..< 240 {
 			for side in ([2]i32{1, -1}) {

@@ -79,7 +79,7 @@ main :: proc() {
 			os.exit(1)
 		}
 
-		player = game.player_spawn(sim.world)
+		player = game.player_spawn(&sim.world)
 		player.on_ground = true
 
 		if !options.aimed && options.biome == "" {
@@ -186,7 +186,7 @@ main :: proc() {
 	shot.drudge_sprite = drudge_sheet
 
 	if options.light {
-		terrain := game.Terrain{world = sim.world, sandbox = shot.sandbox}
+		terrain := game.Terrain{world = &sim.world, sandbox = shot.sandbox}
 		// With no wizard in the frame there is no orb to follow, so the light
 		// follows the view instead. That is how a room lit by nothing but the
 		// sparks of its own reaction can be looked at.

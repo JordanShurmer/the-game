@@ -171,10 +171,10 @@ test_the_pond_leaves_the_spawn_where_it_was :: proc(t: ^testing.T) {
 	bare := s.world
 	bare.pond_count = 0
 
-	want_x, want_y, found := world_find_spawn(bare)
+	want_x, want_y, found := world_find_spawn(&bare)
 	if !testing.expect(t, found, "the shipped map must offer a spawn point") do return
 
-	got_x, got_y, still := world_find_spawn(s.world)
+	got_x, got_y, still := world_find_spawn(&s.world)
 	testing.expect(t, still, "digging a pond must not take the spawn point away")
 	testing.expectf(
 		t,

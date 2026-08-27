@@ -192,7 +192,7 @@ test_a_thrown_pot_flies_and_breaks_on_a_wall_and_leaves_a_crater :: proc(t: ^tes
 
 	pot_fill_box(&pt.sb, 90, 0, 95, 127, Cell(rock))
 
-	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+	terrain := Terrain{world = &pt.world, sandbox = &pt.sb}
 	p := Player{x = 20, y = 64, facing = 1, aim = PLAYER_AIM_RIGHT, on_ground = true}
 
 	bag: Pot_Bag
@@ -240,7 +240,7 @@ test_the_rest_between_throws_holds :: proc(t: ^testing.T) {
 	if !testing.expect(t, found, "Rock must exist") do return
 	pot_fill_box(&pt.sb, 40, 0, 45, 127, Cell(rock))
 
-	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+	terrain := Terrain{world = &pt.world, sandbox = &pt.sb}
 	p := Player{x = 20, y = 20, facing = 1, aim = PLAYER_AIM_RIGHT}
 
 	bag: Pot_Bag
@@ -266,7 +266,7 @@ test_two_runs_of_the_same_throw_give_the_same_checksum :: proc(t: ^testing.T) {
 		rock, _ := find_material_index(pt.table, "Rock")
 		pot_fill_box(&pt.sb, 90, 0, 95, 127, Cell(rock))
 
-		terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+		terrain := Terrain{world = &pt.world, sandbox = &pt.sb}
 		p := Player{x = 20, y = 64, facing = 1, aim = PLAYER_AIM_RIGHT, on_ground = true}
 
 		bag: Pot_Bag
@@ -285,7 +285,7 @@ test_a_pot_that_touches_nothing_goes_off_when_its_fuse_ends :: proc(t: ^testing.
 	if !ok do return
 	defer pot_test_destroy(&pt)
 
-	terrain := Terrain{world = pt.world, sandbox = &pt.sb}
+	terrain := Terrain{world = &pt.world, sandbox = &pt.sb}
 
 	bag: Pot_Bag
 	bag.count = 1

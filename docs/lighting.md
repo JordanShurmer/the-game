@@ -56,6 +56,94 @@ draws between the two: the explosion is matter that goes away, and the
 orb is a light that stays. `docs/physics.md`, "Explosions", says what
 the expulsive `force` on that same row does.
 
+## The day is a biome
+
+A light does not have to be a thing in the world. A **biome** may be one,
+and the sky is:
+
+```
+[Sky]
+color     = 0xFF87CEEB
+generator = uniform
+fill_0    = Air
+light     = Daylight
+```
+
+`Biome.light` names a material, and how bright the biome burns is that
+material's luminosity, exactly as it is for the orb. `Daylight` is a row
+in `data/materials.txt` like any other. Any biome could throw one; the
+sky is the one that does.
+
+**Sunlight is not thrown from a point, so it is not flooded like one.**
+It falls straight down and open air costs it nothing. `light_throw_sky`
+walks each column of the grid from the top of the square, holding full
+power the whole way down while the air is open, and stops at the first
+solid sample -- which takes the light, because that is the ground the
+sun lands on. Nothing under it is under the sky.
+
+Only from that boundary is the light flooded, with `LIGHT_DAY_FALL`, so
+the day still reaches under an overhang, down a bank and a little way
+into the mouth of a cave, and dies fast in rock. That is what keeps a
+cave dark under a lit field.
+
+The first draft seeded the whole `Sky` biome and let the flood carry it
+down. It does not work: the sky region stops at the top of the
+homelands region and the fields are a hundred and sixty cells below it,
+which at two per cent lost a sample is forty samples of falloff. Noon
+came out as dusk.
+
+**The day gets a grid of its own**, beside `stat` and `live`, and a cell
+reads the brightest of the three. It could have shared `stat` with the
+crystals -- neither moves -- but the orb reads the day to know whether
+to burn, and with the two mixed a trail of crystals reads as daylight
+and puts out the very lamp that dropped them.
+
+It is thrown when the wizard enters a square and again every
+`LIGHT_SKY_STRIDE` (20) ticks, so a hole he digs to the sky lights up
+while he is still standing in it. Over a surface square that costs
+1.2 ms; over a square with no sky in it, 0.008 ms, because every column
+answers "no sky here" at once and there is nothing to walk.
+
+The walk goes **a row at a time, not a column at a time**, carrying a
+flag per column for whether the sky has reached it yet. Same walk, same
+answer, but a column is a stride of two thousand cells through the
+sandbox and every step of it misses the cache: 1.94 ms down the
+columns against 1.23 ms across the rows.
+
+## The orb only burns in the dark
+
+A wizard does not carry a lit lamp across a field at noon. `light_throw`
+reads the day where the orb is and puts it out over `LIGHT_ORB_WAKES`,
+the draw paths skip its halo when it is out, and nothing falls from an
+orb that is not lit -- the trail is what he leaves in the dark to find
+his way back, and a walk across a field should not lay one.
+
+## The haze takes the colour of what is lighting
+
+`light_shade` is handed how much of the light on a cell is the day. Two
+things follow from it:
+
+- **The haze**: warm for a flame, cold for the sky, so a lit cave reads
+  as firelight and a lit field as open air.
+- **The bloom**: only the part of the light that is *not* the day may
+  blow a cell out, because a bloom is what standing close to a light
+  does and nobody stands close to the sky. Without that, every cell of
+  a daylit field bleaches to the same warm white.
+
+The two hazes are not laid on the same way either. A lamp's grows as a
+material darkens, which is what makes lit air glow around it; the day's
+grows as the **cube** of that, so air -- which has no colour of its own
+-- comes out sky blue while the grass beside it stays green. Laid on a
+lamp's way, full daylight first bleached a field to pale sand and then
+drowned it in blue.
+
+The material shaders answer to the same split. The g-buffer carries the
+raw light and the part of it a lamp threw, the response curve having
+moved out of the buffer and into the prelude to free the byte, and
+`m_dress` reads both. A material shader lays on no day haze at all: the
+sky's colour belongs to air, and air is the one thing a material shader
+never paints.
+
 ## What the codebase decides for us
 
 1. **`Sim` holds the game and knows nothing of a screen.** The light is
@@ -283,6 +371,9 @@ The two grids and the queue are 768 KB together, allocated once per
 
 ## What this phase leaves out
 
+- **There is no night, and no sun in the sky.** The day is one number
+  that does not change, thrown straight down. Nothing casts a shadow
+  from it and nothing dims at evening.
 - **No shadows with edges.** Light is attenuated by what it passes
   through, not traced, so a wall darkens the light behind it rather
   than cutting a hard silhouette out of it.

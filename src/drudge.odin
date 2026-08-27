@@ -239,7 +239,7 @@ drudge_has_ceiling :: proc(t: Terrain, x, y: i32) -> bool {
 drudge_ground_at_column :: proc(t: Terrain, x, y: i32, home: Biome_Id) -> (found_y: i32, ok: bool) {
 	for dy in i32(0) ..< SPAWN_SEARCH_RANGE {
 		fy := y + dy
-		if world_biome_at(t.world, x, fy) != home do continue
+		if world_biome_at(t.world^, x, fy) != home do continue
 		if !drudge_body_clear(t, f32(x), f32(fy)) do continue
 		if !drudge_on_ground(t, f32(x), f32(fy)) do continue
 		if !drudge_has_ceiling(t, x, fy) do continue
@@ -255,9 +255,9 @@ drudge_ground_at_column :: proc(t: Terrain, x, y: i32, home: Biome_Id) -> (found
 // tunnel into. This scans outward from the spawn instead, a short distance
 // at a time, both ways, and takes the first column whose ground answers
 // both questions. See docs/drudge.md, "Where he stands".
-drudge_place :: proc(world: World, spawn_x, spawn_y: i32) -> (bag: Drudge_Bag) {
+drudge_place :: proc(world: ^World, spawn_x, spawn_y: i32) -> (bag: Drudge_Bag) {
 	t := Terrain{world = world}
-	home := world_biome_at(world, spawn_x, spawn_y)
+	home := world_biome_at(world^, spawn_x, spawn_y)
 
 	for dist := i32(DRUDGE_SPAWN_MIN_DIST); dist <= DRUDGE_SPAWN_MAX_DIST; dist += DRUDGE_SPAWN_STEP {
 		for side in ([2]i32{-1, 1}) {
@@ -419,7 +419,7 @@ test_a_drudge_walks_until_a_wall_turns_it_around :: proc(t: ^testing.T) {
 	drudge_test_floor(&dt, 0, 319, floor_y, Cell(rock))
 	drudge_fill_box(&dt.sb, 120, floor_y-30, 130, floor_y-1, Cell(rock))
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	player := Player{x = 300, y = f32(floor_y) - 60, facing = 1, on_ground = true}
 
 	bag: Drudge_Bag
@@ -454,7 +454,7 @@ test_a_drudge_turns_around_at_a_ledge_instead_of_walking_off_it :: proc(t: ^test
 	floor_y := i32(100)
 	drudge_test_floor(&dt, 0, 120, floor_y, Cell(rock))
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	player := Player{x = 300, y = f32(floor_y) - 60, facing = 1, on_ground = true}
 
 	bag: Drudge_Bag
@@ -486,7 +486,7 @@ test_a_drudge_turns_around_after_walking_its_patrol_leg_even_on_open_ground :: p
 	floor_y := i32(100)
 	drudge_test_floor(&dt, 0, 319, floor_y, Cell(rock))
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	player := Player{x = 300, y = f32(floor_y) - 60, facing = 1, on_ground = true}
 
 	bag: Drudge_Bag
@@ -516,7 +516,7 @@ test_a_drudge_does_not_chase_the_player_who_is_running_away :: proc(t: ^testing.
 		floor_y := i32(100)
 		drudge_test_floor(&dt, 0, 319, floor_y, Cell(rock))
 
-		terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+		terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 		player := Player{x = near_player ? 90 : 3000, y = f32(floor_y) - 60, facing = -1, on_ground = true}
 
 		bag: Drudge_Bag
@@ -549,7 +549,7 @@ test_a_drudge_sees_the_player_in_the_open_and_not_through_a_wall :: proc(t: ^tes
 	rock, found := find_material_index(dt.table, "Rock")
 	if !testing.expect(t, found, "Rock must exist") do return
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	d := Drudge{x = 60, y = 40, dir = 1, on_ground = true}
 	player := Player{x = 85, y = 40, facing = -1, on_ground = true}
 
@@ -592,7 +592,7 @@ test_a_drudge_throws_no_faster_than_once_every_drudge_throw_interval :: proc(t: 
 	floor_y := i32(100)
 	drudge_test_floor(&dt, 0, 319, floor_y, Cell(rock))
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	player := Player{x = 80, y = f32(floor_y) - 10, facing = -1, on_ground = true}
 
 	bag: Drudge_Bag
@@ -628,7 +628,7 @@ test_a_drudge_resumes_patrol_after_losing_sight_of_the_player :: proc(t: ^testin
 	floor_y := i32(100)
 	drudge_test_floor(&dt, 0, 319, floor_y, Cell(rock))
 
-	terrain := Terrain{world = dt.world, sandbox = &dt.sb}
+	terrain := Terrain{world = &dt.world, sandbox = &dt.sb}
 	player := Player{x = 80, y = f32(floor_y) - 10, facing = -1, on_ground = true}
 
 	bag: Drudge_Bag
@@ -661,7 +661,7 @@ test_the_shipped_world_places_a_drudge_the_player_can_reach :: proc(t: ^testing.
 	if !testing.expect(t, s.drudges.count == 1, "the shipped world must place exactly one drudge") do return
 
 	d := s.drudges.drudges[0]
-	terrain := Terrain{world = s.world}
+	terrain := Terrain{world = &s.world}
 	testing.expect(t, drudge_body_clear(terrain, d.x, d.y), "the drudge must not spawn embedded in the world")
 	testing.expect(t, drudge_on_ground(terrain, d.x, d.y), "the drudge must spawn standing on solid ground")
 
@@ -735,7 +735,7 @@ test_the_shipped_world_places_a_drudge_underground :: proc(t: ^testing.T) {
 	if !testing.expect(t, s.drudges.count == 1, "the shipped world must place exactly one drudge") do return
 
 	d := s.drudges.drudges[0]
-	terrain := Terrain{world = s.world}
+	terrain := Terrain{world = &s.world}
 	testing.expectf(
 		t, drudge_has_ceiling(terrain, i32(d.x), i32(d.y)),
 		"he must have solid rock within %d cells above his head, or he is standing under the open sky",
