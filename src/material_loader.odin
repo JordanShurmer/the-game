@@ -190,6 +190,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		case "state":
 			switch value {
 			case "Solid":   current.state = .Solid
+			case "Brush":   current.state = .Brush
 			case "Powder":  current.state = .Powder
 			case "Liquid":  current.state = .Liquid
 			case "Gas":     current.state = .Gas
@@ -490,14 +491,14 @@ test_load_materials_count :: proc(t: ^testing.T) {
 	table, ok := load_materials("data/materials.txt")
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "load must succeed")
-	testing.expect(t, len(table.materials) == 53, "expected 53 materials")
-	testing.expect(t, len(table.names) == 53, "names must match materials")
-	testing.expect(t, len(table.glyphs) == 53, "glyphs must match materials")
-	testing.expect(t, len(table.decays_to) == 53, "decay table must match materials")
-	testing.expect(t, len(table.burns_to) == 53, "burn table must match materials")
-	testing.expect(t, len(table.crumbles_to) == 53, "crumble table must match materials")
-	testing.expect(t, len(table.reaction_at) == 53 * 53, "reaction_at must be n*n")
-	testing.expect(t, len(table.reacts) == 53, "reacts must match materials")
+	testing.expect(t, len(table.materials) == 54, "expected 54 materials")
+	testing.expect(t, len(table.names) == 54, "names must match materials")
+	testing.expect(t, len(table.glyphs) == 54, "glyphs must match materials")
+	testing.expect(t, len(table.decays_to) == 54, "decay table must match materials")
+	testing.expect(t, len(table.burns_to) == 54, "burn table must match materials")
+	testing.expect(t, len(table.crumbles_to) == 54, "crumble table must match materials")
+	testing.expect(t, len(table.reaction_at) == 54 * 54, "reaction_at must be n*n")
+	testing.expect(t, len(table.reacts) == 54, "reacts must match materials")
 }
 
 @(test)

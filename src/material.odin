@@ -7,6 +7,7 @@ Material_State :: enum u8 {
 	Gas,
 	Special,
 	Phantom, // no physical interaction: the cell grid never holds one
+	Brush,   // stands like a solid, but too slight to stop a man
 }
 
 Contact_Effect :: enum u8 {
@@ -64,4 +65,17 @@ Material :: struct {
 // material".
 material_is_phantom :: proc(m: Material) -> bool {
 	return m.state == .Phantom
+}
+
+// Standing growth: a crop, a hedge, a stook of cut wheat. It holds its
+// cell against sand and water the way a solid does and it burns and
+// crumbles like anything else, but a man walks through it rather than
+// into it.
+//
+// It is a state and not a flag because it is a way of being matter, the
+// same as being a powder is. Without it every field in the homelands is
+// a wall of wheat eleven cells high and the village a maze, which is
+// not what a field is.
+material_is_brush :: proc(m: Material) -> bool {
+	return m.state == .Brush
 }

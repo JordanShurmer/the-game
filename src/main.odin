@@ -36,6 +36,7 @@ App :: struct {
 
 	shaders: Material_Shaders,
 	lux:     []u8,
+	sky:     []u8,   // how much of `lux` is the day, so a shader can tell them apart
 
 	look:  Look,
 	clock: f32,
@@ -227,6 +228,7 @@ app_init_view :: proc(app: ^App) {
 	app.cells = make([]Cell, WINDOW_W * WINDOW_H)
 	app.pixels = make([]rl.Color, WINDOW_W * WINDOW_H)
 	app.lux = make([]u8, WINDOW_W * WINDOW_H)
+	app.sky = make([]u8, WINDOW_W * WINDOW_H)
 	app.water_run = make([]u8, WINDOW_W)
 
 	blank := rl.Image {
@@ -298,6 +300,7 @@ app_destroy_view :: proc(app: ^App) {
 	delete(app.cells)
 	delete(app.pixels)
 	delete(app.lux)
+	delete(app.sky)
 	delete(app.water_run)
 }
 
@@ -333,7 +336,7 @@ app_regenerate :: proc(app: ^App) {
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
 	if app_lighting(app) {
 		water_mark(&app.water, app.cells, w, h, app.water_run)
-		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h)
+		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h, app.sky)
 	}
 }
 
@@ -381,12 +384,15 @@ app_shade :: proc(app: ^App, view: World_View) {
 		out := app.pixels[int(ty) * int(view.w):][:view.w]
 
 		lit := app.lux[int(ty) * int(view.w):][:view.w]
+		day := app.sky[int(ty) * int(view.w):][:view.w]
 
 		for tx in i32(0) ..< view.w {
 			wx := view.x + tx * view.step
 			lux := light_lux(&app.light, wx, wy)
+			sky := light_sky_lux(&app.light, wx, wy)
 			lit[tx] = lux
-			out[tx] = light_shade(app.color_lut[row[tx]], lux)
+			day[tx] = sky
+			out[tx] = light_shade(app.color_lut[row[tx]], lux, sky)
 		}
 	}
 }
@@ -767,6 +773,8 @@ app_draw_sparks :: proc(app: ^App) {
 @(private = "file")
 app_draw_orb :: proc(app: ^App) {
 	if !app_lighting(app) do return
+	// He puts it out in the daylight, so it must not be drawn there.
+	if !app.light.orb_lit do return
 
 	x, y := light_orb_at(app.player)
 	app_draw_glow(app, x, y, LIGHT_ORB_HALO, LIGHT_ORB_BLAZE, LIGHT_ORB_PEAK, 1, LIGHT_GLOW, LIGHT_CORE)

@@ -87,7 +87,13 @@ GREEN_SALT = 0x6E7E5F31  # keys the green's own dice, apart from the plots'
 SWELL_SALT = 0x51E11B0D  # keys the swell's own dice, apart from everything else
 PLOT_SALT = 0x2F8C6A19  # keys the plots' own dice, apart from the ground's
 STRATA_SALT = 0x7A19C3E5  # keys the gravel band's and rock roof's own wander
-SKIN = 3  # cells of Grass over the dirt
+SKIN = 3  # cells of Grass standing over the soil line, not cut into it
+
+# PLAYER_CLIMB in src/player.odin: the step a wizard takes without
+# jumping. Anything on open ground that rises more than this is a wall
+# to him, so the worked ground of a field -- ridges, furrows, hedge
+# banks, ditches -- is all cut to it.
+PLAYER_STEP = 3
 
 # The village green: no cottage and no crop stands between these two,
 # because the wizard lands in the middle of it.
@@ -103,6 +109,18 @@ YARD_X0, YARD_X1 = 232, 280
 
 # What a plain span may hold: soil, and the track worn across it.
 PLAIN = ("Air", "Grass", "Dirt", "Rock", "Gravel", "Coal")
+
+# What a wizard walks through rather than into: air, and the standing
+# growth that `state = Brush` in data/materials.txt makes too slight to
+# stop him.
+WALKED_THROUGH = ("Air", "Grass", "Wheat")
+
+# The ground itself, as against the things people built on it. A step up
+# made of ground may never be higher than PLAYER_STEP: he cannot climb
+# it and there is nothing about a field that should stop him. A step
+# made of anything else is a wall, a roof, a fence or a woodpile, and he
+# jumps those -- he clears about twenty-eight cells.
+GROUND = ("Grass", "Dirt", "Loam", "Gravel", "Sand")
 # What may not stand on the green at all: a building or a crop.
 BUILT = ("Brick", "Thatch", "Wheat")
 
@@ -221,6 +239,7 @@ class Land:
         self.seed = seed
         self.rng = Rng(seed)
         self.cells = [[AIR] * IMG for _ in range(IMG)]
+        self.ploughed = [False] * IMG
         self.top = [EDGE_GROUND] * IMG
         # How far the gravel band and the rock roof have wandered from
         # their flat rows in each column, set by lay_ground and read
@@ -259,6 +278,18 @@ class Land:
     def ground(self, x):
         return self.top[min(max(x, 0), IMG - 1)]
 
+    def surface(self, x):
+        """The first row of a column a wizard cannot walk through: what
+        he would be standing on there. Air and the standing growth that
+        `state = Brush` makes too slight to stop him are walked through,
+        so neither counts."""
+        if x < 0 or x >= IMG:
+            return IMG
+        for y in range(IMG):
+            if self.cells[y][x] not in (AIR, GRASS, WHEAT):
+                return y
+        return IMG
+
     def level(self, x0, x1):
         """The lowest ground line across a span: what a building must
         stand on if it is not to hang in the air at one end."""
@@ -267,13 +298,21 @@ class Land:
 
 def edge_profile():
     """What every picture must hold in its outermost columns: level
-    ground at EDGE_GROUND, the grass on it, and the strata under it. It
-    is one column, and both the drawing and the gate read it from here,
-    so the two can never drift apart."""
+    ground at EDGE_GROUND, the grass over it, and the strata under it.
+    It is one column, and both the drawing and the gate read it from
+    here, so the two can never drift apart.
+
+    EDGE_GROUND is the *soil* line, and the grass stands on top of it
+    rather than being the top of it. Grass is `state = Brush`, which a
+    wizard walks through, so it does not hold him up: the soil under it
+    does. Grown the other way -- a soil line three cells under the grass
+    -- every solid thing laid at the ground line stood on a three cell
+    pedestal, and walking off a meadow onto a footpath was a step he
+    could not take."""
     out = [AIR] * IMG
-    for y in range(EDGE_GROUND, EDGE_GROUND + SKIN):
+    for y in range(EDGE_GROUND - SKIN, EDGE_GROUND):
         out[y] = GRASS
-    for y in range(EDGE_GROUND + SKIN, IMG):
+    for y in range(EDGE_GROUND, IMG):
         out[y] = stratum_at(y)
     return out
 
@@ -371,10 +410,20 @@ def lay_ground(land):
         land.gravel_wander[x] = gravel_wander[x] * hold
         land.rock_wander[x] = rock_wander[x] * hold
 
+    # No column of ground may stand more than a cell over the one beside
+    # it. The height field is smooth almost everywhere on its own; this
+    # makes it true everywhere, which is what leaves room to heap a
+    # ridge two cells proud and still be inside a wizard's step of three.
+    for _ in range(2):
+        for x in range(1, IMG):
+            land.top[x] = max(land.top[x], land.top[x - 1] - 1)
+        for x in range(IMG - 2, -1, -1):
+            land.top[x] = max(land.top[x], land.top[x + 1] - 1)
+
     for x in range(IMG):
         top = land.top[x]
-        land.fill(x, top, x, top + SKIN - 1, GRASS)
-        for y in range(top + SKIN, IMG):
+        land.fill(x, top - SKIN, x, top - 1, GRASS)
+        for y in range(top, IMG):
             land.cells[y][x] = stratum_at_col(land, x, y)
 
     scatter_soil(land)
@@ -391,7 +440,7 @@ def scatter_soil(land):
     for _ in range(70):
         cx = rng.between(EDGE + 4, IMG - EDGE - 5)
         depth = rng.between(4, 80)
-        cy = land.ground(cx) + SKIN + depth
+        cy = land.ground(cx) + depth
         blob(land, cx, cy, rng.between(1, 3), ROCK if rng.chance(0.6) else DIRT)
 
     # Stones turned up in the subsoil, more of them the deeper it goes,
@@ -471,52 +520,92 @@ def coal_seam(land, cx, cy, rng, length=None, thick=None):
 
 
 def plough(land, x0, x1, fallow):
-    """Tilled ground: ridges of loam standing proud of the grass, trenched
-    apart by a furrow cut under it. Wheat, where the field is not fallow,
-    stands only on the ridge tops -- ranks of it, with the furrows bare
-    between -- which is what makes a worked field read as worked, both
-    close up and pulled back."""
+    """Tilled ground: ridges of loam standing proud of the grass, with a
+    furrow between them, and wheat standing on the ridge tops in ranks
+    with the furrows bare between.
+
+    Every column is heaped off the ground under *that* column rather
+    than off the lowest ground across the ridge, so the field follows
+    the roll of the land it is cut into and no two neighbours ever step
+    more than RIDGE_H apart. Heaped off the span, a ridge on a slope
+    stood six cells over the furrow beside it, which is twice a
+    wizard's step, and a ploughed field was a flight of stairs he could
+    not climb."""
     rng = land.rng
     period = rng.pick([12, 14, 16])
     ridge_w = period - 5  # the ridge is most of the period, the furrow the rest
-    RIDGE_H = 4  # the ridge crowns this far over the grass line
-    FURROW_D = 4  # and the furrow is trenched this far under it
-    DEPTH = 15  # both run down to the same depth of loam
+
+    # A wizard is thirteen cells tall and steps up PLAYER_CLIMB (3) of
+    # them, so the whole relief of a field is cut to two, leaving the
+    # third as slack for the ground it is heaped on.
+    RIDGE_H = 2
+    DEPTH = 15  # how far down the turned loam goes
+
+    # No column is ploughed twice. Two plots whose spans touch used to
+    # turn the same ground over with different periods, and a crown of
+    # one beside a furrow of the other stood four cells apart, which is
+    # over a wizard's step.
+    while x0 <= x1 and land.ploughed[x0]:
+        x0 += 1
+    while x1 >= x0 and land.ploughed[x1]:
+        x1 -= 1
+    if x1 - x0 < period:
+        return
+    for cx in range(x0, x1 + 1):
+        land.ploughed[cx] = True
+
     ridges = []
     x = x0
     while x <= x1:
         rend = min(x + ridge_w - 1, x1)
-        top = land.level(x, rend)
-        crown = top - RIDGE_H - rng.between(-1, 1)  # no two ridges heaped quite alike
-        # The ridge: a heaped crown, tapered at the shoulders over two
-        # steps so it reads as a mound and not a slab with a flat lid.
-        land.fill(x, crown + 2, rend, top + DEPTH, LOAM)
-        if rend - x >= 3:
-            land.fill(x + 1, crown + 1, rend - 1, crown + 1, LOAM)
-            land.fill(x + 2, crown, rend - 2, crown, LOAM)
-        else:
-            land.fill(x + 1, crown, rend - 1, crown, LOAM)
-        ridges.append((x, rend, crown))
-        fx0, fx1 = rend + 1, min(x + period - 1, x1)
-        if fx1 >= fx0:
-            ftop = top + FURROW_D
-            land.fill(fx0, crown, fx1, ftop - 1, AIR)
-            land.fill(fx0, ftop, fx1, top + DEPTH, LOAM)
+        ridges.append((x, rend))
         x += period
+
+    on_ridge = [False] * (x1 - x0 + 1)
+    for rx0, rx1 in ridges:
+        for cx in range(rx0, rx1 + 1):
+            on_ridge[cx - x0] = True
+
+    # Where the top of the turned loam lies in every column: the ridges
+    # crowned and tapered at the shoulders, so a ridge reads as a mound
+    # and not a slab with a flat lid, and the furrows at the ground.
+    crown = [0] * (x1 - x0 + 1)
+    for cx in range(x0, x1 + 1):
+        top = land.ground(cx)
+        if not on_ridge[cx - x0]:
+            crown[cx - x0] = top
+            continue
+        run = 0
+        for rx0, rx1 in ridges:
+            if rx0 <= cx <= rx1:
+                run = min(cx - rx0, rx1 - cx)
+                break
+        crown[cx - x0] = top - min(RIDGE_H, run + 1)
+
+    for cx in range(x0, x1 + 1):
+        top = land.ground(cx)
+        head = crown[cx - x0]
+        land.fill(cx, head, cx, top + DEPTH, LOAM)
+        land.fill(cx, top - RIDGE_H, cx, head - 1, AIR)
 
     if fallow:
         return
 
-    for rx0, rx1, crown in ridges:
+    for rx0, rx1 in ridges:
         cx = rx0 + 1
         while cx <= rx1 - 1:
             if rng.chance(0.08):
                 cx += 1
                 continue
+            # A stalk grows out of the crown and does not replace it.
+            # Written over the crown cell, the ground a wizard walks was
+            # the loam under one column and the loam under the stalk of
+            # the next, a cell apart, which put a step in the middle of
+            # a field that the field itself had not put there.
+            head = crown[cx - x0]
             h = rng.between(13, 20)
-            land.fill(cx, crown - h, cx, crown, WHEAT)
-            # The ear: a couple of cells wider at the top of the stalk.
-            land.fill(cx - 1, crown - h, cx + 1, crown - h + rng.between(2, 4), WHEAT)
+            land.fill(cx, head - h, cx, head - 1, WHEAT)
+            land.fill(cx - 1, head - h, cx + 1, head - h + rng.between(2, 4), WHEAT)
             cx += rng.between(2, 3)
 
 
@@ -525,11 +614,13 @@ def hedge(land, x, height=None):
     grown up along the top of it, the way a field boundary that has
     stood a long time looks."""
     rng = land.rng
+    # The bank is a step, not a wall: the hedge on top of it is Brush
+    # and he walks through that, so the only thing here that can stop
+    # him is the earth it stands on.
     h = height or rng.between(12, 19)
-    bank = 3
     for dx in range(-2, 3):
         top = land.ground(x + dx)
-        taper = 2 - abs(dx)
+        taper = min(2 - abs(dx), PLAYER_STEP - 2)
         land.fill(x + dx, top - taper, x + dx, top, DIRT)
         land.fill(x + dx, top - taper - h + abs(dx) * 3, x + dx, top - taper, GRASS)
 
@@ -537,31 +628,47 @@ def hedge(land, x, height=None):
 def ditch(land, x):
     """A dry ditch cut along a field boundary, the spoil banked up on
     the field side of it."""
+    # Cut to a wizard's step and no deeper, and the spoil banked no
+    # higher, so a field boundary is something he crosses rather than
+    # something that stops him.
     rng = land.rng
-    depth = rng.between(6, 10)
+    depth = rng.between(PLAYER_STEP, PLAYER_STEP + 1)
     for dx in range(-3, 4):
         top = land.ground(x + dx)
-        cut = depth - abs(dx) * 2
+        cut = depth - abs(dx)
         if cut > 0:
             land.fill(x + dx, top + 1, x + dx, top + cut, AIR)
     for i, dx in enumerate(range(4, 7)):
         top = land.ground(x + dx)
-        land.fill(x + dx, top - (i + 2), x + dx, top, DIRT)
+        land.fill(x + dx, top - min(i + 1, PLAYER_STEP), x + dx, top, DIRT)
 
 
-def fence(land, x0, x1):
-    """Posts and two rails of wood, following the ground."""
-    rng = land.rng
+GATE_W = 18  # wider than a wizard's body (8), so he walks straight through
+
+
+def fence(land, x0, x1, gate=True):
+    """Posts and two rails of wood, following the ground, with a gap
+    left open in the middle of the run.
+
+    The gap is the whole reason a fence can be here at all. A rail at
+    six cells is over a wizard's step, so an unbroken fence is a wall,
+    and a village fenced into plots without a way through them is a
+    village he cannot walk across. Every run gets a gateway."""
     rail_hi = 12
     rail_lo = 6
+    span = x1 - x0
+    gate_x0 = x0 + (span - GATE_W) // 2 if gate and span > GATE_W + 8 else x1 + 1
+    gate_x1 = gate_x0 + GATE_W - 1
+
     for x in range(x0, x1 + 1):
+        if gate_x0 <= x <= gate_x1:
+            continue
         top = land.ground(x)
-        if (x - x0) % 22 < 2:
+        if (x - x0) % 22 < 2 or x == gate_x0 - 1 or x == gate_x1 + 1:
             land.fill(x, top - 15, x, top, WOOD)
         else:
             land.set(x, top - rail_hi, WOOD)
             land.set(x, top - rail_lo, WOOD)
-        _ = rng
 
 
 # ------------------------------------------------------------- the cottage
@@ -748,17 +855,28 @@ def barn(land, x0, w):
 # ----------------------------------------------------------- the small things
 
 
+# A wizard climbs PLAYER_CLIMB (3) cells and no more, so anything
+# standing higher than that on open ground is a wall to him and not a
+# step. A well built to the waist -- which is what a well is built to --
+# is exactly such a wall, and one standing on the green beside where he
+# lands walled the road east out of the village in the first seconds of
+# the game. So a well stands in a farmyard now, where a wall is what a
+# building is, and its coping is low enough to step over.
+WELL_COPING = 3
+
+
 def well(land, x):
     """A stone well: a ring of rock standing over a shaft, with a wood
-    windlass across it."""
+    windlass across it. The coping is a step and not a wall; what makes
+    it a well rather than a ring on the grass is the hole in it."""
     top = land.level(x, x + 15)
-    land.fill(x, top - 11, x + 15, top + 2, ROCK)
+    land.fill(x, top - WELL_COPING, x + 15, top + 2, ROCK)
     # The shaft, and the ground closed again under the bottom of it. It
     # is closed back to the strata and not to Dirt: a shaft backfilled
     # with soil is a soft column punched through the gravel and the rock
     # all the way to the floor of the region, which reads as a seam in
     # every shot pulled back and digs like one too.
-    land.fill(x + 4, top - 11, x + 11, top + WELL_DEPTH, AIR)
+    land.fill(x + 4, top - WELL_COPING, x + 11, top + WELL_DEPTH, AIR)
     for y in range(top + WELL_DEPTH + 1, IMG):
         land.fill(x + 4, y, x + 11, y, stratum_at(y))
     # A few stones and flecks through the backfill, so the closed shaft
@@ -769,11 +887,13 @@ def well(land, x):
         fx = rng.between(x + 4, x + 11)
         fy = rng.between(top + WELL_DEPTH + 8, IMG - 6)
         blob(land, fx, fy, rng.between(1, 2), ROCK if rng.chance(0.6) else DIRT)
-    land.fill(x, top - 13, x + 15, top - 12, ROCK)  # the coping
-    land.fill(x + 1, top - 22, x + 2, top - 13, WOOD)  # the posts
-    land.fill(x + 13, top - 22, x + 14, top - 13, WOOD)
-    land.fill(x + 1, top - 24, x + 14, top - 23, WOOD)  # the beam
-    land.fill(x + 6, top - 22, x + 9, top - 20, WOOD)  # the windlass
+    # The frame stands clear over his head, so he walks under it rather
+    # than into it: the posts start above a wizard's hat and the beam is
+    # higher still.
+    land.fill(x + 1, top - 34, x + 2, top - 18, WOOD)  # the posts
+    land.fill(x + 13, top - 34, x + 14, top - 18, WOOD)
+    land.fill(x + 1, top - 36, x + 14, top - 35, WOOD)  # the beam
+    land.fill(x + 6, top - 34, x + 9, top - 32, WOOD)  # the windlass
 
 
 def stook(land, x):
@@ -781,7 +901,13 @@ def stook(land, x):
     top = land.ground(x)
     for i, dx in enumerate((-3, -1, 1, 3)):
         lean = (i - 1.5) * 0.9
-        for k in range(14):
+        # From one cell over the ground up. Standing growth grows out of
+        # the ground and does not replace it: written into the cell it
+        # stands on, a stook took the ground out from under itself --
+        # Wheat is `state = Brush`, which a wizard walks through, so what
+        # he then walked on was the loam a cell lower, and a stook put a
+        # step in the middle of a field that the field had not.
+        for k in range(1, 15):
             land.set(int(x + dx + lean * k * 0.16), top - k, WHEAT)
 
 
@@ -893,13 +1019,21 @@ def paint_homeland(seed, i=0):
     rng = Rng(seed ^ PLOT_SALT)
     land.rng = rng
 
+    # West to east within each span, so a plot settles against ground
+    # that is already drawn: `plough` clamps its west end to whatever
+    # stands beside it, and out of order there is nothing there to clamp
+    # to. Knots put them out of order.
     for (lo, hi), row in plots(rng, theme):
-        for x, w, kind in row:
+        for x, w, kind in sorted(row):
             if kind == "home":
                 floor, door_x = cottage(land, x, w)
                 dooryard(land, x, w, floor, door_x, lo, hi, garden_p=theme["garden_p"])
                 if rng.chance(0.5):
                     fence(land, min(x + w + EAVES + 2, hi), min(x + w + EAVES + 22, hi))
+                # The well belongs to a farmyard, not to the green: on
+                # the green it stood in the road out of the village.
+                if rng.chance(0.4) and x + w + EAVES + 26 < hi - 16:
+                    well(land, x + w + EAVES + 26)
             elif kind == "barn":
                 barn(land, x, w)
                 if rng.chance(0.6):
@@ -932,8 +1066,6 @@ def paint_homeland(seed, i=0):
     path(land, GREEN_X0 + 2, GREEN_X1 - 2)
     if green_rng.chance(0.7):
         fence(land, POND_X1 + 4, YARD_X0 - 6)
-    if green_rng.chance(0.5):
-        well(land, YARD_X1 + 3)
     if green_rng.chance(0.5):
         tree(land, GREEN_X0 - 34)
 
@@ -1051,8 +1183,8 @@ def paint_cavemouth():
         land.fill(x, 0, x, crest[x] - 1, AIR)
         # Soil and grass hold on the lower slope and give out further up.
         if t < 0.42:
-            land.fill(x, crest[x], x, crest[x] + SKIN - 1, GRASS)
-            land.fill(x, crest[x] + SKIN, x, crest[x] + SKIN + int((0.42 - t) * 40), DIRT)
+            land.fill(x, crest[x] - SKIN, x, crest[x] - 1, GRASS)
+            land.fill(x, crest[x], x, crest[x] + int((0.42 - t) * 40), DIRT)
         land.top[x] = crest[x]
 
     # The rock does not meet the fields' own strata in a ruled plane:
@@ -1066,7 +1198,7 @@ def paint_cavemouth():
     belly_fine = smooth_field(rng, IMG, 17, 22)
     for x in range(BLUFF_X0, IMG):
         t = (x - BLUFF_X0) / (IMG - 1 - BLUFF_X0)
-        skin_bottom = crest[x] + SKIN + (int((0.42 - t) * 40) if t < 0.42 else 0)
+        skin_bottom = crest[x] + (int((0.42 - t) * 40) if t < 0.42 else 0)
         settle = 0.0 if t < 0.06 else min(1.0, (t - 0.06) / 0.5)
         rock_top = int(
             IMG * (1.0 - settle) + skin_bottom * settle
@@ -1240,6 +1372,8 @@ def check_homeland(path_name, grid):
                 )
                 break
 
+    faults += check_walkable(path_name, grid)
+
     for x0, x1, what in ((POND_X0, POND_X1, "the pond"), (YARD_X0, YARD_X1, "the yard")):
         for x in range(x0, x1 + 1):
             for y in range(IMG):
@@ -1249,6 +1383,40 @@ def check_homeland(path_name, grid):
                         f" ({x0}..{x1}), which must be plain pasture"
                     )
                     break
+    return faults
+
+
+def check_walkable(path_name, grid):
+    """The worked ground of a homeland must be ground a wizard can walk.
+
+    He steps up PLAYER_STEP cells and no more. A ridge, a furrow, a
+    hedge bank, a ditch and the coping of a well are all things he
+    should walk over without thinking about it, so none of them may
+    make a step higher than that. What he built -- a wall, a roof, a
+    fence, a stack of cut wood -- may stop him, because he jumps.
+
+    This is the rule the first draft broke everywhere at once: furrows
+    four cells under ridges four cells proud, every dozen cells, the
+    length of every field. Holding one key walked him forty cells and
+    then nothing."""
+    faults = []
+
+    def surface(x):
+        for y in range(IMG):
+            if grid[y][x] not in WALKED_THROUGH:
+                return y
+        return IMG
+
+    prev = surface(EDGE)
+    for x in range(EDGE + 1, IMG - EDGE):
+        here = surface(x)
+        rise = prev - here
+        if rise > PLAYER_STEP and here < IMG and grid[here][x] in GROUND:
+            faults.append(
+                f"{path_name}: the ground at {x} stands {rise} cells over the ground beside it"
+                f" ({grid[here][x]}), and a wizard steps up {PLAYER_STEP}"
+            )
+        prev = here
     return faults
 
 
@@ -1276,7 +1444,7 @@ def check_mouth(path_name, grid):
     # Walk the open space from the west edge at head height and see that
     # it reaches the bottom row.
     seen = [[False] * IMG for _ in range(IMG)]
-    stack = [(0, EDGE_GROUND - 1)]
+    stack = [(0, EDGE_GROUND - SKIN - 1)]
     reached = False
     while stack:
         x, y = stack.pop()

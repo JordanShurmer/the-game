@@ -195,7 +195,7 @@ main :: proc() {
 			lit_x = options.x + options.w * options.step / 2
 			lit_y = options.y + options.h * options.step / 2
 		}
-		game.light_follow(&sim.light, lit_x, lit_y)
+		game.light_follow(&sim.light, game.sim_terrain(&sim), lit_x, lit_y)
 		game.light_step(&sim.light, terrain, player, &sim.flies, &sim.pots, &sim.drudge_pots, &sim.drudges)
 		shot.light = &sim.light
 		shot.flies = &sim.flies

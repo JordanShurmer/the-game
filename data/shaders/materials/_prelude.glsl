@@ -36,7 +36,8 @@ struct Surf {
     vec2 cell;   // the world cell, which does not move when the camera does
     vec3 base;   // the colour the world drew, lit
     float lux;   // the light the world shades by, 0 to 1
-    float glow;  // the light that fell on the cell, before the response
+    float glow;  // the lamp light that fell on the cell, before the response
+    float sky;   // how much of the light on it is the day, 0 to 1
     float depth; // cells of the same material standing over this one
     float bury;  // 0 for a lone cell, 1 deep inside the body
     float edge;  // 1 - bury
@@ -50,10 +51,24 @@ struct Surf {
 
 vec2 m_texel() { return 1.0/size; }
 
+// The buffer carries the raw light in green and the part of it a lamp
+// threw in alpha. The response curve is run here rather than baked into
+// the buffer, so the fourth byte is free to say lamp from sky.
+const float M_RESPONSE_GAMMA = 0.65;
+
 float g_id(vec2 uv)    { return texture(gbuf, uv).r*255.0; }
-float g_lux(vec2 uv)   { return texture(gbuf, uv).g; }
+float g_raw(vec2 uv)   { return texture(gbuf, uv).g; }
+float g_lux(vec2 uv)   { return pow(texture(gbuf, uv).g, M_RESPONSE_GAMMA); }
 float g_depth(vec2 uv) { return texture(gbuf, uv).b*255.0; }
 float g_glow(vec2 uv)  { return texture(gbuf, uv).a; }
+
+// How much of the light on a cell is the day: 0 under a lamp in a cave,
+// 1 out in a field at noon.
+float g_share(vec2 uv) {
+    float raw = g_raw(uv);
+    if (raw < 0.004) return 0.0;
+    return clamp(1.0 - g_glow(uv)/raw, 0.0, 1.0);
+}
 
 // 1.0 where the cell holds the material this pass paints.
 float g_same(vec2 uv) { return 1.0 - step(0.5, abs(g_id(uv) - id)); }
@@ -232,9 +247,24 @@ vec3 m_gloom(vec3 col, float lux) {
     return mix(sunk, col, lux);
 }
 
-// The warm haze the world lays over everything it lights.
+// The haze is the light a space is full of, and a flame is what fills
+// one: warm air around a lamp in a cave, strongest where the material
+// it lands on is darkest.
+//
+// The day does not haze at all here. The sky's own colour belongs to
+// air, and air is the one thing a material shader never paints -- every
+// shader draws only its own cells, and no cell of air holds a material.
+// So under an open sky a material comes out its own colour and nothing
+// else, which is what daylight does to it. Adding the sky's colour on
+// top instead put a blue fog over a whole village.
+const vec3 M_HAZE = vec3(0.306, 0.251, 0.149);
+
+vec3 m_haze(vec3 col, float lux, float sky) {
+    return col + M_HAZE*(lux*(1.0 - sky))*(1.0 - col);
+}
+
 vec3 m_haze(vec3 col, float lux) {
-    return col + vec3(0.306, 0.251, 0.149)*lux*(1.0 - col);
+    return m_haze(col, lux, 0.0);
 }
 
 // The blow-out the world gives a cell close to a light.
@@ -252,5 +282,5 @@ vec3 m_bloom(vec3 col, float glow) {
 // a shaded cell and a flat one sit in the same air. `s.lux` is the light
 // the world shades by and `s.glow` is what fell on the cell.
 vec3 m_dress(vec3 albedo, Surf s) {
-    return m_bloom(m_haze(m_gloom(albedo, s.lux), s.lux), s.glow);
+    return m_bloom(m_haze(m_gloom(albedo, s.lux), s.lux, s.sky), s.glow);
 }

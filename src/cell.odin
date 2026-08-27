@@ -19,7 +19,9 @@ Cell_Works :: distinct bit_set[Cell_Work; u8]
 
 cell_weight_of :: proc(m: Material, is_air: bool) -> u16 {
 	if is_air do return CELL_AIR
-	if m.state == .Solid do return CELL_WALL
+	// Brush stands where it is, the same as a solid does: nothing the
+	// sandbox moves is heavy enough to push a hedge aside.
+	if m.state == .Solid || m.state == .Brush do return CELL_WALL
 
 	q := i64(m.density * 256)
 	return u16(clamp(q, 1, i64(CELL_WALL) - 1))

@@ -79,7 +79,7 @@ world_shot :: proc(world: World, shot: Shot, path: string) -> bool {
 			c := lut[row[tx]]
 
 			if shot.light != nil {
-				c = light_shade(c, light_lux(shot.light, wx, wy))
+				c = light_shade(c, light_lux(shot.light, wx, wy), light_sky_lux(shot.light, wx, wy))
 			}
 
 			if in_frame_row {
@@ -317,6 +317,9 @@ shot_draw_sparks :: proc(world: World, shot: Shot, pixels: []rl.Color, width, he
 
 @(private = "file")
 shot_draw_orb :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, p: Player) {
+	// He puts it out in the daylight, so it must not be drawn there.
+	if shot.light != nil && !shot.light.orb_lit do return
+
 	x, y := light_orb_at(p)
 	shot_draw_glow(
 		shot, pixels, width, height, x, y,
@@ -668,6 +671,10 @@ test_the_orb_lights_what_is_near_him_and_the_gloom_keeps_the_rest :: proc(t: ^te
 	if !testing.expectf(t, result.err == .None, "the shipped sheet must load, got %v", result.err) do return
 	defer destroy_sprite_sheet(sheet)
 
+	// Under the village, where the gloom is the thing being measured.
+	// On the surface the day lights the far corner as well as the near
+	// one and the orb is out, so there is no gloom to keep anything.
+	if !testing.expect(t, sim_stand_in_the_dark(&s), "the coal under the village must be walkable") do return
 	for _ in 0 ..< 30 do sim_step_player(&s, {}, false)
 
 	player := s.player

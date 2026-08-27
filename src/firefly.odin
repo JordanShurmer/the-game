@@ -167,8 +167,11 @@ test_a_firefly_lights_the_bank_it_hangs_over :: proc(t: ^testing.T) {
 	x := i32(math.floor(f.x))
 	y := i32(math.floor(f.y))
 
-	here := light_lux(&s.light, x, y)
-	away := light_lux(&s.light, x, y - 8 * FIREFLY_REACH * LIGHT_CELL)
+	// Read what the swarm itself throws, not what falls on the pond:
+	// the day lights the whole of an open field, so `light_lux` there
+	// would answer for the fireflies whether they burned or not.
+	here := light_live_lux(&s.light, x, y)
+	away := light_live_lux(&s.light, x, y - 8 * FIREFLY_REACH * LIGHT_CELL)
 
 	testing.expectf(t, here > 0, "the air a firefly hangs in must be lit, got %d", here)
 	testing.expectf(t, away == 0, "and the gloom well above the pond must stay dark, got %d", away)
@@ -185,14 +188,14 @@ test_a_firefly_leaves_no_light_behind_it :: proc(t: ^testing.T) {
 	f := s.flies.flies[0]
 	x := i32(math.floor(f.x))
 	y := i32(math.floor(f.y))
-	if !testing.expect(t, light_lux(&s.light, x, y) > 0, "the swarm must light its own air first") do return
+	if !testing.expect(t, light_live_lux(&s.light, x, y) > 0, "the swarm must light its own air first") do return
 
 	for i in 0 ..< int(s.flies.count) {
 		s.flies.flies[i].home_y -= 8 * FIREFLY_REACH * LIGHT_CELL
 	}
 	sim_step_player(&s, {}, false)
 
-	behind := light_lux(&s.light, x, y)
+	behind := light_live_lux(&s.light, x, y)
 	testing.expectf(
 		t,
 		behind == 0,
@@ -212,7 +215,7 @@ test_the_swarm_never_outshines_the_trail_or_the_orb :: proc(t: ^testing.T) {
 	power := light_lumens(s.world.materials, s.world.materials.firefly)
 	for i in 0 ..< int(s.flies.count) {
 		f := s.flies.flies[i]
-		lux := light_lux(&s.light, i32(math.floor(f.x)), i32(math.floor(f.y)))
+		lux := light_live_lux(&s.light, i32(math.floor(f.x)), i32(math.floor(f.y)))
 		testing.expectf(
 			t,
 			lux <= power,

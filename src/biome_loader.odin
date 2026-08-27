@@ -247,6 +247,10 @@ load_biomes :: proc(
 		case "image":
 			if value == "" do return {}, .Bad_Value, line_index
 			current_image = value
+		case "light":
+			idx, found := find_material_index(materials, value)
+			if !found do return {}, .Unknown_Material, line_index
+			current.light = u16(idx)
 		}
 	}
 

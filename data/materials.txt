@@ -502,9 +502,10 @@ tags        = Organic
 glyph       = l
 
 [Grass]
-# The green skin over the pasture. One cell thick where it is walked,
-# a few where it is not. It catches quickly and leaves the dirt bare.
-state       = Solid
+# The green skin over the pasture, and the hedges grown up between the
+# plots. It catches quickly and leaves the dirt bare. Brush, so a man
+# walks through a hedge rather than into it.
+state       = Brush
 density     = 0.4
 fall_speed  = 0
 hardness    = 1
@@ -523,8 +524,9 @@ crumbles_to = Dirt
 [Wheat]
 # The standing crop. It is the most flammable thing in the world, so a
 # field is a fuse, and the fallow strips between the plots are what
-# stops it.
-state       = Solid
+# stops it. Brush, so a field is something to walk through and not a
+# wall eleven cells high.
+state       = Brush
 density     = 0.3
 fall_speed  = 0
 hardness    = 1
@@ -610,6 +612,26 @@ glyph       = !
 force       = 36         # what three grains of black powder throw
 luminosity  = 255
 decays_to   = Fire
+
+[Daylight]
+# The sky. It is a light like any other, and the biome that throws it
+# says so in data/biomes.txt: `light = Daylight` on [Sky]. It burns
+# under the orb, so a wizard's own lamp is still the brightest thing he
+# has, and over a crystal, so a lit field is brighter than a trail.
+state       = Phantom
+density     = 0.0
+fall_speed  = 0
+hardness    = 0
+flammability= 0
+conductivity= 0
+toxicity    = 0
+lifetime    = -1
+color       = 0xFFBFD8F0
+contact     =
+immersion   =
+tags        =
+glyph       = /
+luminosity  = 255
 
 [Orb_Light]
 # The light on the wizard's staff. It does not decay.

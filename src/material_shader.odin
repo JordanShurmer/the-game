@@ -65,7 +65,7 @@ Material_Shader :: struct {
 
 Material_Shaders :: struct {
 	list:    []Material_Shader,
-	gbuf:    []u8, // four bytes a texel: material, light, depth, the raw light
+	gbuf:    []u8, // four bytes a texel: material, the raw light, depth, the lamp's part of it
 	texture: rl.Texture2D,
 	run:     []u8, // a column each: how far the run of one material reaches
 	above:   []Cell, // a column each: what the cell above holds
@@ -189,6 +189,16 @@ material_shaders_unload :: proc(ms: ^Material_Shaders) {
 // its own colour sinks into the dark exactly as the flat picture does.
 // The alpha channel holds the raw light, which is what says how close a
 // cell stands to a lamp.
+// Four bytes a texel: the material, the light on it, how deep it sits in
+// a body of its own material, and the part of that light a *lamp* threw.
+//
+// The last two of those used to be the response curve and the raw light.
+// The prelude runs the response itself now, so the buffer carries the
+// raw number and the shader carries the curve -- and that frees the
+// fourth byte to say how much of the light was a lamp's rather than the
+// sky's. A shader needs both: the day fills open air with its own cold
+// colour and never blows a cell out, because a bloom is the blow-out of
+// standing close to a light and nobody stands close to the sky.
 material_gbuffer_fill :: proc(
 	cells: []Cell,
 	lux: []u8,
@@ -197,6 +207,7 @@ material_gbuffer_fill :: proc(
 	above: []Cell,
 	out: []u8,
 	seen: ^[256]bool,
+	sky: []u8 = nil,
 ) {
 	for i in 0 ..< 256 do seen[i] = false
 	for i in 0 ..< int(w) {
@@ -207,6 +218,7 @@ material_gbuffer_fill :: proc(
 	for y in 0 ..< int(h) {
 		row := cells[y * int(w):][:w]
 		line := lux[y * int(w):][:w]
+		day := sky == nil ? nil : sky[y * int(w):][:w]
 
 		for x in 0 ..< int(w) {
 			c := row[x]
@@ -221,16 +233,16 @@ material_gbuffer_fill :: proc(
 
 			at := (y * int(w) + x) * 4
 			out[at + 0] = u8(c)
-			out[at + 1] = light_response[line[x]]
+			out[at + 1] = line[x]
 			out[at + 2] = run[x]
-			out[at + 3] = line[x]
+			out[at + 3] = day == nil ? line[x] : line[x] - min(day[x], line[x])
 		}
 	}
 }
 
-material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32) {
+material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32, sky: []u8 = nil) {
 	if !ms.on do return
-	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen)
+	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen, sky)
 	rl.UpdateTextureRec(ms.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(ms.gbuf))
 }
 
@@ -287,14 +299,29 @@ test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^test
 
 	for c, i in cells {
 		testing.expectf(t, out[i * 4] == u8(c), "texel %d holds material %d and the buffer says %d", i, c, out[i * 4])
-		testing.expectf(t, out[i * 4 + 3] == lux[i], "texel %d has light %d and the buffer says %d", i, lux[i], out[i * 4 + 3])
+		testing.expectf(t, out[i * 4 + 1] == lux[i], "texel %d has light %d and the buffer says %d", i, lux[i], out[i * 4 + 1])
 		testing.expectf(
 			t,
-			out[i * 4 + 1] == light_response[lux[i]],
-			"texel %d shades by the response to %d and the buffer says %d",
+			out[i * 4 + 3] == lux[i],
+			"with no day on it, every bit of the light on texel %d is a lamp's, and the buffer says %d of %d",
 			i,
+			out[i * 4 + 3],
 			lux[i],
-			out[i * 4 + 1],
+		)
+	}
+
+	// And with the day on it, the fourth byte is what is left after the
+	// sky, which is what stops a shader blooming a field at noon.
+	sky := [W * H]u8{0, 10, 5, 30, 0, 20, 60, 80, 40, 0, 100, 55}
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, sky[:])
+
+	for _, i in cells {
+		want := lux[i] - min(sky[i], lux[i])
+		testing.expectf(
+			t,
+			out[i * 4 + 3] == want,
+			"texel %d has %d of light and %d of day, so a lamp threw %d, and the buffer says %d",
+			i, lux[i], sky[i], want, out[i * 4 + 3],
 		)
 	}
 }

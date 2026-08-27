@@ -116,7 +116,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 	s.flies = firefly_gather(s.world)
 	s.drudges = drudge_place(s.world, i32(s.player.x), i32(s.player.y))
 
-	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
+	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 	s.loaded = true
 
 	sim_open_sandbox(s, SANDBOX_DEFAULT_WIDTH, SANDBOX_DEFAULT_HEIGHT, 0, 0, 1, SANDBOX_DEFAULT_DELAY)
@@ -198,8 +198,47 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 	return find_material_index(s.world.materials, name)
 }
 
+// The world the wizard is standing in: the generated picture, and the
+// sandbox over it wherever one is open on him.
+sim_terrain :: proc(s: ^Sim) -> Terrain {
+	return Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+}
+
+// Two regions under the village, which is coal on every side and has no
+// sky anywhere in the square the light grid covers.
+SIM_DARK_X :: -2304
+SIM_DARK_Y :: -1536
+
+// Put the wizard somewhere dark, and move the square and the light with
+// him. The homelands are daylit, so a test about the lamp he carries or
+// the trail he leaves has to be run under them: on the surface the orb
+// is out, nothing falls from it, and what a grid scan finds is the day.
+// It answers false if there is no standing place down there at all,
+// which is itself worth failing a test over.
+sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
+	t := Terrain{world = s.world}
+	for dy in i32(0) ..< 480 {
+		for dx in i32(0) ..< 240 {
+			for side in ([2]i32{1, -1}) {
+				x := SIM_DARK_X + side * dx
+				y := SIM_DARK_Y + dy
+				if !player_solid_at(t, x, y) do continue
+				if !player_body_clear(t, f32(x), f32(y)) do continue
+
+				s.player.x = f32(x)
+				s.player.y = f32(y)
+				s.player.vx = 0
+				s.player.vy = 0
+				sim_follow_player(s)
+				return true
+			}
+		}
+	}
+	return false
+}
+
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
-	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+	terrain := sim_terrain(s)
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
 	firefly_step(&s.flies)
@@ -221,7 +260,7 @@ sim_play_begin :: proc(s: ^Sim) {
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
 
-	light_follow(&s.light, i32(s.player.x), i32(s.player.y))
+	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 
 	ox := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
 	oy := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
