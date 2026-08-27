@@ -20,7 +20,7 @@ LIGHT_ORB_MIRROR :: -0.5
 LIGHT_ORB_SEEK :: 8
 
 LIGHT_ORB_REACH :: 27
-LIGHT_CRYSTAL_REACH :: 18
+LIGHT_CRYSTAL_REACH :: 46
 
 // What the day loses once it has to turn a corner. Straight down it
 // loses nothing at all -- `light_throw_sky` walks the columns rather
@@ -50,10 +50,33 @@ Light_Fall :: struct {
 }
 
 LIGHT_ORB_FALL :: Light_Fall{open = 212, open_diag = 196, dense = 108, dense_diag = 75}
-LIGHT_CRYSTAL_FALL :: Light_Fall{open = 193, open_diag = 172, dense = 108, dense_diag = 75}
+
+// A crystal's light falls off far more gently than the orb's own, so
+// one crystal lights a broad dim pool over a full screen across --
+// about 356 cells against the 320 the game opens on -- and the trail
+// is a chain of such pools rather than a dotted line of small bright
+// ones. The reach grows with the falloff:
+// test_every_reach_outlasts_the_falloff_it_bounds holds the two
+// together.
+// The diagonal keeps pace with the straight fall (240^sqrt2 in the
+// 256ths), because at a falloff this gentle a lossier diagonal draws
+// the pool as a four-pointed star instead of a pool.
+LIGHT_CRYSTAL_FALL :: Light_Fall{open = 240, open_diag = 234, dense = 108, dense_diag = 75}
 
 LIGHT_CRYSTALS :: 1024
-LIGHT_DROP_STRIDE :: 21.0
+
+// The dimmest the trail may run before the next crystal falls. The
+// stat grid is the memory of every crystal dropped, thinned by the
+// flood's own falloff -- walls counted -- so reading it under the orb
+// is what "how close is the nearest crystal" means here. Bright enough
+// says this place is already left lit and nothing falls; dim says the
+// trail has all but run out, and one falls to carry it on. The bar is
+// set close to LIGHT_FAINT, so down an open gallery the crystals hang
+// more than half a screen apart -- about 164 cells against the 320 the
+// game opens on -- with the last of each pool still readable between
+// them, and through cut rock, where the light behind him dies in a few
+// samples, they fall much closer together.
+LIGHT_DROP_BELOW :: 6
 
 LIGHT_GLOOM_R :: 30
 LIGHT_GLOOM_G :: 30
@@ -81,9 +104,14 @@ LIGHT_BLOOM :: rl.Color{255, 240, 206, 255}
 LIGHT_ORB_HALO :: 10
 LIGHT_ORB_BLAZE :: 3
 LIGHT_ORB_PEAK :: 0.92
-LIGHT_CRYSTAL_HALO :: 5
-LIGHT_CRYSTAL_BLAZE :: 0
-LIGHT_CRYSTAL_PEAK :: 0.62
+
+// A crystal is a patch of glow soaked into the place, not a lamp hung
+// in it: a wide faint halo and no core at all. A blaze below zero is
+// how a light says it has no heart to draw -- both draw paths keep
+// that rule.
+LIGHT_CRYSTAL_HALO :: 12
+LIGHT_CRYSTAL_BLAZE :: -1
+LIGHT_CRYSTAL_PEAK :: 0.26
 
 LIGHT_CORE :: rl.Color{255, 251, 233, 255}
 LIGHT_GLOW :: rl.Color{255, 208, 122, 255}
@@ -114,10 +142,6 @@ Light :: struct {
 
 	count: i32,
 	next:  i32,
-
-	last_x:  f32,
-	last_y:  f32,
-	dropped: bool,
 
 	// Ticks since the day was last thrown, and whether the orb is
 	// burning. He puts it out in the light and lights it in the dark,
@@ -157,7 +181,6 @@ light_move :: proc(l: ^Light, t: Terrain, origin_x, origin_y: i32) {
 	l.live_on = false
 	l.count = 0
 	l.next = 0
-	l.dropped = false
 
 	// The day is static light, like a crystal, so it is thrown once
 	// with the square rather than sixty times a second.
@@ -566,23 +589,19 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	// Nothing falls from an orb that is not lit. The trail is the thing
 	// he leaves in the dark to find his way back, so a walk across a
 	// field in the day must not lay one.
-	if light_day_at(l, x, y) >= LIGHT_ORB_WAKES {
-		l.dropped = false
-		return
-	}
+	if light_day_at(l, x, y) >= LIGHT_ORB_WAKES do return
 
-	fx, fy := f32(x), f32(y)
+	// A crystal falls where the trail has gone dim, and nowhere else.
+	// The stat grid under the orb already says how close the other
+	// crystals are -- through the flood's own falloff, walls counted --
+	// so a walk back over lit ground drops nothing, and the goal is
+	// exactly what is left behind: light where he has been.
+	lx := light_slot(x - l.origin_x)
+	ly := light_slot(y - l.origin_y)
+	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return
+	if l.stat[int(ly) * LIGHT_W + int(lx)] >= LIGHT_DROP_BELOW do return
 
-	if l.dropped {
-		dx := fx - l.last_x
-		dy := fy - l.last_y
-		if dx * dx + dy * dy < LIGHT_DROP_STRIDE * LIGHT_DROP_STRIDE do return
-	}
-	l.last_x = fx
-	l.last_y = fy
-	l.dropped = true
-
-	l.crystals[l.next] = Crystal{x = fx, y = fy, twinkle = u8(wang_hash(l.seed, LIGHT_SALT_CRYSTAL, x, y))}
+	l.crystals[l.next] = Crystal{x = f32(x), y = f32(y), twinkle = u8(wang_hash(l.seed, LIGHT_SALT_CRYSTAL, x, y))}
 	l.next = (l.next + 1) % LIGHT_CRYSTALS
 	l.count = min(l.count + 1, LIGHT_CRYSTALS)
 
@@ -827,9 +846,12 @@ light_halo_fade :: proc(away, halo: i32, peak: f32) -> f32 {
 	return peak * left * left
 }
 
+// A crystal breathes rather than blinks: the swing is kept small so the
+// trail reads as still light soaked into the rock, not a string of
+// fairy lights.
 light_crystal_glow :: proc(c: Crystal, clock: f64) -> f32 {
 	phase := f32(clock) * LIGHT_TWINKLE_HZ + f32(c.twinkle) * (2 * math.PI / 256)
-	return 0.75 + 0.25 * math.sin(phase)
+	return 0.86 + 0.14 * math.sin(phase)
 }
 
 @(private = "file")
@@ -1239,6 +1261,104 @@ test_the_crystals_he_drops_keep_the_place_lit_after_he_leaves :: proc(t: ^testin
 	testing.expectf(
 		t, never == 0,
 		"a place he never walked must stay in the gloom, got %d", never,
+	)
+}
+
+// The drop rule is the stat grid, so the trail goes where the light is
+// missing and only there: a march into the dark lays crystals, and the
+// march back over the lit trail lays none.
+@(test)
+test_no_crystal_falls_where_the_trail_already_lights_the_place :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
+	light_fill_box(&s.sandbox, 0, 0, 511, 511, MATERIAL_AIR)
+
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
+	if !testing.expect(t, light_day_at(&s.light, 256, 256) == 0, "this test means nothing unless the square is dark") do return
+
+	// March him along a line and back again, a cell a tick, the way a
+	// walk moves the orb without asking the physics to carry him.
+	march :: proc(s: ^Sim, terrain: Terrain, from, to: f32) {
+		step := from < to ? f32(1) : f32(-1)
+		p := light_test_player(from, 256, i8(step))
+		for p.x != to {
+			p.x += step
+			light_step(&s.light, terrain, p)
+		}
+	}
+
+	march(&s, terrain, 60, 460)
+	out := s.light.count
+	if !testing.expect(t, out >= 2, "a march into the dark must lay a trail of crystals") do return
+
+	// Way apart: in the open, a gem falls only where the light of the
+	// one before has all but run out, which is more than half of the
+	// 320 cell view the game opens on.
+	for i in 1 ..< int(out) {
+		dx := s.light.crystals[i].x - s.light.crystals[i - 1].x
+		testing.expectf(
+			t, abs(dx) >= 120,
+			"crystals %d and %d fell %v cells apart, and in the open they must hang far apart",
+			i - 1, i, abs(dx),
+		)
+	}
+
+	march(&s, terrain, 460, 60)
+	back := s.light.count - out
+	testing.expectf(
+		t, back == 0,
+		"the march back is over ground the trail lights, so nothing should fall, and %d crystals did",
+		back,
+	)
+}
+
+// Around a corner the pool of the last crystal dies with the corridor
+// that carried it, so the trail must turn the corner with him: a new
+// crystal falls in the side passage though the last one is near as the
+// crow flies.
+@(test)
+test_the_trail_turns_a_corner_with_him :: proc(t: ^testing.T) {
+	s: Sim
+	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
+	defer sim_unload(&s)
+
+	rock, found := sim_material_index(&s, "Rock")
+	if !testing.expect(t, found, "Rock must exist") do return
+
+	sim_open_sandbox(&s, 512, 512, 0, 0, 1, 0)
+	light_move(&s.light, Terrain{world = &s.world, sandbox = &s.sandbox}, 0, 0)
+
+	// An L of open air in solid rock: a corridor east, then a shaft down.
+	light_fill_box(&s.sandbox, 0, 0, 511, 511, Cell(rock))
+	light_fill_box(&s.sandbox, 8, 240, 299, 263, MATERIAL_AIR)
+	light_fill_box(&s.sandbox, 276, 240, 299, 480, MATERIAL_AIR)
+
+	terrain := Terrain{world = &s.world, sandbox = &s.sandbox}
+
+	p := light_test_player(30, 262, 1)
+	for p.x < 288 {
+		p.x += 1
+		light_step(&s.light, terrain, p)
+	}
+	corner := s.light.count
+	if !testing.expect(t, corner >= 1, "the corridor must hold at least one crystal") do return
+
+	for p.y < 460 {
+		p.y += 1
+		light_step(&s.light, terrain, p)
+	}
+
+	dropped := i32(-1)
+	for i in 0 ..< int(s.light.count) {
+		if s.light.crystals[i].y > 300 do dropped = i32(i)
+	}
+	testing.expect(
+		t, dropped >= 0,
+		"the shaft is dark past the corner, so the trail must lay a crystal down it",
 	)
 }
 

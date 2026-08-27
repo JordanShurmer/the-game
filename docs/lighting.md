@@ -4,8 +4,8 @@ The world is dark. The light in it comes off the orb on the wizard's
 staff, off the crystals of light that fall out of that orb as he walks
 and hang in the air where they fell, off the fireflies that drift over
 a pond, and off every explosion while it lasts. So the picture a player
-reads is a warm pool around himself, a thread of small lights behind
-him marking every place he has been, a cold green shimmer over the
+reads is a warm pool around himself, a scatter of soft glows far apart
+behind him marking the way he has come, a cold green shimmer over the
 water, a bang that whites out a cave for a third of a second, and gloom
 everywhere else.
 
@@ -244,8 +244,31 @@ into a broad readable gradient with a bright heart.
 
 ## The crystals
 
-One crystal falls out of the orb every `LIGHT_DROP_STRIDE` (21) cells
-of travel, and hangs exactly where it fell.
+A crystal falls out of the orb where the trail has gone dim, and
+nowhere else. `light_drop` reads the `stat` grid under the orb — which
+is the memory of every crystal already dropped, thinned by the flood's
+own falloff, walls counted — and drops one only where that reading has
+sunk under `LIGHT_DROP_BELOW`. That is the whole rule, and the goal is
+exactly what it leaves behind: light where he has been. A walk back
+over the lit trail drops nothing
+(`test_no_crystal_falls_where_the_trail_already_lights_the_place`).
+The bar sits close to `LIGHT_FAINT`, so in the open the crystals hang
+more than half a screen apart — about 164 cells against the 320 the
+game opens on — with the last of each pool still readable between
+them. Around a corner the pool dies with the corridor that carried it,
+so the trail turns the corner with him and a crystal falls in the side
+passage though the last one is near as the crow flies
+(`test_the_trail_turns_a_corner_with_him`), and through cut rock,
+where the light behind him dies in a few samples, they fall closer
+still.
+
+A crystal is drawn as a patch of glow, not a point: a wide faint halo
+with no core at all (`LIGHT_CRYSTAL_BLAZE` below zero is how a light
+says it has no heart to draw, and both draw paths keep that rule), with
+a breath of a twinkle rather than a blink. Its flood falls off more
+gently than the orb's (`LIGHT_CRYSTAL_FALL`), so each one lights a
+broad dim pool and the trail reads as a ribbon of lit ground rather
+than a dotted line of small lamps.
 
 **A crystal has no physics and no interactions.** It does not fall to
 the floor, it does not collide, nothing in the sandbox can touch it and
@@ -360,7 +383,8 @@ milliseconds for a sandbox tick of the same square. Almost all of it is
 the one orb flood, about 2500 samples of queue. Seven fireflies add
 about 11 microseconds a tick while he stands beside their pond, and
 nothing at all once they fall outside the grid. A crystal costs one
-smaller flood, once, and nothing afterwards. A bang costs one flood a
+flood, once — a broad one, its falloff being as gentle as it is — and
+nothing afterwards. A bang costs one flood a
 tick for the 22 ticks it lives, and a ring with nothing in it costs
 sixteen comparisons. Drawing costs a table
 lookup and about fifteen integer operations per texel, which at the

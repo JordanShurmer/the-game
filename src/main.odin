@@ -157,15 +157,22 @@ main :: proc() {
 		)
 		app_draw_materials(&app, w, h)
 		if !app.look.on {
+			// Bodies first, then the wizard with the front of the crop
+			// over him, then every glow that is only light: a halo is
+			// the light of the world, and the light of the world sits
+			// over the crop, or the front pass rubs a hole in it the
+			// exact shape of his frame.
 			app_draw_water(&app, w, h)
-			app_draw_crystals(&app)
-			app_draw_fireflies(&app)
 			app_draw_drudges(&app)
 			app_draw_pots(&app, &app.pots)
 			app_draw_pots(&app, &app.drudge_pots)
+			app_draw_player(&app)
+			app_draw_crystals(&app)
+			app_draw_fireflies(&app)
 			app_draw_bangs(&app)
 			app_draw_sparks(&app)
-			app_draw_player(&app)
+			app_draw_orb(&app)
+			app_draw_beam(&app)
 			if !app.hud_off do draw_hud(&app)
 			draw_prof(&app)
 			editor_draw(&app)
@@ -869,6 +876,14 @@ app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32,
 	wide := f32(halo) * scale * glow
 	rl.DrawCircleV(at, wide, rl.Fade(wide_color, 0.16 * peak * glow))
 	rl.DrawCircleV(at, wide * 0.55, rl.Fade(wide_color, 0.32 * peak * glow))
+
+	// A blaze below zero says the light has no heart to draw: it is a
+	// patch of glow soaked into the place, so the middle is one more
+	// soft ring and never a point. The shot path keeps the same rule.
+	if blaze < 0 {
+		rl.DrawCircleV(at, wide * 0.30, rl.Fade(wide_color, 0.30 * peak * glow))
+		return
+	}
 	rl.DrawCircleV(at, max(f32(blaze + 1) * scale * glow, 1.5), rl.Fade(core_color, glow))
 }
 
@@ -1039,10 +1054,67 @@ app_draw_player :: proc(app: ^App) {
 	}
 
 	rl.DrawTexturePro(app.sprite_texture, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
-	app_draw_orb(app)
-	app_draw_beam(app)
+	app_draw_brush_front(app, origin_x, origin_y)
 }
 
+// The front share of the standing crop, painted back over his sprite,
+// so a walk through a wheatfield puts stalks before him and stalks
+// behind. Everything that is only light -- the orb, the beam, every
+// halo -- draws after it, because the light of the world sits over
+// the crop.
+@(private = "file")
+app_draw_brush_front :: proc(app: ^App, origin_x, origin_y: i32) {
+	if !app_lighting(app) do return
+
+	w, h := app_view_cells(app)
+	frame := Sandbox_Rect {
+		min_x = floor_div(origin_x - app.cam_x, app.step),
+		min_y = floor_div(origin_y - app.cam_y, app.step),
+		max_x = floor_div(origin_x + SPRITE_FRAME_W - 1 - app.cam_x, app.step),
+		max_y = floor_div(origin_y + SPRITE_FRAME_H - 1 - app.cam_y, app.step),
+	}
+
+	material_shaders_draw_front(
+		&app.shaders,
+		app.texture,
+		rl.Rectangle{0, 0, f32(w), f32(h)},
+		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
+		{WINDOW_W, WINDOW_H},
+		{f32(app.cam_x), f32(app.cam_y)},
+		f32(app.step),
+		app.clock,
+		frame,
+	)
+}
+
+// A four-cornered ribbon of light, wide at one end and narrow at the
+// other. The strip order (+w0, -w0, +w1, -w1) is what keeps raylib's
+// winding happy whichever way the beam points.
+@(private = "file")
+app_beam_quad :: proc(from, to: rl.Vector2, w0, w1: f32, color: rl.Color) {
+	d := rl.Vector2{to.x - from.x, to.y - from.y}
+	length := math.sqrt(d.x * d.x + d.y * d.y)
+	if length < 0.001 do return
+	// This side of the perpendicular keeps every triangle of the strip
+	// counter-clockwise on a screen whose y runs down; the other side
+	// is back-facing whichever way the beam points, and raylib culls it.
+	p := rl.Vector2{d.y / length, -d.x / length}
+
+	quad := [4]rl.Vector2 {
+		{from.x + p.x * w0, from.y + p.y * w0},
+		{from.x - p.x * w0, from.y - p.y * w0},
+		{to.x + p.x * w1, to.y + p.y * w1},
+		{to.x - p.x * w1, to.y - p.y * w1},
+	}
+	rl.DrawTriangleStrip(raw_data(quad[:]), 4, color)
+}
+
+// The digging beam. It leaves the staff rather than his belly, it
+// stops where the cut itself stops instead of shining through the
+// world, it narrows as it goes, it wavers a little, and it is laid on
+// additively, so it reads as light over the picture and not as chalk
+// drawn across it. Where it lands on something too hard to cut, the
+// impact glows.
 @(private = "file")
 app_draw_beam :: proc(app: ^App) {
 	if app.editor.open || app.tile_edit.open do return
@@ -1050,18 +1122,45 @@ app_draw_beam :: proc(app: ^App) {
 	p := app.player
 	if !p.digging do return
 
-	scale := f32(app.zoom) / f32(app.step)
 	cx, cy := player_centre(p)
 	dx, dy := player_aim_vector(p.aim)
 
-	from := rl.Vector2{f32(cx - app.cam_x) * scale, f32(cy - app.cam_y) * scale}
+	// Where the beam ends: sandbox_cut_reach, which is the same one
+	// procedure the kerf itself measures by, so the picture and the
+	// tool cannot disagree on where the cutting stops. On a hit the
+	// beam runs one cell past the reach, onto the face it is burning
+	// against.
+	sb := &app.sandbox
+	cut, hit := sandbox_cut_reach(
+		sb, app.world.materials,
+		cx - sb.origin_x, cy - sb.origin_y,
+		dx, dy, PLAYER_DIG_RANGE, PLAYER_DIG_POWER,
+	)
+	reach := f32(cut)
+	if hit do reach += 1
+
+	scale := f32(app.zoom) / f32(app.step)
+	ox, oy := light_orb_at(p)
+	from := rl.Vector2{(ox - f32(app.cam_x)) * scale, (oy - f32(app.cam_y)) * scale}
 	to := rl.Vector2 {
-		from.x + dx * f32(PLAYER_DIG_RANGE) * scale,
-		from.y + dy * f32(PLAYER_DIG_RANGE) * scale,
+		(f32(cx) + dx * reach - f32(app.cam_x)) * scale,
+		(f32(cy) + dy * reach - f32(app.cam_y)) * scale,
 	}
 
-	rl.DrawLineEx(from, to, f32(PLAYER_DIG_WIDTH) * scale, rl.Fade(BEAM_GLOW, 0.18))
-	rl.DrawLineEx(from, to, max(scale, 1), BEAM_CORE)
+	// Two beat frequencies, so the waver never settles into a pulse.
+	flick := 0.85 + 0.10 * math.sin(app.clock * 34.0) + 0.05 * math.sin(app.clock * 9.1)
+
+	rl.BeginBlendMode(.ADDITIVE)
+	app_beam_quad(from, to, 3.2 * scale, 0.9 * scale, rl.Fade(BEAM_GLOW, 0.10 * flick))
+	app_beam_quad(from, to, 1.6 * scale, 0.6 * scale, rl.Fade(BEAM_GLOW, 0.20 * flick))
+	app_beam_quad(from, to, 0.55 * scale, 0.25 * scale, rl.Fade(BEAM_CORE, 0.85 * flick))
+	if hit {
+		rl.DrawCircleV(to, 2.2 * scale, rl.Fade(BEAM_GLOW, 0.35 * flick))
+		rl.DrawCircleV(to, 1.1 * scale, rl.Fade(BEAM_CORE, 0.55 * flick))
+	} else {
+		rl.DrawCircleV(to, 1.2 * scale, rl.Fade(BEAM_GLOW, 0.18 * flick))
+	}
+	rl.EndBlendMode()
 }
 
 draw_hud :: proc(app: ^App) {

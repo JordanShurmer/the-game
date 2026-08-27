@@ -153,6 +153,11 @@ sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> 
 		work := table.work[sb.cells[i]]
 		if work == {} do continue
 
+		if .Sieves in work && sandbox_sift(sb, table, x, y) {
+			changed = true
+			continue
+		}
+
 		prof.count[.Reacts] += int(.Reacts in work)
 		prof.count[.Fires] += int(.Burns in work)
 		if .Reacts in work && sandbox_react(sb, table, x, y) {
@@ -169,6 +174,34 @@ sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> 
 		}
 	}
 	return changed
+}
+
+// One brush cell in BRUSH_WEAVE is woven too dense to pass. The weave
+// is a hash of the world position, not a roll per tick, so a dense spot
+// stays dense and the grain that lands on one stays lodged until fire
+// or the digger frees it. Over a crop eleven cells tall, one in
+// sixty-four a cell leaves about one grain in seven caught somewhere on
+// the way down: mostly it flows through.
+BRUSH_WEAVE :: 64
+SANDBOX_SALT_SIFT :: 0x0000_0000_0000_0012
+
+// Brush is porous. A powder or a liquid standing on a cell of brush
+// mostly sifts straight down through it: the two trade places, so the
+// grain trickles a cell a tick toward the ground and the stalk rides
+// up over what gathers at its foot, the way a crop stands on a drift
+// rather than under one. The brush cell is the side that does the
+// work (`.Sieves`), because the falling side has already stopped: its
+// own intent saw a wall below and nothing more.
+sandbox_sift :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
+	if y == 0 do return false
+	above := sandbox_index(sb, x, y - 1)
+	if sb.moved[above] do return false
+
+	kind := table.kind[sb.cells[above]]
+	if kind != .Powder && kind != .Liquid do return false
+
+	if wang_hash(sb.seed, SANDBOX_SALT_SIFT, sb.origin_x + x, sb.origin_y + y) % BRUSH_WEAVE == 0 do return false
+	return sandbox_swap(sb, x, y, x, y - 1)
 }
 
 sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {

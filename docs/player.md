@@ -353,12 +353,15 @@ the narrowest tunnel.
 cursor, because turning him away from the way he runs would need
 frames the sheet does not hold.
 
-**The beam starts inside him**, at `player_centre`, half the body up
-from the feet. One procedure decides that point, because three things
-have to measure from it or the tool reads as attached to nothing: the
-beam, the cursor's aim, and the picture the window draws. The first
-cells of the beam are the air his own body stands in, which costs
-nothing and is what makes the tool read as held rather than as thrown.
+**The cut starts inside him**, at `player_centre`, half the body up
+from the feet. One procedure decides that point, because the cut and
+the cursor's aim have to measure from it or the tool reads as attached
+to nothing. The first cells of the beam are the air his own body
+stands in, which costs nothing and is what makes the tool read as held
+rather than as thrown. The *picture* of the beam leaves the orb on his
+staff and lands where the cut lands, so the tool reads as the staff
+cutting; `sandbox_cut_reach` is the one procedure that says where
+that is, and the kerf and the drawn beam both call it.
 
 **The debris must clear him.** `CUT_SPRAY_NEAR` is the length of beam
 nearest the tool that no thrown grain lands in, and an `#assert` in

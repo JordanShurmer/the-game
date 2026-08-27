@@ -70,7 +70,9 @@ material_is_phantom :: proc(m: Material) -> bool {
 // Standing growth: a crop, a hedge, a stook of cut wheat. It holds its
 // cell against sand and water the way a solid does and it burns and
 // crumbles like anything else, but a man walks through it rather than
-// into it.
+// into it, and what falls on it mostly sifts down through it to the
+// ground at its foot -- see `sandbox_sift`, and docs/physics.md, "The
+// sieve rule".
 //
 // It is a state and not a flag because it is a way of being matter, the
 // same as being a powder is. Without it every field in the homelands is
