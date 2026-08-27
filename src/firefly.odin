@@ -5,7 +5,6 @@ import "core:testing"
 import rl "vendor:raylib"
 
 FIREFLY_MAX :: 24
-FIREFLY_PER_POND :: 7
 
 // A firefly is a light with no body, and the light it carries is the
 // Firefly_Light material. See docs/lighting.md, "Every light is a material";
@@ -13,9 +12,6 @@ FIREFLY_PER_POND :: 7
 FIREFLY_REACH :: 9
 FIREFLY_FALL :: Light_Fall{open = 176, open_diag = 150, dense = 96, dense_diag = 64}
 
-FIREFLY_HOVER :: 8.0
-FIREFLY_SPREAD :: 0.82
-FIREFLY_RISE :: 7.0
 FIREFLY_DRIFT_X :: 13.0
 FIREFLY_DRIFT_Y :: 6.0
 FIREFLY_RATE_SLOW :: 0.45
@@ -50,26 +46,66 @@ Firefly_Swarm :: struct {
 	clock: f32,
 }
 
-firefly_gather :: proc(world: World) -> (swarm: Firefly_Swarm) {
-	for i in 0 ..< int(world.pond_count) {
-		p := world.ponds[i]
+// Slots either side of a point the gather looks in: a box of eleven by
+// eleven, which is a whole play square and more.
+FIREFLY_SEARCH :: 5
 
-		for k in 0 ..< FIREFLY_PER_POND {
-			if swarm.count >= FIREFLY_MAX do break
+// Gather the swarm over the firefly marks nearest a point -- the
+// spawn, when the world loads. A mark is a cell of Firefly_Light
+// painted in an authored tile and lifted out by the loader (see
+// Tile_Mark), so the tiles say where every firefly in the world lives
+// and this only has to ask the lattice which tiles are nearby. Nothing
+// here names a room: paint a mark in any tile of any biome and the
+// swarm hangs there.
+//
+// Nearer marks are taken first, so when the box holds more marks than
+// the swarm has flies, the far pond is the one that goes short.
+firefly_gather :: proc(world: ^World, near_x, near_y: i32) -> (swarm: Firefly_Swarm) {
+	firefly := world.materials.firefly
+	home_sx := tile_slot(near_x)
+	home_sy := tile_slot(near_y)
 
-			h := wang_hash(world.seed, FIREFLY_SALT, p.x + i32(k), p.y)
-			across := (f32(k) + 0.5) * 2 / FIREFLY_PER_POND - 1
+	dist: [FIREFLY_MAX]i64
 
-			swarm.flies[swarm.count] = Firefly {
-				home_x  = f32(p.x) + across * f32(p.rx) * FIREFLY_SPREAD,
-				home_y  = f32(p.y) - FIREFLY_HOVER - f32(h & 7) * FIREFLY_RISE / 8,
-				rate_x  = firefly_rate(h >> 8),
-				rate_y  = firefly_rate(h >> 16),
-				phase_x = u8(h >> 24),
-				phase_y = u8(h >> 32),
-				pulse   = u8(h >> 40),
+	for sy in home_sy - FIREFLY_SEARCH ..= home_sy + FIREFLY_SEARCH {
+		for sx in home_sx - FIREFLY_SEARCH ..= home_sx + FIREFLY_SEARCH {
+			id := world_biome_at(world^, sx * TILE_SIZE + TILE_SIZE / 2, sy * TILE_SIZE + TILE_SIZE / 2)
+			b := world.biomes.biomes[id]
+			if b.generator != .Wang || b.tile_base == TILE_NONE do continue
+			tile := wang_tile_at(world.seed, b, sx, sy)
+
+			for m in world.tiles.marks {
+				if m.tile != tile || m.material != firefly do continue
+
+				wx := sx * TILE_SIZE + i32(m.x)
+				wy := sy * TILE_SIZE + i32(m.y)
+				dx := i64(wx - near_x)
+				dy := i64(wy - near_y)
+				d := dx * dx + dy * dy
+
+				at := swarm.count
+				for at > 0 && d < dist[at - 1] {
+					if int(at) < FIREFLY_MAX {
+						swarm.flies[at] = swarm.flies[at - 1]
+						dist[at] = dist[at - 1]
+					}
+					at -= 1
+				}
+				if int(at) >= FIREFLY_MAX do continue
+
+				h := wang_hash(world.seed, FIREFLY_SALT, wx, wy)
+				swarm.flies[at] = Firefly {
+					home_x  = f32(wx),
+					home_y  = f32(wy),
+					rate_x  = firefly_rate(h >> 8),
+					rate_y  = firefly_rate(h >> 16),
+					phase_x = u8(h >> 24),
+					phase_y = u8(h >> 32),
+					pulse   = u8(h >> 40),
+				}
+				dist[at] = d
+				swarm.count = min(swarm.count + 1, FIREFLY_MAX)
 			}
-			swarm.count += 1
 		}
 	}
 
@@ -115,6 +151,13 @@ firefly_power :: proc(table: Material_Table, f: Firefly, clock: f32) -> u8 {
 @(private = "file")
 firefly_test_sim :: proc(t: ^testing.T, s: ^Sim) -> bool {
 	if !testing.expect(t, sim_load(s) == .None, "the world must load") do return false
+	// The pond is underground now, so a test about the light of the
+	// swarm walks him down to it first: flies outside the light square
+	// throw nothing, and a swarm nobody is near is dark on purpose.
+	if !testing.expect(t, sim_stand_by_the_swarm(s), "the pond must have a shore to stand on") {
+		sim_unload(s)
+		return false
+	}
 	if !testing.expect(t, s.flies.count > 0, "the shipped pond must gather a swarm") {
 		sim_unload(s)
 		return false
@@ -129,10 +172,6 @@ test_the_fireflies_hang_over_the_water_and_never_leave_it :: proc(t: ^testing.T)
 	if !firefly_test_sim(t, &s) do return
 	defer sim_unload(&s)
 
-	p := s.world.ponds[0]
-	reach_x := f32(p.rx) * FIREFLY_SPREAD + FIREFLY_DRIFT_X
-	lowest := f32(p.y) - FIREFLY_HOVER - FIREFLY_RISE - FIREFLY_DRIFT_Y
-
 	for _ in 0 ..< 900 {
 		firefly_step(&s.flies)
 
@@ -140,16 +179,15 @@ test_the_fireflies_hang_over_the_water_and_never_leave_it :: proc(t: ^testing.T)
 			f := s.flies.flies[i]
 			testing.expectf(
 				t,
-				abs(f.x - f32(p.x)) <= reach_x,
-				"a firefly must stay over its own pond, and one is %v cells from the middle of it",
-				f.x - f32(p.x),
+				abs(f.x - f.home_x) <= FIREFLY_DRIFT_X,
+				"a firefly must stay by the mark it was painted at, and one is %v cells from home",
+				f.x - f.home_x,
 			)
 			testing.expectf(
 				t,
-				f.y < f32(p.y) && f.y > lowest,
-				"a firefly must hang in the air over the water, and one is at y=%v with the water at %d",
-				f.y,
-				p.y,
+				abs(f.y - f.home_y) <= FIREFLY_DRIFT_Y,
+				"a firefly must hang in the air over its mark, and one is %v cells off",
+				f.y - f.home_y,
 			)
 		}
 	}

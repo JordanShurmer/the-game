@@ -15,8 +15,6 @@ World :: struct {
 	images:    [][]Cell,
 	seed:      u64,
 
-	ponds:      [POND_MAX]Pond,
-	pond_count: i32,
 }
 
 World_View :: struct {
@@ -80,13 +78,13 @@ world_cell_at :: proc(world: World, wx, wy: i32) -> Cell {
 	if b.generator == .Image {
 		cpp := world.biomes.cells_per_pixel
 		img := world_image_cells(world, id, world_image_variant(world, b, floor_div(wx, cpp), floor_div(wy, cpp)))
-		return world_pond_cell(world, wx, wy, img[int(region_offset(wy, cpp)) * int(cpp) + int(region_offset(wx, cpp))])
+		return img[int(region_offset(wy, cpp)) * int(cpp) + int(region_offset(wx, cpp))]
 	}
 
-	if b.tile_base == TILE_NONE do return world_pond_cell(world, wx, wy, Cell(b.fill_0))
+	if b.tile_base == TILE_NONE do return Cell(b.fill_0)
 
 	tile := world_tile_at(world, b, wx, wy)
-	return world_pond_cell(world, wx, wy, tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy)))
+	return tile_at(world.tiles, tile, tile_offset(wx), tile_offset(wy))
 }
 
 generate :: proc(world: World, view: World_View, out: []Cell) {
@@ -137,24 +135,6 @@ generate :: proc(world: World, view: World_View, out: []Cell) {
 				}
 			}
 			tx = tx_end
-		}
-
-		pond_overlay(world, view, wy, row)
-	}
-}
-
-@(private = "file")
-pond_overlay :: proc(world: World, view: World_View, wy: i32, row: []Cell) {
-	for i in 0 ..< int(world.pond_count) {
-		p := world.ponds[i]
-		if wy < p.y - POND_LIP || wy > p.y + p.ry + POND_SHELL do continue
-
-		span := pond_span(p)
-		tx0 := max(ceil_div(p.x - span - view.x, view.step), 0)
-		tx1 := min(floor_div(p.x + span - view.x, view.step), view.w - 1)
-
-		for tx in tx0 ..= tx1 {
-			row[tx] = pond_cell(p, view.x + tx * view.step, wy, row[tx])
 		}
 	}
 }

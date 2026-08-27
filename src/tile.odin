@@ -14,18 +14,39 @@ Tile_Id :: u16
 TILE_NONE :: Tile_Id(0xFFFF)
 MAX_TILES :: 256
 
+// A phantom painted in a tile. A phantom is a light and not matter --
+// the cell grid never holds one -- so a cell of one in a tile file is
+// a mark, not a cell: it says a light lives here. The loader lifts
+// every mark out of the cells (leaving Air) and keeps it beside the
+// set, and the fireflies gather over the marks; see docs/water.md.
+// Saving a tile stamps its marks back into the file, so an editor
+// save cannot lose them.
+Tile_Mark :: struct {
+	tile:     Tile_Id,
+	x, y:     u16,
+	material: u16,
+}
+
+#assert(size_of(Tile_Mark) == 8)
+
 Tile_Set :: struct {
 	cells: []Cell,
 	count: int,
+	marks: [dynamic]Tile_Mark,
 }
 
 make_tile_set :: proc(count: int, allocator := context.allocator) -> Tile_Set {
 	assert(count <= MAX_TILES, "a world holds at most MAX_TILES tiles")
-	return Tile_Set{cells = make([]Cell, count * TILE_AREA, allocator), count = count}
+	return Tile_Set{
+		cells = make([]Cell, count * TILE_AREA, allocator),
+		count = count,
+		marks = make([dynamic]Tile_Mark, allocator),
+	}
 }
 
 destroy_tile_set :: proc(set: Tile_Set, allocator := context.allocator) {
 	delete(set.cells, allocator)
+	delete(set.marks)
 }
 
 tile_cells :: proc(set: Tile_Set, id: Tile_Id) -> []Cell {

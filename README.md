@@ -76,9 +76,10 @@ scratch.
 ## Playing
 
 The window opens on the wizard, standing on the village green of the
-homelands: six regions of field and cottage along the surface, with a
-pond a short walk west of him and the mouth of the coal pit east of the
-last of them.
+homelands: six regions of field and cottage along the surface, with
+the mouth of the coal pit east of the last of them. Down in the coal
+there is a pond with fireflies over it, and it is the one place in the
+dark that is already lit.
 
 | Key | Action |
 | --- | --- |
@@ -130,7 +131,7 @@ is built and what it costs.
 
 ![Walking left toward the pond, dropping a crystal of light every 21 cells](docs/images/walk.gif)
 
-**The pond.** A short walk to his left there is water, drawn by a
+**The pond.** Down in the caves there is water, drawn by a
 shader: a rippling surface, depths that go dark and cold, and a net of
 caustics sliding over the bottom. A swarm of fireflies hangs over its
 mouth and is the only light on it until he walks up with the orb.
@@ -247,7 +248,7 @@ only way down is the longer half of the village.
 `tools/seed_homelands.py` draws the thirteen pictures and `--check`
 holds them to the two rules that matter: every picture's side edges
 agree, so two regions meet with no step, and the middle of every
-picture stays open, because that is where the wizard and his pond land.
+picture stays open, because that is where the wizard lands.
 `docs/homelands.md` is the note.
 
 The two galleries are painted regions too, of one picture each; see
@@ -353,5 +354,5 @@ tools/     the toolchain install, the tile and homelands seeders, and the wizard
 | `src/drudge_sprite.odin` | The drudge's own sheet, and which frame of it to draw |
 | `src/bang.odin` | The explosion as a light: what the world remembers of one |
 | `src/alchemy_test.odin` | The second alchemy, measured in the sandbox it runs in |
-| `src/pond.odin` | The pond dug into the world beside the spawn |
+| `src/pond.odin` | The tests that hold the Grotto tile to being a pond |
 | `src/water.odin` | The depth map of the water, and the shader over it |

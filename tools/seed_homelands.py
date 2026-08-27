@@ -50,11 +50,11 @@ on it, dirt under it. The height field is faded to that level before it
 reaches them. `--check` reads the files back and holds them to it.
 
 **The middle of the picture is the village green, and stays open.** The
-wizard starts in the fourth homelands region, at the middle of it, and
-`pond_place` digs the pond POND_AWAY (96) cells west of wherever he
-stands. So the band from GREEN_X0 to GREEN_X1 carries no building and no
-crop -- pasture, a path, a fence and nothing that a pond eating a hole
-in it would spoil. `--check` holds the files to that too.
+wizard starts in the fourth homelands region, at the middle of it. So
+the band from GREEN_X0 to GREEN_X1 carries no building and no crop --
+pasture, a path, a fence -- and the yard in the middle of it holds
+nothing at all, so wherever the seed puts him down there is ground to
+stand on. `--check` holds the files to that too.
 
 See docs/homelands.md for the whole design note.
 """
@@ -100,11 +100,11 @@ PLAYER_STEP = 3
 GREEN_X0 = 112
 GREEN_X1 = 292
 
-# And two spans inside the green are plain pasture, holding nothing at
-# all above the grass but the track across it. POND is what the pond
-# eats -- `pond_place` digs it POND_AWAY (96) cells west of him and it
-# spans POND_RX + POND_SHELL (31) either way. YARD is where he lands.
-POND_X0, POND_X1 = 118, 202
+# And one span inside the green is plain pasture, holding nothing at
+# all above the grass but the track across it: the yard, where he
+# lands. (A second span used to be held for the pond, which was dug
+# into the green beside him; the pond is a tile in the caves now, and
+# the green keeps only the pasture it always had.)
 YARD_X0, YARD_X1 = 232, 280
 
 # What a plain span may hold: soil, and the track worn across it.
@@ -1064,7 +1064,7 @@ def paint_homeland(seed, i=0):
     land.rng = green_rng
     path(land, GREEN_X0 + 2, GREEN_X1 - 2)
     if green_rng.chance(0.7):
-        fence(land, POND_X1 + 4, YARD_X0 - 6)
+        fence(land, 206, YARD_X0 - 6)  # between the track's west reach and the yard
     if green_rng.chance(0.5):
         tree(land, GREEN_X0 - 34)
 
@@ -1373,7 +1373,7 @@ def check_homeland(path_name, grid):
 
     faults += check_walkable(path_name, grid)
 
-    for x0, x1, what in ((POND_X0, POND_X1, "the pond"), (YARD_X0, YARD_X1, "the yard")):
+    for x0, x1, what in ((YARD_X0, YARD_X1, "the yard"),):
         for x in range(x0, x1 + 1):
             for y in range(IMG):
                 if grid[y][x] not in PLAIN:

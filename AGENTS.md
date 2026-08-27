@@ -161,9 +161,8 @@ whole strip, and `--check` holds the files to both:
   draws its outermost 10 columns identically and the seeder stamps
   them last, the way `seed_tiles.py` stamps a wang band last.
 - **The village green stays open.** The wizard lands in the middle of
-  the fourth region and `pond_place` digs the pond 96 cells west of
-  him. Which picture that region draws depends on the seed, so *every*
-  picture has to be one that can take a pond and a wizard.
+  the fourth region, and which picture that region draws depends on
+  the seed, so *every* picture has to be one he can land in.
 - **The ground of a village is ground he can walk.** He steps up
   `PLAYER_CLIMB` (3) cells. Everything worked into the ground -- ridge,
   furrow, hedge bank, ditch, well coping -- is cut to that; what people
@@ -181,7 +180,8 @@ fireflies over the pond, for the bang an explosion gives off, and for
 the sparkle a poison throws off meeting water. Read it before changing
 `src/light.odin`, `src/firefly.odin`, `src/bang.odin` or
 `src/sparkle.odin`, and note the third rule below. `docs/water.md` is
-the note for the pond and the water shader; read it before changing
+the note for the pond -- a tile in the caves now, with its fireflies
+painted in it -- and for the water shader; read it before changing
 `src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
 `docs/alchemy.md` is the note for the whole alchemy: the poison, the
 water and the neutral liquid the two leave, and then the salts, the

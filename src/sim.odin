@@ -110,10 +110,7 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 	s.light = light_make(biomes.world_seed)
 	s.player = player_spawn(&s.world)
 
-	if pond, dug := pond_place(s.world, i32(s.player.x), i32(s.player.y)); dug {
-		world_add_pond(&s.world, pond)
-	}
-	s.flies = firefly_gather(s.world)
+	s.flies = firefly_gather(&s.world, i32(s.player.x), i32(s.player.y))
 	s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
 
 	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
@@ -209,19 +206,16 @@ sim_terrain :: proc(s: ^Sim) -> Terrain {
 SIM_DARK_X :: -2304
 SIM_DARK_Y :: -1536
 
-// Put the wizard somewhere dark, and move the square and the light with
-// him. The homelands are daylit, so a test about the lamp he carries or
-// the trail he leaves has to be run under them: on the surface the orb
-// is out, nothing falls from it, and what a grid scan finds is the day.
-// It answers false if there is no standing place down there at all,
-// which is itself worth failing a test over.
-sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
+// Put the wizard on the first standing ground in a box, and move the
+// square and the light with him. It answers false when the box holds
+// no standing place at all, which is itself worth failing a test over.
+sim_stand_near :: proc(s: ^Sim, cx, cy, w, h: i32) -> bool {
 	t := Terrain{world = &s.world}
-	for dy in i32(0) ..< 480 {
-		for dx in i32(0) ..< 240 {
+	for dy in i32(0) ..< h {
+		for dx in i32(0) ..< w {
 			for side in ([2]i32{1, -1}) {
-				x := SIM_DARK_X + side * dx
-				y := SIM_DARK_Y + dy
+				x := cx + side * dx
+				y := cy + dy
 				if !player_solid_at(t, x, y) do continue
 				if !player_body_clear(t, f32(x), f32(y)) do continue
 
@@ -235,6 +229,22 @@ sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
 		}
 	}
 	return false
+}
+
+// Somewhere dark. The homelands are daylit, so a test about the lamp
+// he carries or the trail he leaves has to be run under them: on the
+// surface the orb is out, nothing falls from it, and what a grid scan
+// finds is the day.
+sim_stand_in_the_dark :: proc(s: ^Sim) -> bool {
+	return sim_stand_near(s, SIM_DARK_X, SIM_DARK_Y, 240, 480)
+}
+
+// At the water's edge of the pond the swarm hangs over, so the light
+// square covers the flies a test is about to read.
+sim_stand_by_the_swarm :: proc(s: ^Sim) -> bool {
+	if s.flies.count == 0 do return false
+	f := s.flies.flies[0]
+	return sim_stand_near(s, i32(f.home_x), i32(f.home_y) - 8, 160, 80)
 }
 
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {

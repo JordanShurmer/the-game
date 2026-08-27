@@ -19,7 +19,7 @@ Tile_Load_Result :: struct {
 	err:   Tile_Load_Error,
 }
 
-load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size: i32 = TILE_SIZE) -> Tile_Load_Result {
+load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size: i32 = TILE_SIZE, marks: ^[dynamic]Tile_Mark = nil) -> Tile_Load_Result {
 	assert(len(dst) == int(size) * int(size), "a tile buffer must hold size*size cells")
 
 	if !os.exists(path) {
@@ -48,6 +48,17 @@ load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size
 			idx, found := find_material_by_color(materials, argb)
 			if !found {
 				return {err = .Unmatched_Color, color = argb, x = x, y = y}
+			}
+
+			// A phantom is a light and not matter, and the cell grid
+			// never holds one. A cell of one in the file is a mark --
+			// a light's home, painted where it lives -- so it is
+			// lifted out here and the cell reads as the air it hangs
+			// in. `marks` collects them; a caller with no use for
+			// them passes nothing and they are simply air.
+			if material_is_phantom(materials.materials[idx]) {
+				if marks != nil do append(marks, Tile_Mark{x = u16(x), y = u16(y), material = u16(idx)})
+				idx = int(MATERIAL_AIR)
 			}
 			dst[int(y) * int(size) + int(x)] = Cell(idx)
 		}
@@ -101,10 +112,16 @@ load_tile_set :: proc(
 			cells := tile_cells(set, tile)
 
 			if os.exists(path) {
-				r := load_tile_png(path, materials, cells)
+				lifted := make([dynamic]Tile_Mark, context.temp_allocator)
+				r := load_tile_png(path, materials, cells, TILE_SIZE, &lifted)
 				if r.err != .None {
 					destroy_tile_set(set, allocator)
 					return {}, r, tile
+				}
+				for m in lifted {
+					mark := m
+					mark.tile = tile
+					append(&set.marks, mark)
 				}
 				continue
 			}
@@ -178,7 +195,25 @@ save_tile_set :: proc(
 	for k in 0 ..< wang_set_size(b) {
 		tile := b.tile_base + Tile_Id(k)
 		path := biome_tile_path(biomes, biome, tile)
-		if !save_tile_png(tile_cells(set, tile), materials, path) {
+
+		// The marks were lifted out of the cells at load, so writing
+		// the cells back would quietly lose them. Stamp them into a
+		// copy first: the file holds the light where it was painted,
+		// and a load-save-load round trip is a fixed point.
+		cells := tile_cells(set, tile)
+		marked := false
+		for m in set.marks do if m.tile == tile { marked = true; break }
+		if marked {
+			stamped := make([]Cell, TILE_AREA, context.temp_allocator)
+			copy(stamped, cells)
+			for m in set.marks {
+				if m.tile != tile do continue
+				stamped[int(m.y) * TILE_SIZE + int(m.x)] = Cell(m.material)
+			}
+			cells = stamped
+		}
+
+		if !save_tile_png(cells, materials, path) {
 			return written, path, false
 		}
 		written += 1

@@ -91,19 +91,18 @@ that runs into the border simply ends in a headland, and no picture
 has to be drawn around the rule.
 
 **The village green stays open.** The wizard lands in the middle of the
-fourth region, and `pond_place` digs the pond `POND_AWAY` (96) cells
-west of wherever he lands. Which of the twelve pictures the fourth
-region draws depends on the seed, so *every* picture has to be the one
-that can take a pond and a wizard:
+fourth region, and which of the twelve pictures that region draws
+depends on the seed, so *every* picture has to be one he can land in:
 
 | Span | What may be there |
 | --- | --- |
 | `GREEN_X0`..`GREEN_X1` | no Brick, no Thatch, no Wheat: no building and no crop |
-| the pond band | soil, grass and the gravel track, and nothing else |
-| the yard | the same, so there is always somewhere to stand |
+| the yard | soil, grass and the gravel track, so there is always somewhere to stand |
 
 That is why the middle of every picture is pasture with a track across
-it. It is not an oversight; it is the pond.
+it. It is not an oversight; it is where he lands. The pond used to be
+the other reason — it was dug into the green beside him — but the pond
+lives in the caves now; see `docs/water.md`.
 
 ## The strata, and why nothing under the fields is hollow
 
@@ -244,16 +243,8 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game look=Wheat shot=shots/whea
 - **There is no night.** The day is one number that never changes, and
   the village is always at noon. See `docs/lighting.md`, "The day is a
   biome", for how the sky throws it and why the orb goes out under it.
-- **Nobody minds the fields.** The swarm of fireflies still gathers
-  over the pond, which is now a daylit pond, so it is washed out where
-  it used to be the only light for a hundred cells. Fireflies belong in
-  the dark and the pond no longer is.
 - **Nobody lives there.** The cottages are empty and the fields are
   untended. The drudge is the only other body in the world and he is
   placed underground.
-- **The pond is in the village by accident of the spawn rule**, not
-  because a village was drawn around a pond. It lands 96 cells west of
-  the wizard wherever he stands, which is why every picture has to keep
-  that band clear rather than one picture having a pond drawn into it.
 - **Nothing grows and nothing is harvested.** Wheat is a material that
   stands there and burns. There is no season and no yield.

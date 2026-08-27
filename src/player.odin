@@ -127,8 +127,8 @@ player_centre :: proc(p: Player) -> (x, y: i32) {
 Terrain :: struct {
 	// A pointer, not the world itself. A terrain is a *view* of a world
 	// with a sandbox laid over part of it, and a view that carries a
-	// copy of what it views is a snapshot: a `Terrain` built before a
-	// pond was dug went on describing a world with no pond in it.
+	// copy of what it views is a snapshot that stops following the
+	// world it claims to describe.
 	//
 	// It is not the speed. Seven hundred and fifty bytes by value into
 	// a call made hundreds of thousands of times a frame looks like the
@@ -435,7 +435,6 @@ world_find_surface_row :: proc(world: World) -> (row: i32, found: bool) {
 world_find_mouth :: proc(t: Terrain, surface_y, min_x, max_x: i32) -> (x: i32, found: bool) {
 	is_mouth :: proc(t: Terrain, x, surface_y: i32) -> bool {
 		for dy in i32(0) ..< SPAWN_MOUTH_DEPTH {
-			if world_pond_carves(t.world^, x, surface_y + dy) do return false
 			if player_solid_at(t, x, surface_y + dy) do return false
 		}
 		return true
@@ -455,7 +454,6 @@ world_find_ground_near :: proc(t: Terrain, mouth_x, surface_y: i32) -> (x: i32, 
 	for dist := i32(SPAWN_CLEARANCE); dist < SPAWN_SEARCH_RANGE; dist += 1 {
 		for side in ([2]i32{1, -1}) {
 			cx := mouth_x + side * dist
-			if world_pond_carves(t.world^, cx, surface_y) do continue
 			if !player_solid_at(t, cx, surface_y) do continue
 			if !player_body_clear(t, f32(cx), f32(surface_y)) do continue
 			return cx, true
@@ -1539,8 +1537,8 @@ test_world_find_spawn_on_the_shipped_map :: proc(t: ^testing.T) {
 		s.world.biomes.spawn_region, left, left + cpp - 1, x,
 	)
 
-	// And in the middle of it, not at one end: the pond is dug 96 cells
-	// west of wherever he lands and it must land in the same region.
+	// And in the middle of it, not at one end: the middle is the yard
+	// every picture keeps clear for him.
 	middle := left + cpp/2
 	testing.expectf(
 		t, abs(x - middle) < cpp/8,
