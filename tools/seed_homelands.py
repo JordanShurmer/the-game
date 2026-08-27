@@ -60,6 +60,7 @@ See docs/homelands.md for the whole design note.
 """
 
 import argparse
+import math
 import os
 import sys
 
@@ -85,6 +86,7 @@ GREEN_FADE = 70  # how gently the swell fades in from the edge of the green
 GREEN_SALT = 0x6E7E5F31  # keys the green's own dice, apart from the plots'
 SWELL_SALT = 0x51E11B0D  # keys the swell's own dice, apart from everything else
 PLOT_SALT = 0x2F8C6A19  # keys the plots' own dice, apart from the ground's
+STRATA_SALT = 0x7A19C3E5  # keys the gravel band's and rock roof's own wander
 SKIN = 3  # cells of Grass over the dirt
 
 # The village green: no cottage and no crop stands between these two,
@@ -123,6 +125,12 @@ ROCK_TOP = 436
 # and how far it rises above the grass line at the east edge.
 BLUFF_X0 = 190
 FACE = 78  # the scarp at the foot of it, over the level of the fields
+BLUFF_BLEND = 120  # how far west of the bluff a tongue of its rock may reach
+ADIT_X0 = BLUFF_X0 - 34  # where the mouth is cut, west of the face, so what
+                         # is heaped outside it can never bury it
+ADIT_LEN = 96  # cells the mouth runs square and worked before the natural cave
+ADIT_HALF_W = 19  # half the squared adit's width
+ADIT_HALF_H = 17  # half the squared adit's height
 
 # ------------------------------------------------------------ the buildings
 
@@ -214,6 +222,11 @@ class Land:
         self.rng = Rng(seed)
         self.cells = [[AIR] * IMG for _ in range(IMG)]
         self.top = [EDGE_GROUND] * IMG
+        # How far the gravel band and the rock roof have wandered from
+        # their flat rows in each column, set by lay_ground and read
+        # back by scatter_soil and stratum_at_col.
+        self.gravel_wander = [0.0] * IMG
+        self.rock_wander = [0.0] * IMG
 
     # -- writing
 
@@ -266,12 +279,30 @@ def edge_profile():
 
 
 def stratum_at(y):
-    """Which stratum a row is in."""
+    """Which stratum a row is in, at the flat row it always sat on."""
     name = STRATA[0][1]
     for first, material in STRATA:
         if y >= first:
             name = material
     return name
+
+
+def stratum_at_col(land, x, y):
+    """Which stratum a row is in at this column: the gravel band and
+    the rock roof wander gently from column to column instead of
+    running dead level like a layer cake, using the offsets lay_ground
+    left on `land`. Those offsets are faded to zero at the picture's
+    edges, so at EDGE this is `stratum_at` again and the shared edge
+    profile still holds."""
+    gt = GRAVEL_TOP + int(land.gravel_wander[x])
+    rt = ROCK_TOP + int(land.rock_wander[x])
+    if rt < gt + 14:
+        rt = gt + 14  # the rock roof never rides up into the gravel band
+    if y >= rt:
+        return ROCK
+    if y >= gt:
+        return GRAVEL
+    return stratum_at(y)  # topsoil/subsoil above the band: plain Dirt either way
 
 
 def stamp_edges(land, sides="both"):
@@ -320,6 +351,15 @@ def lay_ground(land):
     fine = smooth_field(land.rng, IMG, 23, 2.2)
     swell = smooth_field(Rng(land.seed ^ SWELL_SALT), IMG, 190, SWELL)
 
+    # The gravel band and the rock roof wander too, on a stream of
+    # their own so a change here cannot perturb the ground or the
+    # plots -- faded flat at the edges by the same `hold` the grass
+    # line uses, so the strata a shot sees on either side of a region
+    # border still agree.
+    strata_rng = Rng(land.seed ^ STRATA_SALT)
+    gravel_wander = smooth_field(strata_rng, IMG, 70, 24)
+    rock_wander = smooth_field(strata_rng, IMG, 95, 20)
+
     for x in range(IMG):
         # Fade to the shared edge level over the last FADE columns, so
         # column 0 and column 511 are the same in every picture.
@@ -328,12 +368,14 @@ def lay_ground(land):
         hold = 0.0 if near < EDGE else min(1.0, (near - EDGE) / FADE)
         swell_amt = swell[x] * swell_hold(x)
         land.top[x] = int(round(EDGE_GROUND + (swell_amt + roll[x] + fine[x]) * hold))
+        land.gravel_wander[x] = gravel_wander[x] * hold
+        land.rock_wander[x] = rock_wander[x] * hold
 
     for x in range(IMG):
         top = land.top[x]
         land.fill(x, top, x, top + SKIN - 1, GRASS)
         for y in range(top + SKIN, IMG):
-            land.cells[y][x] = stratum_at(y)
+            land.cells[y][x] = stratum_at_col(land, x, y)
 
     scatter_soil(land)
 
@@ -363,18 +405,24 @@ def scatter_soil(land):
 
     # The gravel band is not a ruled line: it wanders, and lenses of it
     # reach up into the soil and down into the rock, flattened into
-    # sedimentary lenses rather than round lumps.
+    # sedimentary lenses rather than round lumps, sampled around
+    # wherever the band actually is at that column rather than the
+    # flat row it used to sit on.
     for _ in range(34):
         cx = rng.between(EDGE + 16, IMG - EDGE - 17)
-        cy = rng.between(GRAVEL_TOP - 26, GRAVEL_TOP + 30)
+        gt = GRAVEL_TOP + int(land.gravel_wander[cx])
+        cy = gt + rng.between(-26, 30)
         blob(land, cx, cy, rng.between(5, 14), GRAVEL, flat=rng.between(2, 4))
 
-    # And coal in the rock that roofs the mine, which is the first sight
-    # of what the region under this one is made of.
-    for _ in range(20):
-        cx = rng.between(EDGE + 10, IMG - EDGE - 11)
-        cy = rng.between(ROCK_TOP, IMG - 4)
-        blob(land, cx, cy, rng.between(4, 11), COAL, flat=2.2)
+    # And coal in the rock that roofs the mine, which is the first
+    # sight of what the region under this one is made of. Coal is
+    # bedded: long, thin, near-level seams that pinch and swell along
+    # their run, not round holes punched in the rock.
+    for _ in range(18):
+        cx = rng.between(EDGE + 20, IMG - EDGE - 21)
+        rt = ROCK_TOP + int(land.rock_wander[cx])
+        cy = rng.between(rt + 6, IMG - 8)
+        coal_seam(land, cx, cy, rng)
 
 
 def blob(land, cx, cy, r, name, flat=1.0):
@@ -389,6 +437,34 @@ def blob(land, cx, cy, r, name, flat=1.0):
             if land.at(x, y) in (AIR, GRASS):
                 continue
             land.set(x, y, name)
+
+
+def coal_seam(land, cx, cy, rng, length=None, thick=None):
+    """A bedded seam of coal: long, thin and near level, wandering
+    gently up and down along its run and pinching to nothing at both
+    ends instead of swelling into a round lump. It only ever replaces
+    Rock, so a seam sits in the rock it was laid down in and never
+    bleeds into the soil or the gravel either side of it."""
+    length = length or rng.between(70, 170)
+    thick = thick or rng.between(3, 7)
+    # A bed dips and rises over the length of itself, not every few
+    # cells. One slow wave across the whole run, and a second half as
+    # fast and a third as deep, so it is not a drawn sine either.
+    slow = rng.between(1, 2) * math.pi / length
+    fine = rng.between(3, 5) * math.pi / length
+    phase = rng.unit() * 6.283
+    x0 = cx - length // 2
+    for i in range(length):
+        x = x0 + i
+        wob = 5.0 * math.sin(slow * i + phase) + 1.8 * math.sin(fine * i)
+        y = cy + int(round(wob))
+        t = i / max(1, length - 1)
+        pinch = 1.0 - abs(2.0 * t - 1.0)  # 0 at both ends, 1 at the middle
+        h = max(1, round(thick * (0.25 + 0.75 * pinch)))
+        top = y - h // 2
+        for dy in range(h):
+            if land.at(x, top + dy) == ROCK:
+                land.set(x, top + dy, COAL)
 
 
 # --------------------------------------------------------------- the field
@@ -685,6 +761,14 @@ def well(land, x):
     land.fill(x + 4, top - 11, x + 11, top + WELL_DEPTH, AIR)
     for y in range(top + WELL_DEPTH + 1, IMG):
         land.fill(x + 4, y, x + 11, y, stratum_at(y))
+    # A few stones and flecks through the backfill, so the closed shaft
+    # does not show as a clean stripe against the flecked ground around
+    # it -- it was dug and filled, not cast in one piece.
+    rng = land.rng
+    for _ in range(6):
+        fx = rng.between(x + 4, x + 11)
+        fy = rng.between(top + WELL_DEPTH + 8, IMG - 6)
+        blob(land, fx, fy, rng.between(1, 2), ROCK if rng.chance(0.6) else DIRT)
     land.fill(x, top - 13, x + 15, top - 12, ROCK)  # the coping
     land.fill(x + 1, top - 22, x + 2, top - 13, WOOD)  # the posts
     land.fill(x + 13, top - 22, x + 14, top - 13, WOOD)
@@ -879,40 +963,33 @@ def carve_run(land, points):
             carve(land, int(x0 + (x1 - x0) * t), int(y0 + (y1 - y0) * t), int(r0 + (r1 - r0) * t))
 
 
-def mouth_point(points, x):
-    """Where the mouth passage's centre line and radius are at column
-    x, interpolated along the same waypoints `carve_run` widened it
-    from -- so the timber that frames it fits the hole that is
-    actually there."""
-    for i in range(len(points) - 1):
-        x0, y0, r0 = points[i]
-        x1, y1, r1 = points[i + 1]
-        lo, hi = (x0, x1) if x0 <= x1 else (x1, x0)
-        if lo <= x <= hi:
-            t = 0.0 if x1 == x0 else (x - x0) / (x1 - x0)
-            return y0 + (y1 - y0) * t, r0 + (r1 - r0) * t
-    return points[-1][1], points[-1][2]
+TIMBER_CORBEL = 8  # how far a shoring post hangs below its roof beam
 
 
-def timber_mouth(land, cx, cy, r):
-    """Timber at the mouth: two props either side of the opening and a
-    lintel beam across the top of it, as if someone had shored the hole
-    up to walk in under."""
-    dx = int(r * 0.6)
-    half_h = int((r * r - dx * dx) ** 0.5)
-    for px in (cx - dx, cx + dx):
-        land.column(px, cy - half_h + 3, cy + half_h, WOOD)
-    land.fill(cx - dx, cy - half_h, cx + dx, cy - half_h + 2, WOOD)
+def timber_frame(land, cx, y_top, half_w):
+    """Shoring in a worked tunnel, seen from the side: a beam under the
+    roof and a short post down each end of it.
+
+    The posts hang from the beam and never reach the floor. A timber
+    set really does stand floor to roof, but a side elevation of one
+    that did would be a solid wall across the only way in -- the
+    passage is the thing the picture is about, so the timber reads
+    against the roof and the way through stays open."""
+    land.fill(cx - half_w, y_top, cx + half_w, y_top + 2, WOOD)
+    for px in (cx - half_w, cx + half_w):
+        land.fill(px, y_top, px + 1, y_top + TIMBER_CORBEL, WOOD)
 
 
-def cart_rail(land, x0, x1):
+def cart_rail(land, x0, x1, floor_y, floor_from):
     """A cart rail worn out of the mouth: a gravel bed with a wood
-    sleeper set across it every few cells."""
+    sleeper set across it every few cells. It lies on the field until
+    it reaches the mouth and on the floor of the adit past that, so it
+    is one track and not two."""
     for x in range(x0, x1 + 1):
-        top = land.ground(x)
+        top = floor_y if x >= floor_from else land.ground(x)
         land.set(x, top, GRAVEL)
         if (x - x0) % 5 == 0:
-            land.fill(x, top - 1, x, top - 1, WOOD)
+            land.set(x, top - 1, WOOD)
 
 
 def spoil_heap(land, cx, rng):
@@ -936,42 +1013,88 @@ def paint_cavemouth():
     height of the region, so at the east edge the ground stands at the
     top of the picture -- which is exactly where the Coalmine region
     beside it starts, and the two meet with no step. A mouth opens in
-    the lower face of that hillside at the height a wizard walks in at,
-    and the passage behind it turns down into the coal."""
+    the lower face of that hillside at the height a wizard walks in
+    at: worked and squared for the first stretch behind it, and only
+    past that does the passage turn natural and wind down into the
+    coal."""
     land = Land(0xCA7E)
     rng = land.rng
-    lay_ground(land)
+    lay_ground(land)  # ordinary field strata everywhere first, so the
+                       # gravel band and the rock roof are already there
+                       # to run into the bluff rather than be replaced
 
-    # The hillside. It does not start level with the fields: it starts
-    # as a scarp FACE cells high, because a mouth needs a face to open
-    # in and a slope has none. From the top of that scarp it climbs on
-    # to the top of the region, where the coal begins. A jagged, finer
-    # noise rides on top near the face, so the rock reads as broken
-    # rock and not a ruled wedge.
+    # The hillside's skyline: a scarp FACE cells high at the foot of
+    # it, broken by broad shoulders and a jagged, finer edge rather
+    # than one ruled slope, climbing on to the top of the region where
+    # the coal begins.
     roll = smooth_field(rng, IMG, 60, 6)
     scarp = smooth_field(rng, IMG, 21, 9)
     jag = smooth_field(rng, IMG, 7, 5.0)
     crag = smooth_field(rng, IMG, 4, 3.0)
+    ledge = smooth_field(rng, IMG, 34, 11)
+    crest = [EDGE_GROUND] * IMG
     for x in range(BLUFF_X0, IMG):
         t = (x - BLUFF_X0) / (IMG - 1 - BLUFF_X0)
         foot = EDGE_GROUND - FACE
         climb = t ** 0.6
         broken = max(0.0, 1.0 - t * 1.3)
-        crest = int(
+        shoulder = max(0.0, 1.0 - t * 2.4)
+        c = int(
             foot * (1.0 - climb)
             + roll[x] * (1.0 - abs(2 * t - 1))
             + scarp[x] * (1.0 - t)
             + jag[x] * broken
             + crag[x] * broken
+            + ledge[x] * shoulder
         )
-        crest = max(0, min(EDGE_GROUND, crest))
-        land.fill(x, 0, x, crest - 1, AIR)
-        land.fill(x, crest, x, IMG - 1, ROCK)
+        crest[x] = max(0, min(EDGE_GROUND, c))
+        land.fill(x, 0, x, crest[x] - 1, AIR)
         # Soil and grass hold on the lower slope and give out further up.
         if t < 0.42:
-            land.fill(x, crest, x, crest + SKIN - 1, GRASS)
-            land.fill(x, crest + SKIN, x, crest + SKIN + int((0.42 - t) * 40), DIRT)
-        land.top[x] = crest
+            land.fill(x, crest[x], x, crest[x] + SKIN - 1, GRASS)
+            land.fill(x, crest[x] + SKIN, x, crest[x] + SKIN + int((0.42 - t) * 40), DIRT)
+        land.top[x] = crest[x]
+
+    # The rock does not meet the fields' own strata in a ruled plane:
+    # for a short buffer past the face the ground is exactly what a
+    # field's is -- the gravel band and the rock roof both still there,
+    # wandering as they do everywhere else -- and only past that does
+    # the hill's own body start rising up through them, thinning the
+    # dirt above it until, well inside the hill, there is nothing left
+    # over the surface but rock.
+    belly_wander = smooth_field(rng, IMG, 55, 50)
+    belly_fine = smooth_field(rng, IMG, 17, 22)
+    for x in range(BLUFF_X0, IMG):
+        t = (x - BLUFF_X0) / (IMG - 1 - BLUFF_X0)
+        skin_bottom = crest[x] + SKIN + (int((0.42 - t) * 40) if t < 0.42 else 0)
+        settle = 0.0 if t < 0.06 else min(1.0, (t - 0.06) / 0.5)
+        rock_top = int(
+            IMG * (1.0 - settle) + skin_bottom * settle
+            + belly_wander[x] * settle + belly_fine[x] * 0.6
+        )
+        rock_top = max(skin_bottom, min(IMG - 1, rock_top))
+
+        # First the ordinary strata, exactly as a field would have them
+        # at these depths -- this is what makes the gravel band and the
+        # rock roof carry on into the bluff -- because the ground here
+        # used to be flat and lower, and simply had not been repainted
+        # for the new, higher crest: left alone, the old flat skin
+        # would hang in the air where the hill now stands over it.
+        # Then the hill's own body overrides the top of that from
+        # rock_top down, so what is left above it is soil and what is
+        # below reads as the same rock whether it is the hill's or the
+        # roof of the mine.
+        for y in range(skin_bottom, IMG):
+            land.cells[y][x] = stratum_at_col(land, x, y)
+        land.fill(x, rock_top, x, IMG - 1, ROCK)
+
+    # A few tongues of the same rock reach west, up into the subsoil
+    # above where the main mass starts, so the boundary is a handful of
+    # fingers advancing at different rates and not a wall.
+    for _ in range(10):
+        cx = BLUFF_X0 - int(rng.unit() ** 2 * BLUFF_BLEND)
+        cy = rng.between(EDGE_GROUND - 10, GRAVEL_TOP - 15)
+        blob(land, cx, cy, rng.between(10, 22), ROCK, flat=rng.between(2, 4))
 
     # Texture on the exposed face itself, not just its skyline: lenses
     # of gravel breaking up what would otherwise be a flat grey wall.
@@ -981,12 +1104,42 @@ def paint_cavemouth():
         if land.at(cx, cy) == ROCK:
             blob(land, cx, cy, rng.between(4, 10), GRAVEL, flat=rng.between(1, 3))
 
-    # The mouth, and the passage behind it: in level at the height of
-    # the fields, then back and down under the hill, widening the whole
-    # way to the cavern at the bottom.
+    # A broken shoulder: an overhang where the rock juts out over a
+    # notch undercut into the face beneath it, so the face reads as
+    # broken rock and not one ruled slope throughout.
+    for _ in range(3):
+        ox = rng.between(BLUFF_X0 + 24, BLUFF_X0 + 210)
+        oy = crest[ox] + rng.between(16, 30)
+        ow = rng.between(26, 42)
+        oh = rng.between(7, 12)
+        land.fill(ox - ow // 2, oy, ox + ow // 2, oy + oh, AIR)
+
+    # Scree at the foot of the face: loose rock that has come off it,
+    # banked against the scarp. It banks west of the mouth and not over
+    # it -- inside the hill `land.ground` is the crest, a hundred cells
+    # up, and a heap piled there is a heap on the hilltop.
+    for x in range(ADIT_X0 - 74, ADIT_X0 - 6):
+        t2 = (ADIT_X0 - 6 - x) / 68
+        pile = max(0, int(18 * t2 ** 1.5 * (0.5 + 0.5 * rng.unit())))
+        top = land.ground(x)
+        land.fill(x, top - pile, x, top, GRAVEL)
+
+    # The mouth: for the first ADIT_LEN cells behind it the passage is
+    # worked, not natural -- a squared adit, flat floored and straight
+    # roofed at the height the timber lintels sit, propped at
+    # intervals. Only past that does it widen into the round, natural
+    # passage the same way it always has.
+    adit_x0 = ADIT_X0
+    adit_x1 = adit_x0 + ADIT_LEN
+    adit_mid_y = EDGE_GROUND - 17
+    adit_roof = adit_mid_y - ADIT_HALF_H
+    adit_floor = adit_mid_y + ADIT_HALF_H
+    land.fill(adit_x0, adit_roof, adit_x1, adit_floor, AIR)
+    for px in range(adit_x0 + ADIT_HALF_W, adit_x1 - ADIT_HALF_W, 22):
+        timber_frame(land, px, adit_roof, ADIT_HALF_W - 2)
+
     mouth_run = (
-        (BLUFF_X0 - 8, EDGE_GROUND - 17, 19),
-        (BLUFF_X0 + 54, EDGE_GROUND - 15, 21),
+        (adit_x1, adit_mid_y, ADIT_HALF_W),
         (BLUFF_X0 + 116, EDGE_GROUND + 40, 27),
         (BLUFF_X0 + 168, EDGE_GROUND + 150, 34),
         (BLUFF_X0 + 196, IMG - 96, 42),
@@ -1010,26 +1163,23 @@ def paint_cavemouth():
         carve(land, cx, cy, rng.between(10, 26), flat=1.5)
 
     # The floor of the entrance, worn to gravel by the people who use it.
-    for x in range(BLUFF_X0 - 44, BLUFF_X0 + 66):
-        for y in range(EDGE_GROUND - 30, IMG):
+    for x in range(ADIT_X0 - 44, adit_x1):
+        for y in range(adit_roof, IMG):
             if land.at(x, y) in (ROCK, DIRT, GRASS):
                 land.fill(x, y, x, y + 2, GRAVEL)
                 break
 
-    # The mouth itself, timbered: two props either side of the opening
-    # in the rock face and a lintel beam across the top of it, and a
-    # cart rail and a heap of spoil outside where the diggings came out.
-    cy, r = mouth_point(mouth_run, BLUFF_X0 + 10)
-    timber_mouth(land, BLUFF_X0 + 10, int(cy), int(r))
-    cart_rail(land, BLUFF_X0 - 48, BLUFF_X0 + 6)
-    spoil_heap(land, BLUFF_X0 - 26, rng)
+    # A cart rail and a heap of spoil outside where the diggings came out.
+    cart_rail(land, ADIT_X0 - 60, adit_x1 - 4, adit_floor, ADIT_X0)
+    spoil_heap(land, ADIT_X0 - 44, rng)
 
     # Coal in the rock, so the reason to go down is visible from inside
-    # the mouth.
-    for _ in range(40):
-        cx, cy = rng.between(BLUFF_X0, IMG - 6), rng.between(20, IMG - 20)
+    # the mouth: bedded seams, not round holes punched in it.
+    for _ in range(26):
+        cx = rng.between(BLUFF_X0, IMG - 20)
+        cy = rng.between(20, IMG - 20)
         if land.at(cx, cy) == ROCK:
-            blob(land, cx, cy, rng.between(3, 8), COAL, flat=2.4)
+            coal_seam(land, cx, cy, rng)
 
     stamp_edges(land, sides="west")
     return land
