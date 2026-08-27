@@ -49,7 +49,8 @@ App :: struct {
 
 	color_lut: [256]rl.Color,
 
-	dirty: bool,
+	dirty:   bool,
+	hud_off: bool, // a reel films the game, not the debug readout
 }
 
 WINDOW_SHOT_FRAMES :: 90
@@ -62,6 +63,9 @@ Window_Shot :: struct {
 	aim:    u8,
 	ticks:  int,
 	look:   string,
+	script: string,
+	record: string,
+	every:  int,
 	on:     bool,
 }
 
@@ -95,10 +99,32 @@ main :: proc() {
 	if shot.on && !app.look.on do app_walk(&app, shot.walk)
 	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
 
+	reel: Reel
+	if shot.script != "" {
+		loaded, reel_ok := reel_load(shot.script)
+		if !reel_ok {
+			fmt.eprintfln("the script %s could not be read", shot.script)
+			os.exit(1)
+		}
+		reel = loaded
+		reel.dir = shot.record
+		if shot.every > 0 do reel.every = shot.every
+		if reel.dir != "" do os.make_directory(reel.dir)
+		app.hud_off = true
+	}
+
 	frames := 0
 	for !rl.WindowShouldClose() {
-		app.clock = app.look.on ? f32(frames) / 60 : f32(rl.GetTime())
-		if !shot.on do app_handle_input(&app)
+		// A reel must come out the same twice, so its clock is the
+		// frame count and not the wall.
+		app.clock = app.look.on || reel.on ? f32(frames) / 60 : f32(rl.GetTime())
+		if !shot.on && !reel.on do app_handle_input(&app)
+
+		filming := false
+		if reel.on && !reel_done(reel) {
+			filming = reel_step(&reel, &app)
+			app_follow_player(&app)
+		}
 
 		playing := !app.editor.open && !app.tile_edit.open
 		if app.dirty || (playing && app.follow_player) {
@@ -129,13 +155,36 @@ main :: proc() {
 			app_draw_bangs(&app)
 			app_draw_sparks(&app)
 			app_draw_player(&app)
-			draw_hud(&app)
+			if !app.hud_off do draw_hud(&app)
 			editor_draw(&app)
 			tile_editor_draw(&app)
 		}
 		rl.EndDrawing()
 
 		frames += 1
+
+		if reel.on {
+			if filming {
+				if reel.dir != "" && reel.shown % reel.every == 0 {
+					frame_path := fmt.tprintf("%s/frame_%05d.png", reel.dir, reel.wrote)
+					rl.TakeScreenshot(strings.clone_to_cstring(frame_path, context.temp_allocator))
+					reel.wrote += 1
+				}
+				reel.shown += 1
+			}
+			if reel_done(reel) {
+				// Where he ended is how a route is tuned: run the reel,
+				// read the landing, move the digging a few cells.
+				fmt.printfln(
+					"%s: %d frames from %d segments, wizard at %.0f,%.0f",
+					reel.dir != "" ? reel.dir : "(unrecorded)",
+					reel.wrote, len(reel.segments), app.player.x, app.player.y,
+				)
+				free_all(context.temp_allocator)
+				break
+			}
+		}
+
 		if shot.on && frames >= shot.frames {
 			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
 			free_all(context.temp_allocator)
@@ -172,6 +221,12 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			if n, ok := strconv.parse_int(value); ok do shot.ticks = max(n, 0)
 		case "look":
 			shot.look = value
+		case "script":
+			shot.script = value
+		case "record":
+			shot.record = value
+		case "every":
+			if n, ok := strconv.parse_int(value); ok do shot.every = max(n, 1)
 		}
 	}
 	return shot

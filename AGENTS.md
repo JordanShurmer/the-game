@@ -83,6 +83,16 @@ picture and the next. Read `docs/material_shaders.md` before writing one:
 it holds the contract, the helpers, and what makes a material read as
 itself.
 
+## Film the reel
+
+`docs/reel.txt` is the scripted run the README's video is filmed from,
+and `src/reel.odin` is the player: timed input segments driven through
+the same procedures the keys drive, one tick a frame, with `skip`
+segments as the cuts. `docs/toolchain.md`, "Filming the reel", holds
+the commands. The run is deterministic; the tick counts are a route
+tuned against the shipped seed, so a terrain change means re-tuning
+the legs from where the world diverged.
+
 ## Iterate on the world
 
 1. Change the tiles or the code.

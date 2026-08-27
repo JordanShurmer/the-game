@@ -2,7 +2,13 @@
 
 A Noita-like game written in Odin from scratch.
 
-![The wizard at the pond, the orb on his staff the only light, and the crystals he left behind him](docs/images/hero.png)
+![From the village green at noon, over the rooftops, down the mouth of the pit, digging through the dark by the light of the trail, to the firefly pond](docs/images/reel.gif)
+
+One run of the game, played by a script and filmed by the window
+([sharper video](docs/images/reel.mp4), [the script](docs/reel.txt)):
+he starts on the village green, crosses the rooftops, walks into the
+mouth of the coal pit, digs down through the dark leaving a trail of
+light, and comes out at the pond where the fireflies live.
 
 ## Vision
 
@@ -111,7 +117,7 @@ explosion that scatters matter by weight and gives off a bang of light
 as bright as his own orb while it lasts. `docs/pot.md` says how it
 flies, how it breaks, and what this phase leaves out.
 
-![A pot breaking on the floor of the pond: the blast throws water and rock, and the debris falls back](docs/images/blast.gif)
+![A pot breaking in water: the blast throws it with the rock, and the debris falls back](docs/images/blast.gif)
 
 **The drudge.** A drudge patrols a stretch of the world, back and
 forth, and never gives up the walk to chase. Seen, he turns to face
@@ -129,7 +135,7 @@ and hangs where it fell, so the way he came stays lit behind him and
 everything he has not been is gloom. `docs/lighting.md` says how that
 is built and what it costs.
 
-![Walking left toward the pond, dropping a crystal of light every 21 cells](docs/images/walk.gif)
+![Walking the dark, dropping a crystal of light every 21 cells](docs/images/walk.gif)
 
 **The pond.** Down in the caves there is water, drawn by a
 shader: a rippling surface, depths that go dark and cold, and a net of
@@ -333,6 +339,7 @@ tools/     the toolchain install, the tile and homelands seeders, and the wizard
 | `src/biome*.odin` | The biome table and the biome map |
 | `src/tile*.odin` | The tiles and their PNG files |
 | `src/wang.odin` | The tile lattice, the edge colors, the seam rule |
+| `src/reel.odin` | The scripted runs the README's video is filmed from |
 | `src/homelands.odin` | The shape the world expects the village to have |
 | `src/editor.odin` | The world editor, model and window |
 | `src/tile_editor.odin` | The tile editor, model and window |
