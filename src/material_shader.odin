@@ -25,6 +25,7 @@ package game
 // out of that buffer.
 
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -70,6 +71,7 @@ Material_Shaders :: struct {
 	run:     []u8, // a column each: how far the run of one material reaches
 	above:   []Cell, // a column each: what the cell above holds
 	seen:    [256]bool,
+	box:     [256]Sandbox_Rect, // the cells each material actually covers
 	on:      bool,
 }
 
@@ -197,16 +199,23 @@ material_gbuffer_fill :: proc(
 	above: []Cell,
 	out: []u8,
 	seen: ^[256]bool,
+	box: ^[256]Sandbox_Rect,
 ) {
-	for i in 0 ..< 256 do seen[i] = false
+	for i in 0 ..< 256 {
+		seen[i] = false
+		box[i] = SANDBOX_RECT_EMPTY
+	}
 	for i in 0 ..< int(w) {
 		run[i] = 0
 		above[i] = 0
 	}
 
+	texels := transmute([]u32le)mem.slice_data_cast([]u32, out)
+
 	for y in 0 ..< int(h) {
 		row := cells[y * int(w):][:w]
 		line := lux[y * int(w):][:w]
+		texel_row := texels[y * int(w):][:w]
 
 		for x in 0 ..< int(w) {
 			c := row[x]
@@ -217,21 +226,50 @@ material_gbuffer_fill :: proc(
 				above[x] = c
 			}
 
-			seen[u32(c) & 255] = true
+			seen[c] = true
+			b := &box[c]
+			b.min_x = min(b.min_x, i32(x))
+			b.min_y = min(b.min_y, i32(y))
+			b.max_x = max(b.max_x, i32(x))
+			b.max_y = i32(y)
 
-			at := (y * int(w) + x) * 4
-			out[at + 0] = u8(c)
-			out[at + 1] = light_response[line[x]]
-			out[at + 2] = run[x]
-			out[at + 3] = line[x]
+			// One store a texel: material, the response, the run, the
+			// raw light, in the byte order the R8G8B8A8 texture reads.
+			texel_row[x] = u32le(c) |
+				u32le(light_response[line[x]]) << 8 |
+				u32le(run[x]) << 16 |
+				u32le(line[x]) << 24
 		}
 	}
 }
 
 material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32) {
 	if !ms.on do return
-	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen)
+	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen, &ms.box)
 	rl.UpdateTextureRec(ms.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(ms.gbuf))
+}
+
+// The part of the view a material covers, padded by a cell, as matching
+// pieces of the src and dst rectangles. Every fragment past the box
+// would only have discarded itself, so the pass need not draw it: a
+// vein of gold pays for the vein, not for the window.
+material_shader_rects :: proc(
+	b: Sandbox_Rect,
+	src, dst: rl.Rectangle,
+) -> (sub_src, sub_dst: rl.Rectangle) {
+	x0 := f32(max(b.min_x - 1, 0))
+	y0 := f32(max(b.min_y - 1, 0))
+	x1 := f32(b.max_x + 2)
+	if x1 > src.width do x1 = src.width
+	y1 := f32(b.max_y + 2)
+	if y1 > src.height do y1 = src.height
+
+	sub_src = rl.Rectangle{src.x + x0, src.y + y0, x1 - x0, y1 - y0}
+
+	scale_x := dst.width / src.width
+	scale_y := dst.height / src.height
+	sub_dst = rl.Rectangle{dst.x + x0 * scale_x, dst.y + y0 * scale_y, (x1 - x0) * scale_x, (y1 - y0) * scale_y}
+	return sub_src, sub_dst
 }
 
 // Paint over the world, one material at a time. A material the view does
@@ -250,6 +288,7 @@ material_shaders_draw :: proc(
 
 	for &one in ms.list {
 		if !ms.seen[u32(one.cell) & 255] do continue
+		sub_src, sub_dst := material_shader_rects(ms.box[u32(one.cell) & 255], src, dst)
 
 		size := size
 		origin := origin
@@ -264,7 +303,7 @@ material_shaders_draw :: proc(
 		rl.SetShaderValue(one.shader, one.at[.Step], &step, .FLOAT)
 		rl.SetShaderValue(one.shader, one.at[.Seconds], &seconds, .FLOAT)
 		rl.SetShaderValue(one.shader, one.at[.Id], &id, .FLOAT)
-		rl.DrawTexturePro(world, src, dst, rl.Vector2{0, 0}, 0, rl.WHITE)
+		rl.DrawTexturePro(world, sub_src, sub_dst, rl.Vector2{0, 0}, 0, rl.WHITE)
 		rl.EndShaderMode()
 	}
 }
@@ -282,8 +321,9 @@ test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^test
 	run: [W]u8
 	above: [W]Cell
 	seen: [256]bool
+	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
 
 	for c, i in cells {
 		testing.expectf(t, out[i * 4] == u8(c), "texel %d holds material %d and the buffer says %d", i, c, out[i * 4])
@@ -318,8 +358,9 @@ test_the_gbuffer_counts_the_run_of_one_material_over_a_cell :: proc(t: ^testing.
 	run: [W]u8
 	above: [W]Cell
 	seen: [256]bool
+	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
 
 	want := [W * H]u8 {
 		1, 1, 1,
@@ -350,8 +391,9 @@ test_the_gbuffer_names_only_the_materials_the_view_holds :: proc(t: ^testing.T) 
 	run: [W]u8
 	above: [W]Cell
 	seen: [256]bool
+	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
 
 	testing.expect(t, seen[3], "the view holds material 3")
 	testing.expect(t, seen[9], "the view holds material 9")
@@ -369,10 +411,11 @@ test_the_run_never_reaches_past_the_deepest_a_texel_can_hold :: proc(t: ^testing
 	run: [W]u8
 	above: [W]Cell
 	seen: [256]bool
+	box: [256]Sandbox_Rect
 
 	for i in 0 ..< len(cells) do cells[i] = Cell(6)
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
 
 	testing.expect(t, out[2] == 1, "the top of a body of one material is its surface")
 	testing.expectf(
@@ -381,6 +424,73 @@ test_the_run_never_reaches_past_the_deepest_a_texel_can_hold :: proc(t: ^testing
 		"a body deeper than the texel can hold must stop at the deepest it can, and it reads %d",
 		out[(H - 1) * 4 + 2],
 	)
+}
+
+@(test)
+test_the_gbuffer_boxes_each_material_to_the_cells_it_covers :: proc(t: ^testing.T) {
+	W :: 5
+	H :: 4
+	rock := Cell(7)
+	air := Cell(0)
+
+	cells := [W * H]Cell {
+		air, air, air, air, air,
+		air, air, rock, air, air,
+		air, rock, rock, air, air,
+		air, air, air, air, air,
+	}
+	lux: [W * H]u8
+	out: [W * H * 4]u8
+	run: [W]u8
+	above: [W]Cell
+	seen: [256]bool
+	box: [256]Sandbox_Rect
+
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+
+	b := box[rock]
+	testing.expectf(
+		t, b == Sandbox_Rect{1, 1, 2, 2},
+		"the rock covers cells 1,1 to 2,2 and the box says %v", b,
+	)
+	empty := box[9]
+	testing.expect(t, empty.min_x > empty.max_x, "a material the view does not hold has no box")
+
+	// The sub-rectangles cut from the box keep the src-to-dst mapping of
+	// the whole pass: dst is src scaled by the one scale the full pair
+	// names, padded a cell and held inside the view.
+	src := rl.Rectangle{0, 0, W, H}
+	dst := rl.Rectangle{0, 0, W * 4, H * 4}
+	sub_src, sub_dst := material_shader_rects(b, src, dst)
+
+	testing.expectf(t, sub_src == rl.Rectangle{0, 0, 4, 4}, "the padded box clips to the view, got %v", sub_src)
+	testing.expectf(t, sub_dst == rl.Rectangle{0, 0, 16, 16}, "dst is src at the pass's own scale, got %v", sub_dst)
+}
+
+@(test)
+test_the_water_depth_boxes_the_water_it_finds :: proc(t: ^testing.T) {
+	W :: 4
+	H :: 3
+	water := Cell(5)
+	air := Cell(0)
+
+	cells := [W * H]Cell {
+		air, air, air, air,
+		air, water, water, air,
+		air, air, water, air,
+	}
+	out: [W * H]u8
+	run: [W]u8
+
+	box := water_depth_fill(cells[:], W, H, water, run[:], out[:])
+	testing.expectf(
+		t, box == Sandbox_Rect{1, 1, 2, 2},
+		"the pond covers cells 1,1 to 2,2 and the box says %v", box,
+	)
+
+	dry := [W * H]Cell{}
+	box = water_depth_fill(dry[:], W, H, water, run[:], out[:])
+	testing.expect(t, box.min_x > box.max_x, "a dry view has no box, so the pass is never drawn")
 }
 
 @(test)

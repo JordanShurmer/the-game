@@ -200,17 +200,32 @@ sim_material_index :: proc(s: ^Sim, name: string) -> (idx: int, found: bool) {
 
 sim_step_player :: proc(s: ^Sim, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT) {
 	terrain := Terrain{world = s.world, sandbox = s.follow_player ? &s.sandbox : nil}
+
+	at := prof_begin()
 	player_step(&s.player, terrain, held, jump_pressed, aim)
 	if s.follow_player do sim_follow_player(s)
-	firefly_step(&s.flies)
+	prof_end(.Player, at)
 
+	at = prof_begin()
+	firefly_step(&s.flies)
+	prof_end(.Fireflies, at)
+
+	at = prof_begin()
 	if .Throw in held do pot_throw(&s.pots, s.player)
 	pot_step(&s.pots, terrain, s.world.materials)
+	prof_end(.Pots, at)
 
+	at = prof_begin()
 	drudge_step(&s.drudges, &s.drudge_pots, terrain, s.player)
-	pot_step(&s.drudge_pots, terrain, s.world.materials)
+	prof_end(.Drudges, at)
 
+	at = prof_begin()
+	pot_step(&s.drudge_pots, terrain, s.world.materials)
+	prof_end(.Pots, at)
+
+	at = prof_begin()
 	light_step(&s.light, terrain, s.player, &s.flies, &s.pots, &s.drudge_pots, &s.drudges)
+	prof_end(.Light, at)
 }
 
 sim_play_begin :: proc(s: ^Sim) {

@@ -53,6 +53,13 @@ Sandbox :: struct {
 
 	dirty:      []Sandbox_Rect,
 	next_dirty: []Sandbox_Rect,
+
+	// A bit a row in each chunk, beside the rect. The rect alone wakes
+	// every row between two marks; a lake surface is three live rows in
+	// a chunk of 64, and the bits let the step walk only those three.
+	dirty_rows:      []u64,
+	next_dirty_rows: []u64,
+
 	chunks_x:   i32,
 	chunks_y:   i32,
 
@@ -87,6 +94,8 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.next_dirty = make([]Sandbox_Rect, chunk_count, allocator)
 	for &r in sb.dirty do r = SANDBOX_RECT_EMPTY
 	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
+	sb.dirty_rows = make([]u64, chunk_count, allocator)
+	sb.next_dirty_rows = make([]u64, chunk_count, allocator)
 
 	sb.rows.above = make([]u16, width + 2, allocator)
 	sb.rows.here  = make([]u16, width + 2, allocator)
@@ -110,6 +119,8 @@ sandbox_destroy :: proc(sb: ^Sandbox, allocator := context.allocator) {
 	delete(sb.moved, allocator)
 	delete(sb.dirty, allocator)
 	delete(sb.next_dirty, allocator)
+	delete(sb.dirty_rows, allocator)
+	delete(sb.next_dirty_rows, allocator)
 	delete(sb.rows.above, allocator)
 	delete(sb.rows.here, allocator)
 	delete(sb.rows.below, allocator)
@@ -166,20 +177,46 @@ sandbox_mark_all :: proc(sb: ^Sandbox) {
 			ci := int(cy*sb.chunks_x + cx)
 			sb.dirty[ci] = r
 			sb.next_dirty[ci] = r
+			sb.dirty_rows[ci] = max(u64)
+			sb.next_dirty_rows[ci] = max(u64)
 		}
 	}
 }
 
+// The bits for the rows lo..hi of one chunk, both in 0..63.
+sandbox_row_bits :: #force_inline proc "contextless" (lo, hi: i32) -> u64 {
+	return (max(u64) << u64(lo)) & (max(u64) >> u64(63 - hi))
+}
+
 sandbox_mark :: proc(sb: ^Sandbox, x, y: i32) {
-	lo_x := max(x-1, 0)
-	hi_x := min(x+1, sb.width-1)
-	lo_y := max(y-1, 0)
-	hi_y := min(y+1, sb.height-1)
+	sandbox_mark_box(sb, x-1, y-1, x+1, y+1)
+}
+
+// Wake the cells of a box, and their chunks with them. Nearly every box
+// sits inside one chunk, and that case is four compares; only a box on
+// a chunk border pays for the walk below.
+sandbox_mark_box :: proc(sb: ^Sandbox, x0, y0, x1, y1: i32) {
+	lo_x := max(x0, 0)
+	hi_x := min(x1, sb.width-1)
+	lo_y := max(y0, 0)
+	hi_y := min(y1, sb.height-1)
 
 	cx0 := lo_x / SANDBOX_CHUNK
 	cx1 := hi_x / SANDBOX_CHUNK
 	cy0 := lo_y / SANDBOX_CHUNK
 	cy1 := hi_y / SANDBOX_CHUNK
+
+	if cx0 == cx1 && cy0 == cy1 {
+		ci := int(cy0*sb.chunks_x + cx0)
+		r := &sb.next_dirty[ci]
+		r.min_x = min(r.min_x, lo_x)
+		r.min_y = min(r.min_y, lo_y)
+		r.max_x = max(r.max_x, hi_x)
+		r.max_y = max(r.max_y, hi_y)
+		base := cy0 * SANDBOX_CHUNK
+		sb.next_dirty_rows[ci] |= sandbox_row_bits(lo_y - base, hi_y - base)
+		return
+	}
 
 	for cy in cy0 ..= cy1 {
 		chunk_y0 := cy * SANDBOX_CHUNK
@@ -199,6 +236,7 @@ sandbox_mark :: proc(sb: ^Sandbox, x, y: i32) {
 			r.min_y = min(r.min_y, cell_lo_y)
 			r.max_x = max(r.max_x, cell_hi_x)
 			r.max_y = max(r.max_y, cell_hi_y)
+			sb.next_dirty_rows[ci] |= sandbox_row_bits(cell_lo_y - chunk_y0, cell_hi_y - chunk_y0)
 		}
 	}
 }

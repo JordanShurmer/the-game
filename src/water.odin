@@ -32,10 +32,12 @@ Water :: struct {
 	depth:   []u8,
 	texture: rl.Texture2D,
 	cell:    Cell,
+	box:     Sandbox_Rect, // the cells the water actually covers
 	on:      bool,
 }
 
-water_depth_fill :: proc(cells: []Cell, w, h: i32, water: Cell, run: []u8, out: []u8) {
+water_depth_fill :: proc(cells: []Cell, w, h: i32, water: Cell, run: []u8, out: []u8) -> (box: Sandbox_Rect) {
+	box = SANDBOX_RECT_EMPTY
 	for i in 0 ..< int(w) do run[i] = 0
 
 	for y in 0 ..< int(h) {
@@ -50,8 +52,14 @@ water_depth_fill :: proc(cells: []Cell, w, h: i32, water: Cell, run: []u8, out: 
 			}
 			if run[x] < WATER_DEEPEST do run[x] += 1
 			line[x] = run[x]
+
+			box.min_x = min(box.min_x, i32(x))
+			box.min_y = min(box.min_y, i32(y))
+			box.max_x = max(box.max_x, i32(x))
+			box.max_y = max(box.max_y, i32(y))
 		}
 	}
+	return box
 }
 
 water_load :: proc(materials: Material_Table, width, height: i32) -> (water: Water) {
@@ -100,7 +108,8 @@ water_unload :: proc(water: ^Water) {
 
 water_mark :: proc(water: ^Water, cells: []Cell, w, h: i32, run: []u8) {
 	if !water.on do return
-	water_depth_fill(cells, w, h, water.cell, run, water.depth)
+	water.box = water_depth_fill(cells, w, h, water.cell, run, water.depth)
+	if water.box.min_x > water.box.max_x do return // no water: nothing to upload or draw
 	rl.UpdateTextureRec(water.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(water.depth))
 }
 
