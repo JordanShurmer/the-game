@@ -17,6 +17,22 @@ If `odin` is not on the PATH, install it:
 the network. See `docs/toolchain.md` for what it does, and why the
 Odin repository must not be cloned to get raylib.
 
+## Measure before you optimize
+
+`src/prof.odin` times every phase of the tick and the frame, and counts
+what a tick worked: rows stepped, cells loaded, reacts, swaps. Three
+ways to read it, no tools to attach:
+
+- `./bin/bench biome=Lake ticks=300` prints the tick phases and counts.
+- **F3** in the game window overlays the same, averaged over the last
+  second.
+- A headless shot prints the whole run on exit with `profile=1`:
+  `xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/p.png frames=300 profile=1`
+
+A time names the phase to look at; the counts say whether the work
+itself grew or the work got slower. The checksum bench prints must not
+change under an optimization: same seed, same world, same bits.
+
 ## Look at the world
 
 The world is a picture, so read it as one. `bin/shot` draws a

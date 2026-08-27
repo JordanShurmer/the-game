@@ -25,6 +25,7 @@ package game
 // out of that buffer.
 
 import "core:fmt"
+import "core:mem"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -209,9 +210,12 @@ material_gbuffer_fill :: proc(
 		above[i] = 0
 	}
 
+	texels := transmute([]u32le)mem.slice_data_cast([]u32, out)
+
 	for y in 0 ..< int(h) {
 		row := cells[y * int(w):][:w]
 		line := lux[y * int(w):][:w]
+		texel_row := texels[y * int(w):][:w]
 
 		for x in 0 ..< int(w) {
 			c := row[x]
@@ -222,18 +226,19 @@ material_gbuffer_fill :: proc(
 				above[x] = c
 			}
 
-			seen[u32(c) & 255] = true
-			b := &box[u32(c) & 255]
+			seen[c] = true
+			b := &box[c]
 			b.min_x = min(b.min_x, i32(x))
 			b.min_y = min(b.min_y, i32(y))
 			b.max_x = max(b.max_x, i32(x))
-			b.max_y = max(b.max_y, i32(y))
+			b.max_y = i32(y)
 
-			at := (y * int(w) + x) * 4
-			out[at + 0] = u8(c)
-			out[at + 1] = light_response[line[x]]
-			out[at + 2] = run[x]
-			out[at + 3] = line[x]
+			// One store a texel: material, the response, the run, the
+			// raw light, in the byte order the R8G8B8A8 texture reads.
+			texel_row[x] = u32le(c) |
+				u32le(light_response[line[x]]) << 8 |
+				u32le(run[x]) << 16 |
+				u32le(line[x]) << 24
 		}
 	}
 }

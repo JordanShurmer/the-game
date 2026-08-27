@@ -161,5 +161,18 @@ between one picture and the next.
 
 One pass a material, and a material the view does not hold is never
 drawn: the game marks which materials the view holds while it fills the
-g-buffer, and skips the rest. A fragment a pass does not own costs one
-texture read and a `discard`.
+g-buffer, and skips the rest. The mark also boxes each material to the
+cells it covers, and the pass draws only that rectangle of the window,
+so a vein of gold pays for the vein and not for the screen. A fragment
+a pass does own still pays for its whole neighbourhood: `m_shape` reads
+the ring at three radii (24 samples), `m_sky` reads six more and
+`m_light` four, about 35 g-buffer reads a fragment a pass.
+
+**A note from profiling (2026-08): if the GPU is ever the wall, look at
+`_prelude.glsl` first, not at any one material.** The per-material CPU
+work and the pass rectangles are already trimmed; what remains is that
+every shaded fragment recomputes its shape and light from ~35 samples.
+The shape half (`m_shape`, `m_sky`) depends only on the g-buffer, not on
+the material file, so it could be computed once into a second buffer and
+shared by every pass, instead of once per pass per fragment. No material
+file needs to change for that.
