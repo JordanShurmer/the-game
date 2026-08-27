@@ -1,5 +1,6 @@
 package game
 
+import "base:intrinsics"
 import "core:mem"
 
 sandbox_sinks :: #force_inline proc "contextless" (src, dst: u16) -> bool {
@@ -32,12 +33,17 @@ sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, 
 sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 	wake := prof_begin()
 	sb.dirty, sb.next_dirty = sb.next_dirty, sb.dirty
+	sb.dirty_rows, sb.next_dirty_rows = sb.next_dirty_rows, sb.dirty_rows
 	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
+	mem.zero_slice(sb.next_dirty_rows)
 
-	for r in sb.dirty {
+	for r, ci in sb.dirty {
 		if r.min_x > r.max_x do continue
 		width := int(r.max_x - r.min_x + 1)
-		for y in r.min_y ..= r.max_y {
+		base_y := i32(ci) / sb.chunks_x * SANDBOX_CHUNK
+		for bits := sb.dirty_rows[ci]; bits != 0; bits &= bits - 1 {
+			y := base_y + i32(intrinsics.count_trailing_zeros(bits))
+			if y < r.min_y || y > r.max_y do continue
 			row_start := sandbox_index(sb, r.min_x, y)
 			mem.zero_slice(sb.moved[row_start:row_start + width])
 		}
@@ -47,9 +53,12 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 	rows := prof_begin()
 	for y := sb.height - 1; y >= 0; y -= 1 {
 		cy := y / SANDBOX_CHUNK
+		bit := u64(1) << u64(y & (SANDBOX_CHUNK - 1))
 		chunk_row := sb.dirty[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
-		for r in chunk_row {
-			if y < r.min_y || y > r.max_y do continue // nothing on this row
+		row_bits := sb.dirty_rows[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
+		for r, k in chunk_row {
+			if row_bits[k] & bit == 0 do continue // nothing on this row
+			if y < r.min_y || y > r.max_y do continue
 			sandbox_step_row(sb, table, y, r.min_x, r.max_x)
 		}
 	}
