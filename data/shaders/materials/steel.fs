@@ -22,11 +22,11 @@
 
 #define M_ROLL 2.4
 
-const vec3 STEEL_F0 = vec3(0.545, 0.560, 0.585);
+const vec3 STEEL_F0 = vec3(0.440, 0.468, 0.520);
 const vec3 STEEL_WHITE = vec3(0.960, 0.972, 1.000);
 const vec3 STEEL_RUST = vec3(0.300, 0.132, 0.052);
 
-const float STEEL_ROUGH = 0.155;  // ground, not polished
+const float STEEL_ROUGH = 0.190;  // ground, not polished
 const float STEEL_DARK = 0.070;   // what it reflects facing away
 const float STEEL_BRIGHT = 0.980; // what it reflects facing the lamp
 
@@ -34,15 +34,19 @@ const float STEEL_GRIND = 2.30;   // the scratches, better than half a cell
 const float STEEL_ROLL_WAVE = 0.055; // the long swell the rolling mill leaves
 const float STEEL_PLATE = 17.0;   // cells across a plate
 const float STEEL_SEAM = 0.13;    // how much of a plate the seam takes
-const float STEEL_SEAM_STR = 0.15; // and how hard it is drawn
+const float STEEL_SEAM_STR = 0.10; // and how hard it is drawn
 
 // The grinding scratches, drawn out hard along the grain, plus the slow
 // swell the rolling mill leaves under them.
+// The grind, the slow swell the rolling mill leaves, and the dents a
+// working life beats into a plate. The dents are what the light swings
+// across: without them the plate reads as paint, not metal.
 float steel_face_height(vec2 c)
 {
-    float grind = m_fbm(vec2(c.x*0.030, c.y*STEEL_GRIND), 3);
+    float grind = m_fbm(vec2(c.x*0.11, c.y*STEEL_GRIND), 3);
     float swell = m_fbm(c*STEEL_ROLL_WAVE, 3);
-    return grind*0.30 + swell*0.70;
+    float dent = m_fbm(c*0.13 + 5.3, 3);
+    return grind*0.16 + swell*0.36 + dent*1.15;
 }
 
 // Where in its plate a cell lies, 0 in the middle and 1 at the seam.
@@ -69,7 +73,7 @@ vec3 shade(Surf s)
     float h0 = steel_face_height(s.cell);
     float hx = steel_face_height(s.cell + vec2(e, 0.0));
     float hy = steel_face_height(s.cell + vec2(0.0, e));
-    vec2 slope = vec2(h0 - hx, h0 - hy)*1.7;
+    vec2 slope = vec2(h0 - hx, h0 - hy)*3.3;
 
     // The seam dips, but only a little: a plate joint, not a trench.
     slope.y += seam*STEEL_SEAM_STR;
@@ -87,21 +91,29 @@ vec3 shade(Surf s)
     float point = steel_ggx(n, h, STEEL_ROUGH);
     Surf g = s;
     g.n = n;
-    float streak = m_spec_aniso(g, vec2(1.0, 0.0), 0.90, 0.085);
+
+    // The streak breaks where the scratches do, or it reads as bands
+    // laid across the plate instead of light caught in the grind.
+    float catch = 0.45 + 0.55*m_noise(vec2(s.cell.x*0.15, s.cell.y*1.1));
+    float streak = m_spec_aniso(g, vec2(1.0, 0.0), 0.55, 0.24)*catch;
 
     float shadow = ndl/(ndl*0.6 + 0.4);
-    vec3 lamp = fresnel*(point*0.34 + streak*1.55)*shadow;
+    vec3 lamp = fresnel*(point*0.40 + streak*0.85)*shadow;
 
     // The room, reflected. As with gold, this swing from bright to dark
     // across the surface is what makes metal read as metal.
     float toward = dot(n, s.l)*0.5 + 0.5;
     float sky = mix(0.50, 1.0, s.ao);
-    vec3 env = STEEL_F0*mix(STEEL_DARK, STEEL_BRIGHT, pow(toward, 1.8))*sky;
+    vec3 env = STEEL_F0*mix(STEEL_DARK, STEEL_BRIGHT, pow(toward, 2.3))*sky;
 
     // Rust gathers where the water sits: in the seams, in the crevices,
     // and along the broken rim. It kills the mirror wherever it takes.
-    float damp = seam*0.55 + (1.0 - s.ao)*0.45 + s.edge*0.35;
-    float rust = smoothstep(0.52, 0.98, m_fbm(s.cell*0.075, 4)*0.55 + damp*0.62);
+    // The seam only rusts where the weather found it, or every joint
+    // draws itself and the wall reads as graph paper.
+    float weather = m_fbm(s.cell*0.075, 4);
+    float damp = seam*smoothstep(0.35, 0.75, weather)*0.55
+               + (1.0 - s.ao)*0.45 + s.edge*0.35;
+    float rust = smoothstep(0.52, 0.98, weather*0.55 + damp*0.62);
     vec3 scab = STEEL_RUST*(0.35 + 0.65*max(dot(s.n, s.l), 0.0));
 
     vec3 metal = lamp + env;

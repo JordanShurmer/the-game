@@ -18,6 +18,7 @@ Material_Table :: struct {
 	reactions:   []Reaction,
 	reaction_at: []i16,
 	reacts:      []bool,
+	partners:    []u64,
 
 	weight:      []u16,
 	kind:        []Cell_Kind,
@@ -372,6 +373,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.reactions   = reactions[:]
 	table.reaction_at = reaction_at
 	table.reacts      = reacts
+	table.partners    = reaction_partners(reaction_at, n, allocator)
 
 	table.weight = make([]u16, n, allocator)
 	table.kind   = make([]Cell_Kind, n, allocator)
@@ -385,6 +387,23 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	sandbox_build_luts(&table)
 
 	return table, true
+}
+
+// One bit a partner: bit d of partners[c] says c and d have a row in
+// reaction_at, so the sandbox can ask "can these two react at all?"
+// without walking the n*n table for every quiet neighbour. A table too
+// big for the bits keeps every reacting material at all-ones, so the
+// filter passes everything and reaction_at stays the authority.
+@(private = "file")
+reaction_partners :: proc(reaction_at: []i16, n: int, allocator: runtime.Allocator) -> []u64 {
+	partners := make([]u64, n, allocator)
+	for c in 0 ..< n {
+		for d in 0 ..< n {
+			if reaction_at[c*n + d] < 0 do continue
+			partners[c] |= n <= 64 ? u64(1) << u64(d) : max(u64)
+		}
+	}
+	return partners
 }
 
 @(private = "file")
@@ -415,6 +434,7 @@ destroy_material_table :: proc(table: Material_Table, allocator := context.alloc
 	delete(table.reactions, allocator)
 	delete(table.reaction_at, allocator)
 	delete(table.reacts, allocator)
+	delete(table.partners, allocator)
 	delete(table.weight, allocator)
 	delete(table.kind, allocator)
 	delete(table.work, allocator)

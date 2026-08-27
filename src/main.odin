@@ -38,8 +38,17 @@ App :: struct {
 	lux:     []u8,
 	sky:     []u8,   // how much of `lux` is the day, so a shader can tell them apart
 
+	// light_shade of every material at every lux, so the shade loop is
+	// one lookup a pixel. See app_shade.
+	shade_lut:     []rl.Color,
+	shade_corners: []u32,
+	sky_corners:   []u32, // the day's own row of corners, beside shade_corners
+
 	look:  Look,
 	clock: f32,
+
+	prof_hud:  bool,
+	prof_view: Prof,
 
 	sprite:         Sprite_Sheet,
 	sprite_texture: rl.Texture2D,
@@ -56,17 +65,18 @@ App :: struct {
 WINDOW_SHOT_FRAMES :: 90
 
 Window_Shot :: struct {
-	path:   string,
-	frames: int,
-	walk:   int,
-	throw:  bool,
-	aim:    u8,
-	ticks:  int,
-	look:   string,
-	script: string,
-	record: string,
-	every:  int,
-	on:     bool,
+	path:    string,
+	frames:  int,
+	walk:    int,
+	throw:   bool,
+	aim:     u8,
+	ticks:   int,
+	look:    string,
+	script:  string,
+	record:  string,
+	every:   int,
+	on:      bool,
+	profile: bool,
 }
 
 BACKGROUND :: rl.Color{18, 20, 26, 255}
@@ -134,6 +144,7 @@ main :: proc() {
 
 		w, h := app_view_cells(&app)
 
+		draw := prof_begin()
 		rl.BeginDrawing()
 		rl.ClearBackground(BACKGROUND)
 		rl.DrawTexturePro(
@@ -156,10 +167,21 @@ main :: proc() {
 			app_draw_sparks(&app)
 			app_draw_player(&app)
 			if !app.hud_off do draw_hud(&app)
+			draw_prof(&app)
 			editor_draw(&app)
 			tile_editor_draw(&app)
 		}
 		rl.EndDrawing()
+		prof_end(.Draw, draw)
+		prof.frames += 1
+
+		// The overlay reads a snapshot a second old, so the numbers hold
+		// still long enough to read. A shot run keeps the whole record
+		// instead and prints it once at the end.
+		if !shot.on && prof.frames >= 60 {
+			app.prof_view = prof
+			prof_reset()
+		}
 
 		frames += 1
 
@@ -187,11 +209,34 @@ main :: proc() {
 
 		if shot.on && frames >= shot.frames {
 			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
+			if shot.profile {
+				fmt.eprintln(prof_report(context.temp_allocator))
+			}
 			free_all(context.temp_allocator)
 			break
 		}
 
 		free_all(context.temp_allocator)
+	}
+}
+
+// F3: what every phase of the tick and the frame costs, averaged over
+// the last second. See src/prof.odin.
+draw_prof :: proc(app: ^App) {
+	if !app.prof_hud do return
+
+	keep := prof
+	prof = app.prof_view
+	report := prof_report(context.temp_allocator)
+	prof = keep
+
+	lines := strings.split_lines(report, context.temp_allocator)
+	y := i32(140)
+	rl.DrawRectangle(0, y - 6, 340, i32(len(lines)) * 20 + 10, rl.Fade(rl.BLACK, 0.55))
+	for line in lines {
+		if line == "" do continue
+		rl.DrawText(strings.clone_to_cstring(line, context.temp_allocator), 12, y, 18, rl.RAYWHITE)
+		y += 20
 	}
 }
 
@@ -227,6 +272,8 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			shot.record = value
 		case "every":
 			if n, ok := strconv.parse_int(value); ok do shot.every = max(n, 1)
+		case "profile":
+			if n, ok := strconv.parse_int(value); ok do shot.profile = n != 0
 		}
 	}
 	return shot
@@ -266,6 +313,13 @@ app_load_data :: proc(app: ^App) -> bool {
 		app.color_lut[i] = blend_over(rl_from_argb(m.color), BACKGROUND)
 	}
 
+	app.shade_lut = make([]rl.Color, len(app.world.materials.materials) * 256)
+	for m in 0 ..< len(app.world.materials.materials) {
+		for lux in 0 ..< 256 {
+			app.shade_lut[m * 256 + lux] = light_shade(app.color_lut[m], u8(lux))
+		}
+	}
+
 	app.step = 1
 	app.zoom = WORLD_VIEW_MAX_ZOOM
 	w, h := app_view_cells(app)
@@ -276,6 +330,7 @@ app_load_data :: proc(app: ^App) -> bool {
 }
 
 app_unload_data :: proc(app: ^App) {
+	delete(app.shade_lut)
 	sim_unload(&app.sim)
 }
 
@@ -285,6 +340,8 @@ app_init_view :: proc(app: ^App) {
 	app.lux = make([]u8, WINDOW_W * WINDOW_H)
 	app.sky = make([]u8, WINDOW_W * WINDOW_H)
 	app.water_run = make([]u8, WINDOW_W)
+	app.shade_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
+	app.sky_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
 
 	blank := rl.Image {
 		data    = raw_data(app.pixels),
@@ -357,6 +414,8 @@ app_destroy_view :: proc(app: ^App) {
 	delete(app.lux)
 	delete(app.sky)
 	delete(app.water_run)
+	delete(app.shade_corners)
+	delete(app.sky_corners)
 }
 
 app_view_cells :: proc(app: ^App) -> (w, h: i32) {
@@ -377,9 +436,22 @@ app_regenerate :: proc(app: ^App) {
 		h    = h,
 		step = app.step,
 	}
-	generate(app.world, view, app.cells)
-	if app.follow_player do app_draw_sandbox(app, view)
+	// When the sandbox holds every cell the view samples, the copy below
+	// overwrites everything generate would write, so generate has nothing
+	// to say and is skipped.
+	at := prof_begin()
+	if !(app.follow_player && app_sandbox_covers(app, view)) {
+		generate(app.world, view, app.cells)
+	}
+	prof_end(.Generate, at)
 
+	if app.follow_player {
+		at = prof_begin()
+		app_draw_sandbox(app, view)
+		prof_end(.Sandbox_Copy, at)
+	}
+
+	at = prof_begin()
 	if app_lighting(app) {
 		app_shade(app, view)
 	} else {
@@ -388,10 +460,20 @@ app_regenerate :: proc(app: ^App) {
 			app.pixels[i] = app.color_lut[app.cells[i]]
 		}
 	}
+	prof_end(.Shade, at)
+
+	at = prof_begin()
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
+	prof_end(.Upload, at)
+
 	if app_lighting(app) {
+		at = prof_begin()
 		water_mark(&app.water, app.cells, w, h, app.water_run)
+		prof_end(.Water_Mark, at)
+
+		at = prof_begin()
 		material_shaders_mark(&app.shaders, app.cells, app.lux, w, h, app.sky)
+		prof_end(.Shader_Mark, at)
 	}
 }
 
@@ -425,7 +507,7 @@ app_regenerate_look :: proc(app: ^App, w, h: i32) {
 
 	count := int(w) * int(h)
 	for i in 0 ..< count {
-		app.pixels[i] = light_shade(app.color_lut[app.cells[i]], app.lux[i])
+		app.pixels[i] = app.shade_lut[int(app.cells[i]) * 256 + int(app.lux[i])]
 	}
 	rl.UpdateTextureRec(app.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(app.pixels))
 	material_shaders_mark(&app.shaders, app.cells, app.lux, w, h)
@@ -433,6 +515,10 @@ app_regenerate_look :: proc(app: ^App, w, h: i32) {
 
 @(private = "file")
 app_shade :: proc(app: ^App, view: World_View) {
+	if view.step == 1 && app.light.stat != nil {
+		app_shade_fine(app, view)
+		return
+	}
 	for ty in i32(0) ..< view.h {
 		wy := view.y + ty * view.step
 		row := app.cells[int(ty) * int(view.w):][:view.w]
@@ -447,7 +533,71 @@ app_shade :: proc(app: ^App, view: World_View) {
 			sky := light_sky_lux(&app.light, wx, wy)
 			lit[tx] = lux
 			day[tx] = sky
-			out[tx] = light_shade(app.color_lut[row[tx]], lux, sky)
+			out[tx] = sky == 0 ? app.shade_lut[int(row[tx]) * 256 + int(lux)] : light_shade(app.color_lut[row[tx]], lux, sky)
+		}
+	}
+}
+
+// At step 1 the light grid holds still for LIGHT_CELL pixels at a time,
+// so the corners are fetched once a square and blended down the row,
+// instead of light_lux fetching all four again for every pixel. The
+// blend is the same sum light_lux computes, so the two paths agree to
+// the bit; test_the_fine_shade_matches_light_lux holds them together.
+// The day rides the same machinery: a second corner row from the day
+// grid, so a pixel knows how much of its light is the sky's without a
+// second interpolation path existing anywhere.
+@(private = "file")
+app_shade_fine :: proc(app: ^App, view: World_View) {
+	l := &app.light
+
+	fx0 := view.x - l.origin_x - LIGHT_CELL / 2
+	lx0 := floor_div(fx0, LIGHT_CELL)
+	tx0 := u32(fx0 - lx0 * LIGHT_CELL)
+	corners := int(floor_div(fx0 + view.w - 1, LIGHT_CELL) - lx0) + 2
+
+	day_corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
+		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
+		return u32(l.day[int(ly) * LIGHT_W + int(lx)])
+	}
+
+	for ty in i32(0) ..< view.h {
+		wy := view.y + ty
+		fy := wy - l.origin_y - LIGHT_CELL / 2
+		ly := floor_div(fy, LIGHT_CELL)
+		wy_t := u32(fy - ly * LIGHT_CELL)
+
+		for k in 0 ..< corners {
+			cx := lx0 + i32(k)
+			top := light_corner(l, cx, ly)
+			bottom := light_corner(l, cx, ly + 1)
+			app.shade_corners[k] = top * (LIGHT_CELL - wy_t) + bottom * wy_t
+
+			sky_top := day_corner(l, cx, ly)
+			sky_bottom := day_corner(l, cx, ly + 1)
+			app.sky_corners[k] = sky_top * (LIGHT_CELL - wy_t) + sky_bottom * wy_t
+		}
+
+		row := app.cells[int(ty) * int(view.w):][:view.w]
+		out := app.pixels[int(ty) * int(view.w):][:view.w]
+		lit := app.lux[int(ty) * int(view.w):][:view.w]
+		day := app.sky[int(ty) * int(view.w):][:view.w]
+
+		k := 0
+		t := tx0
+		for tx in i32(0) ..< view.w {
+			left := app.shade_corners[k]
+			right := app.shade_corners[k + 1]
+			lux := u8((left * (LIGHT_CELL - t) + right * t) / (LIGHT_CELL * LIGHT_CELL))
+			sky := u8((app.sky_corners[k] * (LIGHT_CELL - t) + app.sky_corners[k + 1] * t) / (LIGHT_CELL * LIGHT_CELL))
+			lit[tx] = lux
+			day[tx] = sky
+			out[tx] = sky == 0 ? app.shade_lut[int(row[tx]) * 256 + int(lux)] : light_shade(app.color_lut[row[tx]], lux, sky)
+
+			t += 1
+			if t == LIGHT_CELL {
+				t = 0
+				k += 1
+			}
 		}
 	}
 }
@@ -473,6 +623,17 @@ app_draw_materials :: proc(app: ^App, w, h: i32) {
 @(private = "file")
 app_draw_water :: proc(app: ^App, w, h: i32) {
 	if !app_lighting(app) do return
+	if app.water.on && app.water.box.min_x > app.water.box.max_x do return // no water in view
+
+	sub_src, sub_dst := material_shader_rects(
+		app.water.box,
+		rl.Rectangle{0, 0, f32(w), f32(h)},
+		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
+	)
+	if !app.water.on {
+		sub_src = rl.Rectangle{0, 0, f32(w), f32(h)}
+		sub_dst = rl.Rectangle{0, 0, WINDOW_W, WINDOW_H}
+	}
 
 	water_begin(
 		&app.water,
@@ -481,31 +642,47 @@ app_draw_water :: proc(app: ^App, w, h: i32) {
 		f32(app.step),
 		app.clock,
 	)
-	rl.DrawTexturePro(
-		app.texture,
-		rl.Rectangle{0, 0, f32(w), f32(h)},
-		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
-		rl.Vector2{0, 0},
-		0,
-		rl.WHITE,
-	)
+	rl.DrawTexturePro(app.texture, sub_src, sub_dst, rl.Vector2{0, 0}, 0, rl.WHITE)
 	water_end(&app.water)
+}
+
+@(private = "file")
+app_sandbox_covers :: proc(app: ^App, view: World_View) -> bool {
+	sb := &app.sandbox
+	return view.x >= sb.origin_x && view.y >= sb.origin_y &&
+		view.x + (view.w - 1) * view.step < sb.origin_x + sb.width &&
+		view.y + (view.h - 1) * view.step < sb.origin_y + sb.height
+}
+
+// The first tx whose sample lands at or past `edge`, so the row loops
+// below run only over the sandbox and test no bounds per cell.
+@(private = "file")
+view_first_at :: proc(view_at, edge, step: i32) -> i32 {
+	return floor_div(edge - view_at + step - 1, step)
 }
 
 @(private = "file")
 app_draw_sandbox :: proc(app: ^App, view: World_View) {
 	sb := &app.sandbox
-	for ty in i32(0) ..< view.h {
-		wy := view.y + ty * view.step
-		sy := wy - sb.origin_y
-		if sy < 0 || sy >= sb.height do continue
 
+	tx0 := clamp(view_first_at(view.x, sb.origin_x, view.step), 0, view.w)
+	tx1 := clamp(view_first_at(view.x, sb.origin_x + sb.width, view.step), tx0, view.w)
+	ty0 := clamp(view_first_at(view.y, sb.origin_y, view.step), 0, view.h)
+	ty1 := clamp(view_first_at(view.y, sb.origin_y + sb.height, view.step), ty0, view.h)
+
+	for ty in ty0 ..< ty1 {
+		sy := view.y + ty * view.step - sb.origin_y
 		row := app.cells[int(ty) * int(view.w):][:view.w]
-		for tx in i32(0) ..< view.w {
-			wx := view.x + tx * view.step
-			sx := wx - sb.origin_x
-			if sx < 0 || sx >= sb.width do continue
-			row[tx] = sandbox_cell(sb, sx, sy)
+		from := sb.cells[int(sy) * int(sb.width):][:sb.width]
+
+		sx := view.x + tx0 * view.step - sb.origin_x
+		if view.step == 1 {
+			copy(row[tx0:tx1], from[sx:])
+			continue
+		}
+		for tx in tx0 ..< tx1 {
+			row[tx] = from[sx]
+			sx += view.step
 		}
 	}
 }
@@ -515,6 +692,8 @@ app_handle_input :: proc(app: ^App) {
 		tile_editor_handle_input(app)
 		return
 	}
+
+	if rl.IsKeyPressed(.F3) do app.prof_hud = !app.prof_hud
 
 	if rl.IsKeyPressed(.TAB) {
 		app.editor.open = !app.editor.open
@@ -935,6 +1114,131 @@ draw_hud :: proc(app: ^App) {
 	)
 
 	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   Q/right-click throw a pot   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+}
+
+// The fast shade and the plain one must be the same picture. The fine
+// path blends corners once a square; light_lux fetches them per pixel;
+// the sums are the same polynomial, and this holds them to it.
+@(test)
+test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
+	app: App
+	app.light = light_make(7)
+	defer light_destroy(&app.light)
+	app.light.origin_x = -SANDBOX_PLAY_SIZE
+	app.light.origin_y = 0
+
+	// A little landscape of light, off both grids, bright and faint.
+	for i in 0 ..< LIGHT_SAMPLES {
+		app.light.stat[i] = u8((i * 37) % 251)
+		app.light.live[i] = u8((i * 101 + 13) % 249)
+	}
+
+	w, h := i32(64), i32(48)
+	app.cells = make([]Cell, int(w) * int(h))
+	app.pixels = make([]rl.Color, int(w) * int(h))
+	app.lux = make([]u8, int(w) * int(h))
+	app.sky = make([]u8, int(w) * int(h))
+	app.shade_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
+	app.sky_corners = make([]u32, WINDOW_W / LIGHT_CELL + 3)
+	app.shade_lut = make([]rl.Color, 256 * 256)
+	defer {
+		delete(app.cells)
+		delete(app.pixels)
+		delete(app.lux)
+		delete(app.sky)
+		delete(app.shade_corners)
+		delete(app.sky_corners)
+		delete(app.shade_lut)
+	}
+	for m in 0 ..< 256 {
+		for lux in 0 ..< 256 {
+			app.shade_lut[m * 256 + lux] = light_shade(app.color_lut[m], u8(lux))
+		}
+	}
+
+	// A view that hangs off the light grid on two sides, so the edge
+	// corners run through the out-of-grid path too.
+	views := []World_View {
+		{x = app.light.origin_x - 10, y = -9, w = w, h = h, step = 1},
+		{x = app.light.origin_x + 200, y = 300, w = w, h = h, step = 1},
+		{x = app.light.origin_x + SANDBOX_PLAY_SIZE - 30, y = SANDBOX_PLAY_SIZE - 20, w = w, h = h, step = 1},
+	}
+	for view in views {
+		for i in 0 ..< len(app.cells) do app.cells[i] = Cell(i % 53)
+		app_shade_fine(&app, view)
+
+		for ty in i32(0) ..< h {
+			for tx in i32(0) ..< w {
+				want := light_lux(&app.light, view.x + tx, view.y + ty)
+				got := app.lux[int(ty) * int(w) + int(tx)]
+				ok := testing.expectf(
+					t, got == want,
+					"view %v pixel %d,%d: the fine shade says %d, light_lux says %d",
+					view, tx, ty, got, want,
+				)
+				if !ok do return
+			}
+		}
+	}
+}
+
+// The clipped sandbox copy must paint exactly the cells the bounded
+// per-cell loop painted, for views hanging off every side of it.
+@(test)
+test_the_sandbox_copy_matches_the_plain_loop :: proc(t: ^testing.T) {
+	app: App
+	sb, ok := sandbox_make(96, 80, 5)
+	if !testing.expect(t, ok, "the sandbox must be created") do return
+	defer sandbox_destroy(&sb)
+	sb.origin_x = -37
+	sb.origin_y = 23
+	for i in 0 ..< len(sb.cells) do sb.cells[i] = Cell(i % 251)
+	app.sandbox = sb
+
+	w, h := i32(40), i32(30)
+	app.cells = make([]Cell, int(w) * int(h))
+	want := make([]Cell, int(w) * int(h))
+	defer {
+		delete(app.cells)
+		delete(want)
+	}
+
+	views := []World_View {
+		{x = -37, y = 23, w = w, h = h, step = 1},
+		{x = -60, y = 0, w = w, h = h, step = 1},
+		{x = 30, y = 80, w = w, h = h, step = 1},
+		{x = -100, y = -10, w = w, h = h, step = 3},
+		{x = -38, y = 22, w = w, h = h, step = 7},
+		{x = 500, y = 500, w = w, h = h, step = 1},
+	}
+	for view in views {
+		for i in 0 ..< len(app.cells) {
+			app.cells[i] = 255
+			want[i] = 255
+		}
+		for ty in i32(0) ..< view.h {
+			wy := view.y + ty * view.step
+			sy := wy - sb.origin_y
+			if sy < 0 || sy >= sb.height do continue
+			for tx in i32(0) ..< view.w {
+				wx := view.x + tx * view.step
+				sx := wx - sb.origin_x
+				if sx < 0 || sx >= sb.width do continue
+				want[int(ty) * int(view.w) + int(tx)] = sandbox_cell(&app.sandbox, sx, sy)
+			}
+		}
+
+		app_draw_sandbox(&app, view)
+		for i in 0 ..< len(want) {
+			same := testing.expectf(
+				t, app.cells[i] == want[i],
+				"view %v cell %d: the clipped copy says %d, the plain loop says %d",
+				view, i, app.cells[i], want[i],
+			)
+			if !same do return
+		}
+	}
+	app.sandbox = {}
 }
 
 @(test)

@@ -96,20 +96,33 @@ From the depth the shader makes three things:
    less red and a little more blue, so a pond reads as a bowl and not
    as a flat blue shape. It is a multiply, never an add, so water in
    the gloom stays in the gloom.
-3. **The caustics and the surface.** Two crossing fields of sines, in
-   world cells so the pattern stays with the world as the camera moves,
-   warped by a third slower field so the net curves instead of forming a
-   lattice, and ridged — `pow(1 - abs(w), 9)` — so what is drawn is the
-   thin bright line where a wave crosses zero and not a smooth blob.
-   The surface line is the same thing at depth 0, with a ripple
-   travelling along it.
+3. **The caustics and the surface.** The net light leaves on the bottom
+   of a pond is the boundary of a pattern of cells — bright curved seams
+   where neighbouring lenses of surface meet — so it is drawn as one: a
+   scatter of points that drift, in world cells so the pattern stays
+   with the world as the camera moves, and the brightness is how close
+   the texel lies to the seam between the nearest point and the next.
+   Two such nets at different scales are laid over each other, and the
+   whole thing dims with depth, because a lens focuses light near the
+   surface and spends it there. The surface line carries a slow ripple
+   and a twinkle: each short run of it has its own phase, and a hard
+   `pow` keeps all but the crest of each pulse dark, so points of the
+   line catch the light and let it go.
+4. **The mirror.** The world above the surface, sampled upside down with
+   a sideways waver and mixed in faintly, fading with depth. The sample
+   is of the picture the light already drew, so a dark shore reflects as
+   a dark shore; what it brings the pond is the firefly and the orb,
+   inverted and wavering, which is what still water does at night.
 
-**The shader never lights what the light left dark.** Everything it adds
-is multiplied by `lit`, taken from the brightness of the texel the CPU
-already shaded. Water in the far gloom is a dark shape; water under the
-fireflies shimmers; water under the orb is bright. So the one place the
-look of light lives is still `light_shade`, and the shader only says
-what water does with the light it is given.
+**The shader never lights what the light left dark.** The net and the
+twinkle are multiplied by `lit`, taken from the brightness of the texel
+the CPU already shaded and tinted by its colour, so a glint under the
+fireflies is green and one under the orb is warm. The mirror adds only
+light that already stands in the picture above the water. Water in the
+far gloom is a dark shape; water under the fireflies shimmers; water
+under the orb is bright. So the one place the look of light lives is
+still `light_shade`, and the shader only says what water does with the
+light it is given.
 
 ## Where it runs, and what happens when it cannot
 

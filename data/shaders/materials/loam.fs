@@ -25,10 +25,10 @@ const vec3 LOAM_HUMUS = vec3(0.076, 0.055, 0.040); // near-black rot in the furr
 const vec3 LOAM_CHAFF = vec3(0.560, 0.470, 0.270); // straw turned in with it
 const vec3 LOAM_GRIT  = vec3(0.520, 0.480, 0.420); // the odd stone
 
-const float LOAM_FURROW = 0.72; // the ranks the plough left, about 9 cells
+const float LOAM_FURROW = 0.115; // the ranks the plough left, about 9 cells
 const float LOAM_CLOD   = 0.34; // the clods, three or four cells across
 const float LOAM_PATCH  = 0.024;
-const float LOAM_RELIEF = 1.30;
+const float LOAM_RELIEF = 2.10;
 
 // The ranks. A furrow slice is a long ridge with a trough beside it, so
 // this is a banded field and not a scatter -- the one thing that says
@@ -59,7 +59,7 @@ vec3 loam_color(vec2 cell, float ridge)
 
     // The crown of a slice dries out pale; the trough beside it stays
     // wet and nearly black.
-    col = mix(LOAM_HUMUS, col, smoothstep(0.06, 0.55, ridge));
+    col = mix(LOAM_HUMUS, col, smoothstep(0.02, 0.75, ridge));
     return col;
 }
 

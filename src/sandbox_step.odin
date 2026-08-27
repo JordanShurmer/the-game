@@ -1,5 +1,6 @@
 package game
 
+import "base:intrinsics"
 import "core:mem"
 
 sandbox_sinks :: #force_inline proc "contextless" (src, dst: u16) -> bool {
@@ -30,39 +31,60 @@ sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, 
 }
 
 sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
+	wake := prof_begin()
 	sb.dirty, sb.next_dirty = sb.next_dirty, sb.dirty
+	sb.dirty_rows, sb.next_dirty_rows = sb.next_dirty_rows, sb.dirty_rows
 	for &r in sb.next_dirty do r = SANDBOX_RECT_EMPTY
+	mem.zero_slice(sb.next_dirty_rows)
 
-	for r in sb.dirty {
+	for r, ci in sb.dirty {
 		if r.min_x > r.max_x do continue
 		width := int(r.max_x - r.min_x + 1)
-		for y in r.min_y ..= r.max_y {
+		base_y := i32(ci) / sb.chunks_x * SANDBOX_CHUNK
+		for bits := sb.dirty_rows[ci]; bits != 0; bits &= bits - 1 {
+			y := base_y + i32(intrinsics.count_trailing_zeros(bits))
+			if y < r.min_y || y > r.max_y do continue
 			row_start := sandbox_index(sb, r.min_x, y)
 			mem.zero_slice(sb.moved[row_start:row_start + width])
 		}
 	}
+	prof_end(.Step_Wake, wake)
 
+	rows := prof_begin()
 	for y := sb.height - 1; y >= 0; y -= 1 {
 		cy := y / SANDBOX_CHUNK
+		bit := u64(1) << u64(y & (SANDBOX_CHUNK - 1))
 		chunk_row := sb.dirty[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
-		for r in chunk_row {
-			if y < r.min_y || y > r.max_y do continue // nothing on this row
+		row_bits := sb.dirty_rows[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
+		for r, k in chunk_row {
+			if row_bits[k] & bit == 0 do continue // nothing on this row
+			if y < r.min_y || y > r.max_y do continue
 			sandbox_step_row(sb, table, y, r.min_x, r.max_x)
 		}
 	}
+	prof_end(.Step_Rows, rows)
 
+	age := prof_begin()
 	bang_age(&sb.bangs)
 	spark_age(&sb.sparks)
+	prof_end(.Step_Age, age)
+
 	sb.tick += 1
+	prof.ticks += 1
 }
 
 sandbox_step_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
+	prof.count[.Rows_Stepped] += 1
+	prof.count[.Cells_Loaded] += int(x1 - x0 + 1)
+
 	if sandbox_load_row(sb, table, y, x0, x1) {
+		prof.count[.Hot_Rows] += 1
 		if sandbox_hot_row(sb, table, y, x0, x1) {
 			sandbox_load_row(sb, table, y, x0, x1)
 		}
 	}
 	if sandbox_intent_row(sb, y, x0, x1) {
+		prof.count[.Moving_Rows] += 1
 		sandbox_apply_row(sb, table, y, x0, x1)
 	}
 }
@@ -131,6 +153,8 @@ sandbox_hot_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> 
 		work := table.work[sb.cells[i]]
 		if work == {} do continue
 
+		prof.count[.Reacts] += int(.Reacts in work)
+		prof.count[.Fires] += int(.Burns in work)
 		if .Reacts in work && sandbox_react(sb, table, x, y) {
 			changed = true
 			continue
@@ -153,6 +177,7 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 	index    := sandbox_index(sb, x, y)
 	material := sb.cells[index]
 	n        := len(table.materials)
+	partners := table.partners[material]
 
 	live:  [4]int // the sides that have a partner on them
 	count: int
@@ -160,6 +185,9 @@ sandbox_react :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 		nx, ny := x + s[0], y + s[1]
 		if !sandbox_in_bounds(sb, nx, ny) do continue
 		ni := sandbox_index(sb, nx, ny)
+		// The bit says "these two never react", which is what almost
+		// every neighbour is; reaction_at stays the authority after it.
+		if partners >> (sb.cells[ni] & 63) & 1 == 0 do continue
 		if sb.moved[ni] do continue
 		if table.reaction_at[int(material) * n + int(sb.cells[ni])] < 0 do continue
 		live[count] = k
@@ -286,11 +314,12 @@ sandbox_swap :: proc(sb: ^Sandbox, sx, sy, dx, dy: i32) -> bool {
 	if sb.moved[to] do return false
 	from := sandbox_index(sb, sx, sy)
 
+	prof.count[.Swaps] += 1
 	sb.cells[from], sb.cells[to] = sb.cells[to], sb.cells[from]
 	sb.lifetime[from], sb.lifetime[to] = sb.lifetime[to], sb.lifetime[from]
 	sb.moved[from] = true
 	sb.moved[to] = true
-	sandbox_mark(sb, sx, sy)
-	sandbox_mark(sb, dx, dy)
+	// The two cells are neighbours, so one box covers both marks.
+	sandbox_mark_box(sb, min(sx, dx)-1, min(sy, dy)-1, max(sx, dx)+1, max(sy, dy)+1)
 	return true
 }
