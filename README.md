@@ -105,8 +105,8 @@ after he runs off a ledge, still works for a tenth of a second. Hold
 the key and the jetpack lights, which empties the tank in two seconds
 and fills it again in under one while he stands.
 
-**Digging.** The digger is a beam out of the centre of his mass, along
-the cursor. It cuts a kerf he can walk down, it stops at what it
+**Digging.** The digger is a beam along the cursor, drawn off the orb
+on his staff. It cuts a kerf he can walk down, it stops at what it
 cannot cut, and it throws part of what it removes back out of the hole
 as debris that then falls. `docs/player.md` says how he is built and
 what this phase leaves out.
@@ -130,12 +130,14 @@ one — stooped, coal-dark, lit by the one lamp he carries.
 what this phase leaves out.
 
 **The dark.** The orb on the wizard's staff is nearly the only light
-in the world. Every 21 cells a small crystal of light falls out of it
-and hangs where it fell, so the way he came stays lit behind him and
-everything he has not been is gloom. `docs/lighting.md` says how that
-is built and what it costs.
+in the world. Where the light of the way behind him has run out, a
+tiny crystal falls from the orb and hangs where it fell — a small gem
+whose gentle glow soaks half a screen of ground — so the way he came
+stays marked by a scatter of far-apart lights and everything he has
+not been is gloom. `docs/lighting.md` says how that is built and what
+it costs.
 
-![Walking the dark, dropping a crystal of light every 21 cells](docs/images/walk.gif)
+![Walking the dark, past the glow of a crystal the orb let fall](docs/images/walk.gif)
 
 **The pond.** Down in the caves there is water, drawn by a
 shader: a rippling surface, depths that go dark and cold, and a net of

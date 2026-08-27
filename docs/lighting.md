@@ -24,7 +24,7 @@ every other light in the world.
 | --- | --- | --- | --- |
 | a bang | `Blast` | 255 | 22 ticks, then it is fire |
 | the orb on his staff | `Orb_Light` | 255 | it does not decay |
-| a crystal he leaves | `Light_Crystal` | 168 | it does not decay |
+| a crystal he leaves | `Light_Crystal` | 110 | it does not decay |
 | the fuse on a thrown pot | `Fire` | 120 | 90 ticks |
 | a firefly | `Firefly_Light` | 96 | it does not decay |
 
@@ -252,23 +252,26 @@ sunk under `LIGHT_DROP_BELOW`. That is the whole rule, and the goal is
 exactly what it leaves behind: light where he has been. A walk back
 over the lit trail drops nothing
 (`test_no_crystal_falls_where_the_trail_already_lights_the_place`).
-The bar sits close to `LIGHT_FAINT`, so in the open the crystals hang
-more than half a screen apart — about 164 cells against the 320 the
-game opens on — with the last of each pool still readable between
-them. Around a corner the pool dies with the corridor that carried it,
+The bar sits close to `LIGHT_FAINT`, and the floor below does the
+rest, so the crystals hang at least half a screen apart — 160 cells
+against the 320 the game opens on. Around a corner the pool dies with
+the corridor that carried it,
 so the trail turns the corner with him and a crystal falls in the side
 passage though the last one is near as the crow flies
-(`test_the_trail_turns_a_corner_with_him`), and through cut rock,
-where the light behind him dies in a few samples, they fall closer
-still.
+(`test_the_trail_turns_a_corner_with_him`). And however dark the rock
+keeps the reading, none falls within `LIGHT_DROP_APART` (160 cells —
+half that screen) of one already hanging: without the floor, the
+darkness rule bunched gems down every winding stair.
 
-A crystal is drawn as a patch of glow, not a point: a wide faint halo
-with no core at all (`LIGHT_CRYSTAL_BLAZE` below zero is how a light
-says it has no heart to draw, and both draw paths keep that rule), with
-a breath of a twinkle rather than a blink. Its flood falls off more
-gently than the orb's (`LIGHT_CRYSTAL_FALL`), so each one lights a
-broad dim pool and the trail reads as a ribbon of lit ground rather
-than a dotted line of small lamps.
+A crystal is drawn as a tiny rupee of light: a slim six-sided gem,
+amber at the rim and white at the heart, inside a small faint halo
+with no core (`LIGHT_CRYSTAL_BLAZE` below zero is how a light says it
+has no bright heart to draw, and both draw paths keep the rule), with
+a breath of a twinkle rather than a blink. It burns low and its flood
+falls off gently (`LIGHT_CRYSTAL_FALL`), so a very small gem soaks a
+wide patch of ground in faint light without filling the cave with
+glow: the trail says the cave is explored, it does not stage the
+scene.
 
 **A crystal has no physics and no interactions.** It does not fall to
 the floor, it does not collide, nothing in the sandbox can touch it and

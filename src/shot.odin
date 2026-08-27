@@ -201,8 +201,22 @@ shot_draw_glow :: proc(
 	}
 }
 
+// The rupee at one texel a cell: a slim diamond of amber with a white
+// heart, inside the same faint halo the window draws. See
+// app_draw_crystals for the shape at full size.
 @(private = "file")
 shot_draw_crystals :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
+	Rupee_Cell :: struct {
+		dx, dy: i32,
+		core:   bool,
+	}
+	rupee := []Rupee_Cell {
+		{0, -2, false},
+		{-1, -1, false}, {0, -1, true}, {1, -1, false},
+		{-1, 0, false}, {0, 0, true}, {1, 0, false},
+		{0, 1, false},
+	}
+
 	for i in 0 ..< int(shot.light.count) {
 		c := shot.light.crystals[i]
 		shot_draw_glow(
@@ -210,6 +224,12 @@ shot_draw_crystals :: proc(shot: Shot, pixels: []rl.Color, width, height: i32) {
 			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
 			LIGHT_GLOW, LIGHT_CORE,
 		)
+
+		tx := floor_div(i32(math.floor(c.x)) - shot.view.x, shot.view.step)
+		ty := floor_div(i32(math.floor(c.y)) - shot.view.y, shot.view.step)
+		for rc in rupee {
+			shot_plot(shot, pixels, width, height, tx + rc.dx, ty + rc.dy, rc.core ? LIGHT_CORE : LIGHT_GLOW)
+		}
 	}
 }
 

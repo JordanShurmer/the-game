@@ -887,19 +887,52 @@ app_draw_glow :: proc(app: ^App, wx, wy: f32, halo, blaze: i32, peak, glow: f32,
 	rl.DrawCircleV(at, max(f32(blaze + 1) * scale * glow, 1.5), rl.Fade(core_color, glow))
 }
 
+// A crystal is a tiny rupee of light: a slim six-sided gem, amber at
+// the rim and white at the heart, inside a wide faint halo. The gem is
+// the thing you can see the light coming from, and it is kept far
+// smaller than the light it gives.
+@(private = "file")
+app_draw_rupee :: proc(at: rl.Vector2, w, h, waist: f32, color: rl.Color) {
+	rl.DrawRectangleRec(rl.Rectangle{at.x - w, at.y - waist, 2 * w, 2 * waist}, color)
+	// Vertex order keeps each triangle counter-clockwise on a screen
+	// whose y runs down, the way app_beam_quad orders its strip.
+	rl.DrawTriangle(
+		rl.Vector2{at.x, at.y - h},
+		rl.Vector2{at.x - w, at.y - waist},
+		rl.Vector2{at.x + w, at.y - waist},
+		color,
+	)
+	rl.DrawTriangle(
+		rl.Vector2{at.x, at.y + h},
+		rl.Vector2{at.x + w, at.y + waist},
+		rl.Vector2{at.x - w, at.y + waist},
+		color,
+	)
+}
+
 @(private = "file")
 app_draw_crystals :: proc(app: ^App) {
 	if !app_lighting(app) do return
 
+	scale := f32(app.zoom) / f32(app.step)
 	clock := rl.GetTime()
 	for i in 0 ..< int(app.light.count) {
 		c := app.light.crystals[i]
+		glow := light_crystal_glow(c, clock)
 		app_draw_glow(
 			app, c.x, c.y,
 			LIGHT_CRYSTAL_HALO, LIGHT_CRYSTAL_BLAZE, LIGHT_CRYSTAL_PEAK,
-			light_crystal_glow(c, clock),
+			glow,
 			LIGHT_GLOW, LIGHT_CORE,
 		)
+
+		x := (c.x - f32(app.cam_x)) * scale
+		y := (c.y - f32(app.cam_y)) * scale
+		if x < -2 * scale || y < -2 * scale || x > WINDOW_W + 2 * scale || y > WINDOW_H + 2 * scale do continue
+
+		at := rl.Vector2{x, y}
+		app_draw_rupee(at, 0.9 * scale, 1.7 * scale, 0.7 * scale, rl.Fade(LIGHT_GLOW, 0.90))
+		app_draw_rupee(at, 0.45 * scale, 0.9 * scale, 0.35 * scale, rl.Fade(LIGHT_CORE, 0.55 + 0.45 * glow))
 	}
 }
 
