@@ -588,6 +588,30 @@ sandbox_dig :: proc(sb: ^Sandbox, table: Material_Table, cx, cy: i32, radius: i3
 	return removed
 }
 
+// How far a cut carries: the last step the digger can cut, walked from
+// the centre along the aim. One procedure decides it, because two
+// things measure from it and must agree or the picture lies about the
+// tool: the kerf sandbox_cut opens, and the beam the window draws.
+// `hit` says the walk stopped on a cell too hard to cut, rather than at
+// the range or at the edge of the sandbox.
+sandbox_cut_reach :: proc(
+	sb: ^Sandbox,
+	table: Material_Table,
+	cx, cy: i32,
+	dx, dy: f32,
+	range: i32,
+	power: u8,
+) -> (reach: i32, hit: bool) {
+	for step in i32(1) ..= range {
+		ax := cx + i32(math.round(dx * f32(step)))
+		ay := cy + i32(math.round(dy * f32(step)))
+		if !sandbox_in_bounds(sb, ax, ay) do return reach, false
+		if table.materials[sb.cells[sandbox_index(sb, ax, ay)]].hardness > power do return reach, true
+		reach = step
+	}
+	return reach, false
+}
+
 sandbox_cut :: proc(
 	sb: ^Sandbox,
 	table: Material_Table,
@@ -599,14 +623,7 @@ sandbox_cut :: proc(
 	px, py := -dy, dx
 	r2 := half_width * half_width
 
-	reach := i32(0)
-	for step in i32(1) ..= range {
-		ax := cx + i32(math.round(dx * f32(step)))
-		ay := cy + i32(math.round(dy * f32(step)))
-		if !sandbox_in_bounds(sb, ax, ay) do break
-		if table.materials[sb.cells[sandbox_index(sb, ax, ay)]].hardness > power do break
-		reach = step
-	}
+	reach, _ := sandbox_cut_reach(sb, table, cx, cy, dx, dy, range, power)
 
 	for step in i32(1) ..= reach {
 		ax := cx + i32(math.round(dx * f32(step)))
@@ -770,6 +787,61 @@ test_denser_powder_sinks_through_liquid :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect(t, deepest == sb.height-1, "sand must sink to the floor")
+}
+
+// Brush is porous: what falls on a crop mostly sifts down through it
+// to gather at its foot, the stalks riding up over the drift, and a
+// little lodges in the weave on the way down. See sandbox_sift.
+@(test)
+test_what_falls_on_a_crop_mostly_sifts_through_and_a_little_lodges :: proc(t: ^testing.T) {
+	for name in ([]string{"Sand", "Water"}) {
+		sb, table := test_sandbox(t, 40, 48, 9)
+		defer sandbox_destroy(&sb)
+		defer destroy_material_table(table)
+
+		wheat, wheat_found := find_material_index(table, "Wheat")
+		if !testing.expect(t, wheat_found, "Wheat must exist") do return
+		grain, grain_found := find_material_index(table, name)
+		if !testing.expect(t, grain_found, "the falling material must exist") do return
+		rock, _ := find_material_index(table, "Rock")
+
+		// A floor, a standing crop eleven cells tall over the whole
+		// width, and a row of what falls resting well above it.
+		for x in i32(0) ..< sb.width {
+			sandbox_paint(&sb, table, x, 40, 0, Cell(rock))
+			for y in i32(29) ..< 40 do sandbox_paint(&sb, table, x, y, 0, Cell(wheat))
+			sandbox_paint(&sb, table, x, 24, 0, Cell(grain))
+		}
+
+		for _ in 0 ..< 200 do sandbox_step(&sb, table)
+
+		through, lodged, standing := 0, 0, 0
+		for y in i32(0) ..< sb.height {
+			for x in i32(0) ..< sb.width {
+				c := int(sandbox_cell(&sb, x, y))
+				if c == grain {
+					if y >= 38 {through += 1} else {lodged += 1}
+				}
+				if c == wheat do standing += 1
+			}
+		}
+
+		testing.expectf(
+			t, through >= int(sb.width) * 3 / 4,
+			"%s must mostly sift through the crop to its foot, and only %d of %d cells did",
+			name, through, sb.width,
+		)
+		testing.expectf(
+			t, lodged >= 1,
+			"a little of the %s must lodge in the weave, and none did",
+			name,
+		)
+		testing.expectf(
+			t, standing == int(sb.width) * 11,
+			"the crop must ride over what sifts through it, not be eaten: %d cells stand of %d",
+			standing, int(sb.width) * 11,
+		)
+	}
 }
 
 @(test)

@@ -46,6 +46,7 @@ Material_Uniform :: enum u8 {
 	Step,
 	Seconds,
 	Id,
+	Front,
 }
 
 material_uniform_name := [Material_Uniform]cstring {
@@ -55,6 +56,7 @@ material_uniform_name := [Material_Uniform]cstring {
 	.Step    = "step_cells",
 	.Seconds = "seconds",
 	.Id      = "id",
+	.Front   = "front",
 }
 
 Material_Shader :: struct {
@@ -62,6 +64,7 @@ Material_Shader :: struct {
 	at:     [Material_Uniform]i32,
 	cell:   Cell,
 	name:   string,
+	brush:  bool, // drawn again over the wizard: see material_shaders_draw_front
 }
 
 Material_Shaders :: struct {
@@ -139,6 +142,7 @@ material_shaders_load :: proc(
 			shader = shader,
 			cell   = Cell(i),
 			name   = name,
+			brush  = material_is_brush(materials.materials[i]),
 		}
 		for uniform_name, u in material_uniform_name {
 			one.at[u] = rl.GetShaderLocation(shader, uniform_name)
@@ -283,6 +287,37 @@ material_shader_rects :: proc(
 	return sub_src, sub_dst
 }
 
+@(private = "file")
+material_shader_pass :: proc(
+	ms: ^Material_Shaders,
+	one: ^Material_Shader,
+	world: rl.Texture2D,
+	sub_src, sub_dst: rl.Rectangle,
+	size: [2]f32,
+	origin: [2]f32,
+	step: f32,
+	seconds: f32,
+	front: f32,
+) {
+	size := size
+	origin := origin
+	step := step
+	seconds := seconds
+	front := front
+	id := f32(one.cell)
+
+	rl.BeginShaderMode(one.shader)
+	rl.SetShaderValueTexture(one.shader, one.at[.Gbuf], ms.texture)
+	rl.SetShaderValue(one.shader, one.at[.Size], &size, .VEC2)
+	rl.SetShaderValue(one.shader, one.at[.Origin], &origin, .VEC2)
+	rl.SetShaderValue(one.shader, one.at[.Step], &step, .FLOAT)
+	rl.SetShaderValue(one.shader, one.at[.Seconds], &seconds, .FLOAT)
+	rl.SetShaderValue(one.shader, one.at[.Id], &id, .FLOAT)
+	rl.SetShaderValue(one.shader, one.at[.Front], &front, .FLOAT)
+	rl.DrawTexturePro(world, sub_src, sub_dst, rl.Vector2{0, 0}, 0, rl.WHITE)
+	rl.EndShaderMode()
+}
+
 // Paint over the world, one material at a time. A material the view does
 // not hold costs nothing: the pass is never drawn.
 material_shaders_draw :: proc(
@@ -300,22 +335,45 @@ material_shaders_draw :: proc(
 	for &one in ms.list {
 		if !ms.seen[u32(one.cell) & 255] do continue
 		sub_src, sub_dst := material_shader_rects(ms.box[u32(one.cell) & 255], src, dst)
+		material_shader_pass(ms, &one, world, sub_src, sub_dst, size, origin, step, seconds, 0)
+	}
+}
 
-		size := size
-		origin := origin
-		step := step
-		seconds := seconds
-		id := f32(one.cell)
+// The front of the crop, painted again over the wizard's sprite so he
+// walks through the standing brush rather than in front of it. The
+// pass is the same pass with `front` set: the epilogue keeps only the
+// stalks the front mask names and discards the rest, so the wizard
+// shows between them. Clipped to `box` -- his frame, in view texels --
+// because everywhere else the base pass already drew those stalks and
+// drawing them again would only be work.
+material_shaders_draw_front :: proc(
+	ms: ^Material_Shaders,
+	world: rl.Texture2D,
+	src: rl.Rectangle,
+	dst: rl.Rectangle,
+	size: [2]f32,
+	origin: [2]f32,
+	step: f32,
+	seconds: f32,
+	box: Sandbox_Rect,
+) {
+	if !ms.on do return
 
-		rl.BeginShaderMode(one.shader)
-		rl.SetShaderValueTexture(one.shader, one.at[.Gbuf], ms.texture)
-		rl.SetShaderValue(one.shader, one.at[.Size], &size, .VEC2)
-		rl.SetShaderValue(one.shader, one.at[.Origin], &origin, .VEC2)
-		rl.SetShaderValue(one.shader, one.at[.Step], &step, .FLOAT)
-		rl.SetShaderValue(one.shader, one.at[.Seconds], &seconds, .FLOAT)
-		rl.SetShaderValue(one.shader, one.at[.Id], &id, .FLOAT)
-		rl.DrawTexturePro(world, sub_src, sub_dst, rl.Vector2{0, 0}, 0, rl.WHITE)
-		rl.EndShaderMode()
+	for &one in ms.list {
+		if !one.brush do continue
+		if !ms.seen[u32(one.cell) & 255] do continue
+
+		b := ms.box[u32(one.cell) & 255]
+		clipped := Sandbox_Rect {
+			min_x = max(b.min_x, box.min_x),
+			min_y = max(b.min_y, box.min_y),
+			max_x = min(b.max_x, box.max_x),
+			max_y = min(b.max_y, box.max_y),
+		}
+		if clipped.min_x > clipped.max_x || clipped.min_y > clipped.max_y do continue
+
+		sub_src, sub_dst := material_shader_rects(clipped, src, dst)
+		material_shader_pass(ms, &one, world, sub_src, sub_dst, size, origin, step, seconds, 1)
 	}
 }
 

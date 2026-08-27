@@ -268,6 +268,30 @@ Two things make the rule safe:
 - After the swap the pair is in the order it wanted, so it does not
   swap back.
 
+## The sieve rule
+
+Brush — a standing crop, a hedge — weighs `CELL_WALL`, because nothing
+the sandbox moves is heavy enough to push a stalk aside. But a crop is
+not a roof: what falls on it should end up under it, on the ground
+between the stalks, not resting on the canopy eleven cells in the air.
+
+So brush sifts. A powder or a liquid standing directly on a cell of
+brush trades places with it (`sandbox_sift`, a `.Sieves` work bit on
+every brush material): the grain trickles a cell a tick toward the
+ground, and the stalk rides up over what gathers at its foot, the way
+a crop stands on a drift rather than under one. The brush cell is the
+side that does the work, because the falling cell has already stopped
+— its own intent saw a wall below and nothing more.
+
+One brush cell in `BRUSH_WEAVE` (64) is woven too dense to pass. The
+weave is a hash of the world position, not a roll per tick, so a dense
+spot stays dense and the grain that lands on one stays lodged until
+fire or the digger frees it. Over a crop eleven tall that leaves about
+one grain in seven caught somewhere on the way down: the field is an
+extremely porous material, not a strainer that holds everything.
+`test_what_falls_on_a_crop_mostly_sifts_through_and_a_little_lodges`
+measures both halves of that sentence.
+
 ## Explosions
 
 ```odin

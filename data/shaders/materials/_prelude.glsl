@@ -26,6 +26,7 @@ uniform vec2 origin;
 uniform float step_cells;
 uniform float seconds;
 uniform float id;
+uniform float front;
 
 out vec4 finalColor;
 

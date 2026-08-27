@@ -14,13 +14,16 @@ Cell_Work :: enum u8 {
 	Reacts,
 	Burns,
 	Flame,
+	Sieves, // brush: what falls on it mostly sifts through. See sandbox_sift.
 }
 Cell_Works :: distinct bit_set[Cell_Work; u8]
 
 cell_weight_of :: proc(m: Material, is_air: bool) -> u16 {
 	if is_air do return CELL_AIR
 	// Brush stands where it is, the same as a solid does: nothing the
-	// sandbox moves is heavy enough to push a hedge aside.
+	// sandbox moves is heavy enough to push a hedge aside. What falls
+	// on it still mostly finds its way through -- that is the sieve
+	// (`sandbox_sift`), not the weight.
 	if m.state == .Solid || m.state == .Brush do return CELL_WALL
 
 	q := i64(m.density * 256)
@@ -43,5 +46,6 @@ cell_work_of :: proc(m: Material, reacts: bool) -> Cell_Works {
 	if reacts             do work += {.Reacts}
 	if .Burns in m.contact do work += {.Burns}
 	if m.state == .Special do work += {.Flame}
+	if m.state == .Brush   do work += {.Sieves}
 	return work
 }

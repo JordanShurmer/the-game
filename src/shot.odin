@@ -188,7 +188,9 @@ shot_draw_glow :: proc(
 	for dy in -halo ..= halo {
 		for dx in -halo ..= halo {
 			away := dx * dx + dy * dy
-			if away <= blaze * blaze {
+			// A blaze below zero says the light has no heart to draw,
+			// the same rule the window keeps in app_draw_glow.
+			if blaze >= 0 && away <= blaze * blaze {
 				shot_plot(shot, pixels, width, height, tx + dx, ty + dy, core_color)
 				continue
 			}
@@ -720,3 +722,4 @@ test_the_orb_lights_what_is_near_him_and_the_gloom_keeps_the_rest :: proc(t: ^te
 		lit_far, dim_far,
 	)
 }
+

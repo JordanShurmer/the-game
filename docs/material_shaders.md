@@ -113,6 +113,27 @@ light bouncing between it and the eye. `soot.fs` shows the shape of it.
 Do this only for a material that is genuinely near black, and say why in
 the file.
 
+## The front of the crop
+
+A brush material — the standing wheat, a hedge — is drawn twice. The
+whole crop draws in the ordinary pass, under the wizard. Then, after
+his sprite, `material_shaders_draw_front` runs the same shaders once
+more with the `front` uniform set, clipped to his frame, and the
+epilogue keeps only the stalks the front mask names and discards the
+rest. So some stalks stand before him and some behind, and a walk
+through a field reads as walking *through* the crop. Which stalks are
+in front is decided by world column, two cells to a stalk, so a stalk
+is wholly one or the other and the crop reads as depth rather than as
+noise; `M_FRONT_SHARE` in `_main.glsl` leans behind, so he is veiled,
+not hidden. Everything that is only light — the orb, the dig beam,
+and every halo a crystal, a firefly, a bang or a sparkle throws —
+draws after the front pass, because the light of the world sits over
+the crop; drawn under it, the front pass would rub a hole in a halo
+the exact shape of his frame.
+
+A material file never sees any of this. The mask and the discard live
+in the epilogue, and a shader body reads `front` at its peril.
+
 ## Looking at one material
 
 A vein of gold four cells wide in an unlit cave says almost nothing about
