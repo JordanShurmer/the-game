@@ -27,7 +27,6 @@ BANG_SPENT :: i16(-1) // the slot is free, and the light has cleared its box
 Bang :: struct {
 	x, y: i32,
 	life: i16,
-	_pad: i16,
 }
 #assert(size_of(Bang) == 12)
 

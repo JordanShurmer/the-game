@@ -1360,15 +1360,6 @@ def place_bracket_ledge(grid, overlay, colors, material, inside, wall_x, out, y,
     place_brace(grid, overlay, colors, material, inside, wall_x, y + thickness + 22, far_x, y + thickness + 2, width=strut_w)
 
 
-def in_mound(x, y, cx, floor_y, half_w, height):
-    """A rounded mound sitting on the floor at `floor_y`, not a flat
-    half-disc floating above it."""
-    if y > floor_y:
-        return False
-    nx, ny = (x - cx) / half_w, (floor_y - y) / height
-    return nx * nx + ny * ny <= 1.0
-
-
 def place_coal_bin(grid, overlay, colors, inside, cx, floor_y, half_w, height, wall=6):
     """A three-sided Wood bin on the floor, open at the top, filled
     with Coal: dark against black air is not there at all unless a

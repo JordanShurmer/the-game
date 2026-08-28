@@ -19,11 +19,10 @@ DRUDGE_ALERT_HOLD  :: 30   // ticks his sight of the player is remembered after 
 
 // The lamp he carries, the way a miner always did. See docs/drudge.md,
 // "Sight: seeing him before he sees you". Its brightness and colour are
-// `Fire`'s own — a lamp is a flame, and the shipped material table sits
-// exactly at the 32-material ceiling the wide AVX2 lookup needs, so the
-// lamp gets no row of its own, the same way the pot's own fuse already
-// borrows `Fire` rather than defining its own material. Only how far it
-// reaches and how fast it falls off are code, same as every other light.
+// `Fire`'s own — a lamp is a flame, so it gets no row of its own, the
+// same way the pot's own fuse already borrows `Fire` rather than
+// defining its own material. Only how far it reaches and how fast it
+// falls off are code, same as every other light.
 DRUDGE_LAMP_REACH :: 25
 DRUDGE_LAMP_FALL  :: Light_Fall{open = 212, open_diag = 196, dense = 108, dense_diag = 75}
 

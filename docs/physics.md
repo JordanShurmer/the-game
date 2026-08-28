@@ -935,7 +935,8 @@ two builds rather than running one after the other.
 | `SANDBOX_PLAY_SIZE` | 2048 | the play sandbox, on a lattice of its own |
 | `SANDBOX_MAX_WIDTH` | 2048 | the largest sandbox `sandbox_make` will build |
 | `PLAYER_DIG_POWER` | 8 | hardness he can remove; rock is exactly 8 |
-| `PLAYER_DIG_RADIUS` | 5 | cells |
+| `PLAYER_DIG_RANGE` | 26 | cells the cut carries |
+| `PLAYER_DIG_WIDTH` | 15 | cells across the kerf |
 | `EXPLODE_MIN_RAYS` | 24 | rays in the smallest blast |
 | `EXPLODE_RAYS_PER_CELL` | 6 | rays per cell of radius above that |
 | `EXPLODE_BLAST_ODDS` | 150 | out of 255: how much of the inner blast catches |
@@ -946,7 +947,6 @@ two builds rather than running one after the other.
 | `BLAST_CHIP` | 2 | lift at which a blast still bites a face |
 | `BLAST_CHIP_ODDS` | 96 | out of 255: how much of a chipped face goes |
 | `BLAST_FLING` | 2 | cells a scattered grain flies per unit of lift |
-| `REACT_PROBES` | 1 | reaction rolls a cell makes per tick |
 | `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
 | `GALLERY_ROOM` | 128 | cells along one edge of a room |
 | `GALLERY_WALL` | 4 | cells of bedrock between two rooms |
