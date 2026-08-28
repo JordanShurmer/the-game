@@ -237,11 +237,11 @@ tool_list_materials :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	table := s.world.materials
 
-	strings.write_string(&b, "idx glyph name    state    density fall hard flam cond tox force lum life decays_to burns_to\n")
+	strings.write_string(&b, "idx glyph name    state    density fall hard flam force lum life decays_to burns_to\n")
 	for material, i in table.materials {
 		fmt.sbprintf(
 			&b,
-			"% 3d %c     %-7s %-8s % 7.2f % 4d % 4d % 4d % 4d % 3d % 5d % 3d % 4d %-9s %s\n",
+			"% 3d %c     %-7s %-8s % 7.2f % 4d % 4d % 4d % 5d % 3d % 4d %-9s %s\n",
 			i,
 			rune(table.glyphs[i]),
 			table.names[i],
@@ -250,8 +250,6 @@ tool_list_materials :: proc(s: ^Sim) -> string {
 			material.fall_speed,
 			material.hardness,
 			material.flammability,
-			material.conductivity,
-			material.toxicity,
 			material.force,
 			material.luminosity,
 			material.lifetime,
