@@ -32,8 +32,8 @@ MATERIALS_PATH = "data/materials.txt"
 
 IMG      = 512  # the whole gallery, one region, cells_per_pixel in data/biomes.txt
 GRID     = 4    # rooms across and down
-ROOM     = 128  # GALLERY_ROOM: cells along one edge of a room, wall included
-WALL     = 4    # GALLERY_WALL: cells of bedrock a room's own wall is thick
+ROOM     = 128  # cells along one edge of a room, wall included
+WALL     = 4    # cells of bedrock a room's own wall is thick
 INTERIOR = ROOM - 2 * WALL  # 120: the space inside one room
 
 DOOR_H    = 18  # a door is at least PLAYER_BODY_H (13) + 4 cells tall

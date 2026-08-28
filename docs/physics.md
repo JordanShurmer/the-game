@@ -178,23 +178,26 @@ Reaction :: struct {
 	a, b:   u16, // what meets
 	c, d:   u16, // what it becomes
 	chance: u8,  // out of 255, per probe
-	_pad:   [3]u8,
+	next:   i16, // the next row for the same pair, -1 at the end
 }
 #assert(size_of(Reaction) == 12)
 ```
 
-The table carries three things:
+The table carries four things:
 
 ```odin
 reactions: []Reaction, // every row, both ways round
-reaction_at: []i16,    // n*n; the row for a pair, or -1
+reaction_at: []i16,    // n*n; the head of a pair's chain of rows, or -1
 reacts: []bool,        // n; whether this material is in any row at all
+partners: []u64,       // n; one bit per partner, the coarse filter
 ```
 
-`reaction_at` is a dense square of `i16`, indexed `a*n + b`. With the
-28 materials the game ships that is 784 entries, or 1568 bytes. A
-table of 200 materials would cost 80 KB, which is the bound worth
-knowing and far past what this game needs.
+`reaction_at` is a dense square of `i16`, indexed `a*n + b`, holding
+the first row of the pair's chain — `next` walks the rest, and
+docs/alchemy.md, "A chain of rows", says how. With the 54 materials
+the game ships that is 2916 entries, or 5832 bytes. A table of 200
+materials would cost 80 KB, which is the bound worth knowing and far
+past what this game needs.
 
 `reacts` is the gate that keeps the step cheap. Air is in no row, so
 the common cell pays one byte of lookup and nothing else.
@@ -948,8 +951,8 @@ two builds rather than running one after the other.
 | `BLAST_CHIP_ODDS` | 96 | out of 255: how much of a chipped face goes |
 | `BLAST_FLING` | 2 | cells a scattered grain flies per unit of lift |
 | `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
-| `GALLERY_ROOM` | 128 | cells along one edge of a room |
-| `GALLERY_WALL` | 4 | cells of bedrock between two rooms |
+| `ROOM` (tools/museum.py) | 128 | cells along one edge of a room |
+| `WALL` (tools/museum.py) | 4 | cells of bedrock between two rooms |
 
 ## The order of work
 

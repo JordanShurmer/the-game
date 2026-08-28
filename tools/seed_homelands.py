@@ -80,8 +80,7 @@ EDGE_GROUND = 168  # the row the grass starts on, at both side edges
 ROLL = 13  # how far the fine height field wanders either side of that
 SWELL = 26  # how far the long, slow ground swell adds on top of that, out
             # in the plot spans -- it is held at zero across the green,
-            # below, so the pond and the swarm over it keep the ground
-            # they always stood on
+            # below
 GREEN_FADE = 70  # how gently the swell fades in from the edge of the green
 GREEN_SALT = 0x6E7E5F31  # keys the green's own dice, apart from the plots'
 SWELL_SALT = 0x51E11B0D  # keys the swell's own dice, apart from everything else
@@ -131,11 +130,10 @@ BUILT = ("Brick", "Thatch", "Wheat")
 # rock that roofs the coalmine in the region below.
 STRATA = (
     (0, "Dirt"),  # subsoil, from the grass down
-    (300, "Dirt"),  # stones start here
     (392, "Gravel"),  # the gravel band
     (436, "Rock"),  # the roof of the mine
 )
-STONE_TOP = 300  # no stone in the soil above this row
+STONE_TOP = 300  # stones start here: no stone in the soil above this row
 GRAVEL_TOP = 392  # the gravel band, and the rock under it
 ROCK_TOP = 436
 
@@ -215,8 +213,6 @@ class Rng:
 def smooth_field(rng, length, wavelength, amplitude):
     """A wandering line: random values a wavelength apart, joined by a
     cosine so the ground rolls instead of stepping."""
-    import math
-
     stops = length // wavelength + 2
     highs = [rng.unit() * 2.0 - 1.0 for _ in range(stops)]
     out = []
@@ -271,18 +267,6 @@ class Land:
 
     def ground(self, x):
         return self.top[min(max(x, 0), IMG - 1)]
-
-    def surface(self, x):
-        """The first row of a column a wizard cannot walk through: what
-        he would be standing on there. Air and the standing growth that
-        `state = Brush` makes too slight to stop him are walked through,
-        so neither counts."""
-        if x < 0 or x >= IMG:
-            return IMG
-        for y in range(IMG):
-            if self.cells[y][x] not in (AIR, GRASS, WHEAT):
-                return y
-        return IMG
 
     def level(self, x0, x1):
         """The lowest ground line across a span: what a building must
@@ -356,9 +340,8 @@ def stamp_edges(land, sides="both"):
 
 def swell_hold(x):
     """Zero across the village green, where the ground must stay at the
-    height it has always stood -- the pond is dug and the firefly swarm
-    hung from the ground line there -- fading up to full strength out
-    where the plots are, so there is no step at the edge of the green."""
+    height it has always stood, fading up to full strength out where
+    the plots are, so there is no step at the edge of the green."""
     if GREEN_X0 <= x <= GREEN_X1:
         return 0.0
     d = (GREEN_X0 - x) if x < GREEN_X0 else (x - GREEN_X1)
@@ -1049,11 +1032,10 @@ def paint_homeland(seed, i=0):
                     stook(land, x + rng.between(6, max(7, w - 6)))
 
     # The green: a gravel track worn the length of it, and off the track
-    # a fence line, a well or a tree, but never over the pond and never
-    # in the yard he lands in. Drawn off a stream of its own, keyed only
-    # to the picture's seed, so nothing about how the fields or cottages
-    # roll their dice ever moves what stands on the green -- the pond
-    # and the swarm above it are keyed to this same ground.
+    # a fence line, a well or a tree, but never in the yard he lands in.
+    # Drawn off a stream of its own, keyed only to the picture's seed,
+    # so nothing about how the fields or cottages roll their dice ever
+    # moves what stands on the green.
     green_rng = Rng(seed ^ GREEN_SALT)
     land.rng = green_rng
     path(land, GREEN_X0 + 2, GREEN_X1 - 2)

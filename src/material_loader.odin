@@ -47,7 +47,6 @@ Reaction :: struct {
 	a, b:   u16,
 	c, d:   u16,
 	chance: u8,
-	_pad:   [1]u8,
 	next:   i16,
 }
 #assert(size_of(Reaction) == 12)

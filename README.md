@@ -143,8 +143,9 @@ it costs.
 shader: a rippling surface, depths that go dark and cold, and a net of
 caustics sliding over the bottom. A swarm of fireflies hangs over its
 mouth and is the only light on it until he walks up with the orb.
-`docs/water.md` says how the pond is dug, where the shader came from,
-and how to take a picture of a window to judge it.
+`docs/water.md` says where the pond is and how the fireflies find it,
+where the shader came from, and how to take a picture of a window to
+judge it.
 
 **The chemistry.** 48 rows of `data/materials.txt` are the whole of
 it: salt goes into water and heat brings it back, nitre and brimstone
