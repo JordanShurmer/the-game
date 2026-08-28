@@ -206,10 +206,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if v, vok := strconv.parse_uint(value, 10); vok do current.hardness = u8(v)
 		case "flammability":
 			if v, vok := strconv.parse_uint(value, 10); vok do current.flammability = u8(v)
-		case "conductivity":
-			if v, vok := strconv.parse_uint(value, 10); vok do current.conductivity = u8(v)
-		case "toxicity":
-			if v, vok := strconv.parse_uint(value, 10); vok do current.toxicity = u8(v)
 		case "force":
 			if v, vok := strconv.parse_uint(value, 10); vok do current.force = u8(v)
 		case "luminosity":
@@ -220,10 +216,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if v, vok := strconv.parse_u64_maybe_prefixed(value); vok do current.color = u32(v)
 		case "contact":
 			current.contact = parse_contact_effects(value)
-		case "immersion":
-			current.immersion = parse_immersion_effects(value)
-		case "tags":
-			current.tags = parse_reaction_tags(value)
 		case "glyph":
 			if len(raw) > 0 do current_glyph = raw[0]
 		case "decays_to":
@@ -445,47 +437,7 @@ parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {
 	s := s
 	for part in strings.fields_iterator(&s) {
 		switch part {
-		case "Burns":       result += {.Burns}
-		case "Wets":        result += {.Wets}
-		case "Freezes":     result += {.Freezes}
-		case "Poisons":     result += {.Poisons}
-		case "Dissolves":   result += {.Dissolves}
-		case "Heals":       result += {.Heals}
-		case "Electrifies": result += {.Electrifies}
-		}
-	}
-	return result
-}
-
-parse_immersion_effects :: proc(s: string) -> bit_set[Immersion_Effect; u32] {
-	result: bit_set[Immersion_Effect; u32]
-	s := s
-	for part in strings.fields_iterator(&s) {
-		switch part {
-		case "Drowns":     result += {.Drowns}
-		case "Burns":      result += {.Burns}
-		case "Freezes":    result += {.Freezes}
-		case "Poisons":    result += {.Poisons}
-		case "Dissolves":  result += {.Dissolves}
-		case "Heals":      result += {.Heals}
-		case "Transforms": result += {.Transforms}
-		}
-	}
-	return result
-}
-
-parse_reaction_tags :: proc(s: string) -> bit_set[Reaction_Tag; u32] {
-	result: bit_set[Reaction_Tag; u32]
-	s := s
-	for part in strings.fields_iterator(&s) {
-		switch part {
-		case "Fuel":     result += {.Fuel}
-		case "Oxidizer": result += {.Oxidizer}
-		case "Acid":     result += {.Acid}
-		case "Base":     result += {.Base}
-		case "Metal":    result += {.Metal}
-		case "Organic":  result += {.Organic}
-		case "Magical":  result += {.Magical}
+		case "Burns": result += {.Burns}
 		}
 	}
 	return result
@@ -649,28 +601,8 @@ test_water_properties :: proc(t: ^testing.T) {
 	testing.expect(t, m.state == .Liquid)
 	testing.expect(t, m.density == 1.0)
 	testing.expect(t, m.fall_speed == 4)
-	testing.expect(t, .Wets in m.contact)
-	testing.expect(t, .Drowns in m.immersion)
 	testing.expect(t, m.lifetime == -1)
 	testing.expect(t, table.glyphs[idx] == '~')
-}
-
-@(test)
-test_acid_effects_and_tags :: proc(t: ^testing.T) {
-	table, ok := load_materials("data/materials.txt")
-	defer destroy_material_table(table)
-	testing.expect(t, ok)
-
-	idx, found := find_material_index(table, "Acid")
-	testing.expect(t, found)
-	m := table.materials[idx]
-
-	testing.expect(t, .Dissolves in m.contact)
-	testing.expect(t, .Poisons in m.contact)
-	testing.expect(t, .Poisons in m.immersion)
-	testing.expect(t, .Dissolves in m.immersion)
-	testing.expect(t, .Acid in m.tags)
-	testing.expect(t, m.toxicity == 6)
 }
 
 @(test)
@@ -687,7 +619,6 @@ test_fire_lifetime_and_rise :: proc(t: ^testing.T) {
 	testing.expect(t, m.lifetime == 90)
 	testing.expect(t, m.fall_speed == 1)
 	testing.expect(t, .Burns in m.contact)
-	testing.expect(t, .Oxidizer in m.tags)
 }
 
 @(test)
@@ -717,7 +648,6 @@ test_gold_density :: proc(t: ^testing.T) {
 
 	testing.expect(t, m.state == .Solid)
 	testing.expect(t, m.density == 19.3)
-	testing.expect(t, .Metal in m.tags)
 	testing.expect(t, m.fall_speed == 0)
 }
 
