@@ -23,8 +23,6 @@ DRUDGE_SPRITE_BODY_Y :: 9
 DRUDGE_SPRITE_BODY_W :: 10
 DRUDGE_SPRITE_BODY_H :: 12
 
-DRUDGE_SPRITE_FOOT_Y :: DRUDGE_SPRITE_BODY_Y + DRUDGE_SPRITE_BODY_H - 1
-
 #assert(DRUDGE_SPRITE_BODY_W == DRUDGE_BODY_W, "the drudge sprite's body box and his collision box must be the same width")
 #assert(DRUDGE_SPRITE_BODY_H == DRUDGE_BODY_H, "the drudge sprite's body box and his collision box must be the same height")
 

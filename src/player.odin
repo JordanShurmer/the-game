@@ -1105,14 +1105,6 @@ dig_test_sandbox :: proc(t: ^testing.T, world: World, p: Player, name: string) -
 	return sb, true
 }
 
-@(private = "file")
-dig_test_count_cut :: proc(sb: ^Sandbox, p: Player, material: Cell) -> (cut: int) {
-	for i in 0 ..< len(sb.cells) {
-		if sb.cells[i] != material do cut += 1
-	}
-	return cut
-}
-
 @(test)
 test_the_digger_cuts_along_the_aim_and_not_along_his_facing :: proc(t: ^testing.T) {
 	world, ok := make_flat_world(t, 200, 60)

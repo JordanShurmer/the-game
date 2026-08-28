@@ -495,7 +495,6 @@ app_look_at :: proc(app: ^App, name: string) -> bool {
 
 	app.look = Look {
 		cell = Cell(idx),
-		name = app.world.materials.names[idx],
 		on   = true,
 	}
 	app.step = 1
@@ -630,17 +629,14 @@ app_draw_materials :: proc(app: ^App, w, h: i32) {
 @(private = "file")
 app_draw_water :: proc(app: ^App, w, h: i32) {
 	if !app_lighting(app) do return
-	if app.water.on && app.water.box.min_x > app.water.box.max_x do return // no water in view
+	if !app.water.on do return
+	if app.water.box.min_x > app.water.box.max_x do return // no water in view
 
 	sub_src, sub_dst := material_shader_rects(
 		app.water.box,
 		rl.Rectangle{0, 0, f32(w), f32(h)},
 		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
 	)
-	if !app.water.on {
-		sub_src = rl.Rectangle{0, 0, f32(w), f32(h)}
-		sub_dst = rl.Rectangle{0, 0, WINDOW_W, WINDOW_H}
-	}
 
 	water_begin(
 		&app.water,

@@ -33,7 +33,6 @@ void main()
     Surf s;
     s.uv = uv;
     s.cell = cell;
-    s.base = texture(texture0, uv).rgb;
     s.lux = g_lux(uv);
     s.glow = g_glow(uv);
     s.sky = g_share(uv);

@@ -153,12 +153,6 @@ wang_band_color :: proc(sig: Wang_Signature, band: Wang_Band) -> u8 {
 	return 0
 }
 
-wang_shares_cell :: proc(a, b: Wang_Signature, x, y: i32) -> bool {
-	band := wang_band(x, y)
-	if band == .Inside do return false
-	return wang_band_color(a, band) == wang_band_color(b, band)
-}
-
 wang_paint_cell :: proc(set: Tile_Set, b: Biome, sig: Wang_Signature, x, y: i32, c: Cell) {
 	band := wang_band(x, y)
 	if band == .Inside do return

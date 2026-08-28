@@ -33,7 +33,6 @@ LOOK_FILL_Y :: 0.74
 
 Look :: struct {
 	cell: Cell,
-	name: string,
 	on:   bool,
 }
 

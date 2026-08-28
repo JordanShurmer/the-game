@@ -79,16 +79,6 @@ biome_map_label_components :: proc(
 	return count
 }
 
-biome_map_component_count :: proc(m: Biome_Map, allocator := context.temp_allocator) -> int {
-	labels := make([]i32, len(m.cells), allocator)
-	defer delete(labels, allocator)
-	return biome_map_label_components(m, labels, allocator)
-}
-
-biome_map_is_connected :: proc(m: Biome_Map, allocator := context.temp_allocator) -> bool {
-	return biome_map_component_count(m, allocator) <= 1
-}
-
 @(private = "file")
 build_test_map :: proc(rows: []string, allocator := context.allocator) -> Biome_Map {
 	height := i32(len(rows))
@@ -146,11 +136,13 @@ test_biome_map_connectivity :: proc(t: ^testing.T) {
 		m := build_test_map(c.rows)
 		defer destroy_biome_map(m)
 
-		got := biome_map_component_count(m)
+		labels := make([]i32, len(m.cells))
+		defer delete(labels)
+		got := biome_map_label_components(m, labels)
 		testing.expectf(t, got == c.want, "%s: want %d components, got %d", c.name, c.want, got)
 		testing.expectf(
 			t,
-			biome_map_is_connected(m) == c.connected,
+			(got <= 1) == c.connected,
 			"%s: want connected=%v",
 			c.name,
 			c.connected,
