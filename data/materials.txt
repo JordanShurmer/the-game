@@ -456,7 +456,7 @@ crumbles_to = Gravel
 #
 # The order they burn in is a rule, held by
 # test_the_lights_of_the_world_are_ordered:
-#   Blast 255 >= Orb_Light 255 > Light_Crystal 168 > Firefly_Light 96
+#   Blast 255 >= Orb_Light 255 > Sparkle 190 > Light_Crystal 110 > Firefly_Light 96
 # A bang is the brightest thing in the world while it lasts, and the
 # trail he leaves must never outshine the orb he carries.
 # ------------------------------------------------------------
