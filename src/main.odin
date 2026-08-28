@@ -74,7 +74,6 @@ Window_Shot :: struct {
 	look:    string,
 	script:  string,
 	record:  string,
-	every:   int,
 	on:      bool,
 	profile: bool,
 }
@@ -118,7 +117,6 @@ main :: proc() {
 		}
 		reel = loaded
 		reel.dir = shot.record
-		if shot.every > 0 do reel.every = shot.every
 		if reel.dir != "" do os.make_directory(reel.dir)
 		app.hud_off = true
 	}
@@ -277,8 +275,6 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			shot.script = value
 		case "record":
 			shot.record = value
-		case "every":
-			if n, ok := strconv.parse_int(value); ok do shot.every = max(n, 1)
 		case "profile":
 			if n, ok := strconv.parse_int(value); ok do shot.profile = n != 0
 		}

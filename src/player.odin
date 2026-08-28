@@ -1251,7 +1251,7 @@ test_a_thrown_grain_is_something_that_can_fall :: proc(t: ^testing.T) {
 	defer destroy_flat_world(world)
 
 	table := world.materials
-	for m, i in table.materials {
+	for _, i in table.materials {
 		debris := table.crumbles_to[i]
 		if table.kind[debris] == .Still do continue
 		testing.expectf(
@@ -1259,7 +1259,6 @@ test_a_thrown_grain_is_something_that_can_fall :: proc(t: ^testing.T) {
 			"%s crumbles into %s, which a cut would throw: a thrown grain must not be solid",
 			table.names[i], table.names[debris],
 		)
-		_ = m
 	}
 }
 

@@ -712,7 +712,7 @@ def cottage(land, x0, w):
     if rng.chance(0.55):
         porch(land, door_x, floor, top)
 
-    return floor, door_x
+    return door_x
 
 
 def porch(land, door_x, floor, wall_top):
@@ -726,7 +726,7 @@ def porch(land, door_x, floor, wall_top):
     land.fill(px1 + 1, py - 1, px1 + 2, py - 1, THATCH)
 
 
-def dooryard(land, x0, w, floor, door_x, lo, hi, garden_p=0.5, woodpile_p=0.5):
+def dooryard(land, x0, w, door_x, lo, hi, garden_p=0.5, woodpile_p=0.5):
     """What stands around a cottage: a low garden wall with a gate
     facing the track, a stack of cut wood against the gable, and the
     ground worn to a cart track at the door. `lo`/`hi` are the plot
@@ -1019,8 +1019,8 @@ def paint_homeland(seed, i=0):
     for (lo, hi), row in plots(rng, theme):
         for x, w, kind in sorted(row):
             if kind == "home":
-                floor, door_x = cottage(land, x, w)
-                dooryard(land, x, w, floor, door_x, lo, hi, garden_p=theme["garden_p"])
+                door_x = cottage(land, x, w)
+                dooryard(land, x, w, door_x, lo, hi, garden_p=theme["garden_p"])
                 if rng.chance(0.5):
                     fence(land, min(x + w + EAVES + 2, hi), min(x + w + EAVES + 22, hi))
                 # The well belongs to a farmyard, not to the green: on

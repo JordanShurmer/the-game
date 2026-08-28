@@ -337,7 +337,7 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 	// wherever a column reaches lower than the one beside it. Every
 	// other lit sample has nothing but full daylight around it and
 	// nowhere to spread to, so pushing it would only be work.
-	head, tail := 0, 0
+	tail := 0
 	for lx in i32(0) ..< LIGHT_W {
 		if depth[lx] < 0 do continue
 
@@ -352,7 +352,7 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 		}
 	}
 
-	light_spread(l, l.day, t, head, tail, 0, 0, LIGHT_W - 1, LIGHT_H - 1, LIGHT_DAY_FALL)
+	light_spread(l, l.day, t, tail, 0, 0, LIGHT_W - 1, LIGHT_H - 1, LIGHT_DAY_FALL)
 }
 
 // What the sky over one column throws, read at the top of the square.
@@ -383,7 +383,7 @@ light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, r
 	grid[start] = power
 
 	l.flood[0] = i32(start)
-	light_spread(l, grid, t, 0, 1, x0, y0, x1, y1, fall, start)
+	light_spread(l, grid, t, 1, x0, y0, x1, y1, fall, start)
 }
 
 // The spread every light in the world shares: a queue of samples that
@@ -401,12 +401,12 @@ light_spread :: proc(
 	l: ^Light,
 	grid: []u8,
 	t: Terrain,
-	head_in, tail_in: int,
+	tail_in: int,
 	x0, y0, x1, y1: i32,
 	fall: Light_Fall,
 	source := -1,
 ) {
-	head, tail := head_in, tail_in
+	head, tail := 0, tail_in
 
 	for head < tail {
 		at := int(l.flood[head])
