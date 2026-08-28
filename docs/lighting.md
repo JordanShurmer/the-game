@@ -394,8 +394,8 @@ sixteen comparisons. Drawing costs a table
 lookup and about fifteen integer operations per texel, which at the
 zoom the game opens at is 320 x 180 of them.
 
-The two grids and the queue are 768 KB together, allocated once per
-`Sim`.
+The three grids and the queue are about 1 MB together, allocated once
+per `Sim`.
 
 ## What this phase leaves out
 

@@ -80,10 +80,9 @@ reader knows the gap is a decision and not an oversight.
 1. **A new material and a new reaction need no code.**
    `docs/mcp.md` already makes that promise. Everything below holds it.
    Reactions are rows in `data/materials.txt`, not a switch in Odin.
-2. **`Material` is 32 bytes and the `#assert` says so.** It had two
+2. **`Material` is 24 bytes and the `#assert` says so.** It had two
    bytes of tail padding. One became `force`, the expulsive force, and
-   the other became `luminosity`, the light a material gives. The
-   struct is full now, and it does not grow.
+   the other became `luminosity`, the light a material gives.
 3. **Hot fields in the struct, cold fields in parallel tables.**
    `crumbles_to` is read only when a blast lands, so it is a cold
    table beside `decays_to` and `burns_to`.
@@ -619,7 +618,7 @@ picture.
 // What the wizard collides with: the running sandbox where it covers
 // him, and the generator everywhere else.
 Terrain :: struct {
-	world:   World,
+	world:   ^World,
 	sandbox: ^Sandbox, // may be nil
 }
 
@@ -961,8 +960,8 @@ Each step compiles, passes `odin test src`, and can be looked at.
 1. **The data.** The fifteen materials, `Material.force`, the
    `crumbles_to` table, the `[Reactions]` section and its loader. No
    change to the step. Tests: the table loads, a pair reads the same
-   both ways round, every named material resolves, `Material` is
-   still 32 bytes.
+   both ways round, every named material resolves, `Material` keeps
+   its asserted size.
 2. **The step.** Reactions, `sandbox_explode`, `sandbox_dig`,
    crumbling, detonation on ignite, the new command kinds. Tests: one
    per mechanic, plus the checksum still repeats.

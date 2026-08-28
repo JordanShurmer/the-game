@@ -31,7 +31,6 @@ void main()
     if (front > 0.5 && m_front(cell) < 0.5) discard;
 
     Surf s;
-    s.uv = uv;
     s.cell = cell;
     s.lux = g_lux(uv);
     s.glow = g_glow(uv);

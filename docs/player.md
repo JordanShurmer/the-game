@@ -13,8 +13,8 @@ This note says how, and says what the phase leaves out.
 1. **`Sim` holds the game and knows nothing of a screen.** The MCP
    server and the game window both drive one. So the player is a field
    of `Sim`, and the picture of him is not.
-2. **Fat structs, sized and asserted.** `Material` is 32 bytes with a
-   `#assert`, and so is `Input_Command`. `Player` follows.
+2. **Fat structs, sized and asserted.** `Material` is 24 bytes with a
+   `#assert`, and `Input_Command` is 32. `Player` follows.
 3. **A picture is the check.** `bin/shot` draws the world with no
    display. It learns to draw the wizard, so this phase can be judged
    from a terminal.
@@ -134,7 +134,7 @@ static picture it always was.
 ## A fixed step driven by held buttons
 
 ```odin
-Player_Button :: enum u8 { Left, Right, Jump, Run, Dig }
+Player_Button :: enum u8 { Left, Right, Jump, Run, Dig, Throw }
 Player_Input  :: bit_set[Player_Button; u8]
 
 player_step :: proc(p: ^Player, t: Terrain, held: Player_Input, jump_pressed: bool, aim: u8 = PLAYER_AIM_RIGHT)
@@ -170,10 +170,9 @@ has no other use for. `sim_apply` routes it into the same
 `player_step` the window calls, so a caller willing to pay the queue's
 delay gets a replayable, deterministic path to move him — `Sim` is a
 function of seed, region and commands alone again, for that caller.
-One thing is still missing: there is no MCP tool built on top of
-`Move` yet, so "one path for a hand and a model" does not fully cover
-him until `docs/physics.md` step 7 adds one. The `player_move` tool
-covers the direct path in the meantime, aim included.
+`enqueue_input kind=move` is the MCP tool built on top of `Move`, so
+a model pays the queue's delay the same way a hand would; the
+`player_move` tool covers the direct path, aim included.
 
 ## The numbers
 
@@ -385,7 +384,7 @@ With `origin_pixel = 8 8` and `cells_per_pixel = 512` the surface is
 world y -2560, and the sky above it is open air.
 
 ```odin
-world_find_spawn :: proc(world: World) -> (x, y: i32, found: bool)
+world_find_spawn :: proc(world: ^World) -> (x, y: i32, found: bool)
 ```
 
 Where he starts is data, not code. `[Map]` in `data/biomes.txt` names
@@ -441,8 +440,8 @@ per texel and joins it, and only one of the two is ever above 1:
 
 `zoom` is 1, 2 or 4 and never 3, because 1280 and 720 divide by 1, 2
 and 4 exactly. A non-integer scale in a pixel game leaves an uneven
-grid. Play starts at `zoom = 4`: 320 by 180 cells on screen, five tiles
-across, and a wizard 76 pixels tall.
+grid. Play starts at `zoom = 4`: 320 by 180 cells on screen, well under one
+tile across, and a wizard 76 pixels tall.
 
 The buffers are allocated once at full size. At zoom n the generator
 fills `WINDOW_W/n by WINDOW_H/n` texels, and because `generate` writes
