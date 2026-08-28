@@ -267,12 +267,6 @@ class Land:
     def column(self, x, y0, y1, name):
         self.fill(x, y0, x, y1, name)
 
-    def outline(self, x0, y0, x1, y1, name, t=1):
-        self.fill(x0, y0, x1, y0 + t - 1, name)
-        self.fill(x0, y1 - t + 1, x1, y1, name)
-        self.fill(x0, y0, x0 + t - 1, y1, name)
-        self.fill(x1 - t + 1, y0, x1, y1, name)
-
     # -- reading the ground
 
     def ground(self, x):

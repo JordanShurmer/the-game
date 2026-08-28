@@ -399,8 +399,8 @@ test_load_tile_set_reads_every_authored_tile :: proc(t: ^testing.T) {
 	)
 	defer destroy_tile_set(set)
 
-	testing.expect(t, set.count == biome_tile_count(biomes))
-	testing.expect(t, set.count > 0, "the shipped data must author at least one set")
+	testing.expect(t, len(set.cells) == biome_tile_count(biomes) * TILE_AREA)
+	testing.expect(t, len(set.cells) > 0, "the shipped data must author at least one set")
 
 	for c in set.cells {
 		testing.expectf(t, int(c) < len(materials.materials), "cell holds unknown material %d", c)
@@ -493,7 +493,7 @@ test_load_tile_set_fills_a_missing_set_with_the_biome_fill :: proc(t: ^testing.T
 	defer destroy_tile_set(set)
 
 	sand, _ := find_material_index(materials, "Sand")
-	testing.expect(t, set.count == WANG_SIGNATURES * 2, "the whole set exists, painted or not")
+	testing.expect(t, len(set.cells) == WANG_SIGNATURES * 2 * TILE_AREA, "the whole set exists, painted or not")
 	for c in set.cells {
 		testing.expect(t, c == Cell(sand), "a new set starts as the fill of its biome")
 	}

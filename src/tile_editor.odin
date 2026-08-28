@@ -207,11 +207,6 @@ tile_editor_neighbour :: proc(s: ^Sim, band: Wang_Band) -> (tile: Tile_Id, found
 	return 0, false
 }
 
-tile_editor_air :: proc(s: ^Sim) -> Cell {
-	idx, found := find_material_index(s.world.materials, "Air")
-	return found ? Cell(idx) : MATERIAL_AIR
-}
-
 tile_editor_open :: proc(app: ^App, biome: Biome_Id) {
 	message, ok := tile_editor_begin(&app.sim, biome)
 	if !ok {
@@ -350,7 +345,7 @@ tile_editor_handle_input :: proc(app: ^App) {
 		if rl.IsMouseButtonDown(.LEFT) {
 			painted = tile_editor_paint_cell(&app.sim, x, y, e.brush)
 		} else if rl.IsMouseButtonDown(.RIGHT) {
-			painted = tile_editor_paint_cell(&app.sim, x, y, tile_editor_air(&app.sim))
+			painted = tile_editor_paint_cell(&app.sim, x, y, MATERIAL_AIR)
 		}
 
 		if painted do app.dirty = true

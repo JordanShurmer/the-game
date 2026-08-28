@@ -167,9 +167,6 @@ class Canvas:
     def __init__(self):
         self.cells = [[BEDROCK] * IMG for _ in range(IMG)]
 
-    def set(self, x, y, name):
-        self.cells[y][x] = name
-
     def fill(self, x0, y0, x1, y1, name):
         """Fill world cells [x0,x1] x [y0,y1], inclusive, clipped to the canvas."""
         for y in range(max(0, y0), min(IMG - 1, y1) + 1):

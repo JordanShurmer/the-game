@@ -340,7 +340,7 @@ shot_draw_sparks :: proc(world: World, shot: Shot, pixels: []rl.Color, width, he
 @(private = "file")
 shot_draw_orb :: proc(shot: Shot, pixels: []rl.Color, width, height: i32, p: Player) {
 	// He puts it out in the daylight, so it must not be drawn there.
-	if shot.light != nil && !shot.light.orb_lit do return
+	if !shot.light.orb_lit do return
 
 	x, y := light_orb_at(p)
 	shot_draw_glow(

@@ -37,7 +37,6 @@ Reel_Segment :: struct {
 	held:      Player_Input,
 	aim:       u8,
 	tap_jump:  bool,
-	tap_throw: bool,
 	skip:      bool,
 }
 
@@ -123,8 +122,6 @@ reel_parse_segment :: proc(line: string) -> (seg: Reel_Segment, ok: bool) {
 			seg.tap_jump = true
 		case word == "dig":
 			seg.held += {.Dig}
-		case word == "throw":
-			seg.tap_throw = true
 		case strings.has_prefix(word, "aim="):
 			degrees, aim_ok := strconv.parse_int(word[4:])
 			if !aim_ok do return {}, false
@@ -176,10 +173,7 @@ reel_step :: proc(reel: ^Reel, app: ^App) -> (record: bool) {
 
 @(private = "file")
 reel_tick :: proc(app: ^App, seg: Reel_Segment, first := false) {
-	held := seg.held
-	if first && seg.tap_throw do held += {.Throw}
-
-	sim_step_player(&app.sim, held, first && seg.tap_jump, seg.aim)
+	sim_step_player(&app.sim, seg.held, first && seg.tap_jump, seg.aim)
 	sandbox_step(&app.sandbox, app.world.materials)
 }
 

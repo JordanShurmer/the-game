@@ -507,9 +507,7 @@ app_look_at :: proc(app: ^App, name: string) -> bool {
 
 @(private = "file")
 app_regenerate_look :: proc(app: ^App, w, h: i32) {
-	air, _ := find_material_index(app.world.materials, "Air")
-
-	look_fill(app.look, app.cells, app.lux, w, h, Cell(air))
+	look_fill(app.look, app.cells, app.lux, w, h, MATERIAL_AIR)
 
 	count := int(w) * int(h)
 	for i in 0 ..< count {

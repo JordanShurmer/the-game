@@ -31,7 +31,6 @@ Tile_Mark :: struct {
 
 Tile_Set :: struct {
 	cells: []Cell,
-	count: int,
 	marks: [dynamic]Tile_Mark,
 }
 
@@ -39,7 +38,6 @@ make_tile_set :: proc(count: int, allocator := context.allocator) -> Tile_Set {
 	assert(count <= MAX_TILES, "a world holds at most MAX_TILES tiles")
 	return Tile_Set{
 		cells = make([]Cell, count * TILE_AREA, allocator),
-		count = count,
 		marks = make([dynamic]Tile_Mark, allocator),
 	}
 }
@@ -80,7 +78,6 @@ test_tile_set_gives_each_tile_its_own_block :: proc(t: ^testing.T) {
 	defer destroy_tile_set(set)
 
 	testing.expect(t, len(set.cells) == 3 * TILE_AREA)
-	testing.expect(t, set.count == 3)
 
 	tile_fill(set, 0, 1)
 	tile_fill(set, 1, 2)

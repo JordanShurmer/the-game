@@ -164,12 +164,13 @@ The lamp's brightness and colour are not its own: they are `Fire`'s,
 the same material the pot's own burning fuse already borrows in
 `light_throw_pots` (`src/light.odin`). A lamp is a flame, so this is
 not a stretch, and it buys something concrete. `data/materials.txt`
-sat at exactly 32 rows before this phase, and `SANDBOX_WIDE_IDS` in
-`src/sandbox_step_asm.odin` caps the hand-written AVX2 weight lookup —
-the fast path the whole sandbox physics loop runs through — at 32
-material ids. A 33rd row for the lamp's own light would have pushed
-the table over that ceiling and silently turned the fast path off for
-the entire game, not just the drudge. `test_the_shipped_materials_still_fit_the_wide_lookup`
+sat at exactly 32 rows before this phase, and at the time
+`SANDBOX_WIDE_IDS` in `src/sandbox_step_asm.odin` capped the
+hand-written AVX2 weight lookup — the fast path the whole sandbox
+physics loop runs through — at 32 material ids, so a 33rd row for the
+lamp's own light would have silently turned the fast path off for the
+entire game, not just the drudge. The lookup has since been widened to
+64 ids. `test_the_shipped_materials_still_fit_the_wide_lookup`
 (`src/sandbox_step_asm.odin`) exists so the next feature that reaches
 for a new material row finds out immediately, in a test, rather than
 in a slower benchmark nobody was watching. Only how far the lamp's
