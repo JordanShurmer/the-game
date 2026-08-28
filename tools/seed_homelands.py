@@ -921,18 +921,18 @@ def path(land, x0, x1):
 # fallow, hedged with a tree instead of a hedge (orchard_p), walled
 # into a garden (garden_p), and how wide one field is let run.
 THEMES = [
-    dict(name="pasture",  cluster_p=0.12, sizes=[1],    barn_p=0.0,  fallow_p=0.65, orchard_p=0.08, garden_p=0.30, field_max=70),
-    dict(name="village",  cluster_p=0.85, sizes=[2, 3], barn_p=0.35, fallow_p=0.15, orchard_p=0.05, garden_p=0.55, field_max=48),
-    dict(name="wheat",    cluster_p=0.10, sizes=[1],    barn_p=0.0,  fallow_p=0.05, orchard_p=0.00, garden_p=0.10, field_max=120),
-    dict(name="barnyard", cluster_p=0.55, sizes=[2],    barn_p=0.80, fallow_p=0.30, orchard_p=0.05, garden_p=0.30, field_max=70),
-    dict(name="orchard",  cluster_p=0.25, sizes=[1, 2], barn_p=0.10, fallow_p=0.35, orchard_p=0.55, garden_p=0.20, field_max=50),
-    dict(name="garden",   cluster_p=0.35, sizes=[1, 2], barn_p=0.10, fallow_p=0.20, orchard_p=0.10, garden_p=0.75, field_max=60),
-    dict(name="mixed",    cluster_p=0.45, sizes=[1, 2], barn_p=0.30, fallow_p=0.28, orchard_p=0.15, garden_p=0.40, field_max=75),
-    dict(name="hedgerow", cluster_p=0.28, sizes=[1],    barn_p=0.05, fallow_p=0.20, orchard_p=0.10, garden_p=0.20, field_max=42),
-    dict(name="fallow",   cluster_p=0.18, sizes=[1],    barn_p=0.0,  fallow_p=0.80, orchard_p=0.05, garden_p=0.15, field_max=90),
-    dict(name="cluster",  cluster_p=0.90, sizes=[2],    barn_p=0.15, fallow_p=0.20, orchard_p=0.10, garden_p=0.60, field_max=55),
-    dict(name="harvest",  cluster_p=0.08, sizes=[1],    barn_p=0.0,  fallow_p=0.00, orchard_p=0.00, garden_p=0.10, field_max=140),
-    dict(name="mixed2",   cluster_p=0.40, sizes=[1, 2], barn_p=0.25, fallow_p=0.25, orchard_p=0.30, garden_p=0.35, field_max=65),
+    dict(cluster_p=0.12, sizes=[1],    barn_p=0.0,  fallow_p=0.65, orchard_p=0.08, garden_p=0.30, field_max=70),  # pasture
+    dict(cluster_p=0.85, sizes=[2, 3], barn_p=0.35, fallow_p=0.15, orchard_p=0.05, garden_p=0.55, field_max=48),  # village
+    dict(cluster_p=0.10, sizes=[1],    barn_p=0.0,  fallow_p=0.05, orchard_p=0.00, garden_p=0.10, field_max=120),  # wheat
+    dict(cluster_p=0.55, sizes=[2],    barn_p=0.80, fallow_p=0.30, orchard_p=0.05, garden_p=0.30, field_max=70),  # barnyard
+    dict(cluster_p=0.25, sizes=[1, 2], barn_p=0.10, fallow_p=0.35, orchard_p=0.55, garden_p=0.20, field_max=50),  # orchard
+    dict(cluster_p=0.35, sizes=[1, 2], barn_p=0.10, fallow_p=0.20, orchard_p=0.10, garden_p=0.75, field_max=60),  # garden
+    dict(cluster_p=0.45, sizes=[1, 2], barn_p=0.30, fallow_p=0.28, orchard_p=0.15, garden_p=0.40, field_max=75),  # mixed
+    dict(cluster_p=0.28, sizes=[1],    barn_p=0.05, fallow_p=0.20, orchard_p=0.10, garden_p=0.20, field_max=42),  # hedgerow
+    dict(cluster_p=0.18, sizes=[1],    barn_p=0.0,  fallow_p=0.80, orchard_p=0.05, garden_p=0.15, field_max=90),  # fallow
+    dict(cluster_p=0.90, sizes=[2],    barn_p=0.15, fallow_p=0.20, orchard_p=0.10, garden_p=0.60, field_max=55),  # cluster
+    dict(cluster_p=0.08, sizes=[1],    barn_p=0.0,  fallow_p=0.00, orchard_p=0.00, garden_p=0.10, field_max=140),  # harvest
+    dict(cluster_p=0.40, sizes=[1, 2], barn_p=0.25, fallow_p=0.25, orchard_p=0.30, garden_p=0.35, field_max=65),  # mixed2
 ]
 
 

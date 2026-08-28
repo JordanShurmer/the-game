@@ -147,7 +147,7 @@ mouth and is the only light on it until he walks up with the orb.
 where the shader came from, and how to take a picture of a window to
 judge it.
 
-**The chemistry.** 48 rows of `data/materials.txt` are the whole of
+**The chemistry.** 54 rows of `data/materials.txt` are the whole of
 it: salt goes into water and heat brings it back, nitre and brimstone
 and coal make black powder in two steps, quicksilver takes gold up and
 fire gives it back, and a spell turns plain rock into a stone that

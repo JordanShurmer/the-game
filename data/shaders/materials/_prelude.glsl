@@ -33,7 +33,6 @@ out vec4 finalColor;
 // What a shader is handed. Everything here is worked out once, before
 // `shade` is called, so a material file holds only its own look.
 struct Surf {
-    vec2 uv;     // where on the world texture
     vec2 cell;   // the world cell, which does not move when the camera does
     float lux;   // the light the world shades by, 0 to 1
     float glow;  // the lamp light that fell on the cell, before the response

@@ -45,7 +45,6 @@ before anything else in the file:
 | Field | What it says |
 | --- | --- |
 | `cell` | the world cell. It does not move when the camera does, so anything drawn from it stays put on the wall. |
-| `uv` | where on the world texture the fragment lies |
 | `lux` | the light the world shades by, 0 to 1 |
 | `glow` | the light that fell on the cell, before the response curve |
 | `depth` | how many cells of the same material stand directly over this one |

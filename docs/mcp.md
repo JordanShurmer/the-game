@@ -150,10 +150,10 @@ tile_open     biome=Coalmine             -> 32 tiles, 2 per signature
 tile_select   edges=0110                 -> open on the east and the south
 tile_paint    x=20 y=6 rows=[...]        -> every Coalmine region changes
 sandbox_open  biome=Coalmine width=48 height=34
-  -> sandbox 48x34 filled from world (-4096,-2560), the first Coalmine region
+  -> sandbox 48x34 filled from world (-512,-2560), the first Coalmine region
      cells: Air 1502 Rock 96 Oil 30 Gold 4
 enqueue_input kind=ignite x=22 y=6 radius=2
-  -> runs on tick 1 (now 0, delay 1)
+  -> runs on tick 2 (now 0, delay 2)
 tick          count=40
 observe
 ```

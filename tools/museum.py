@@ -235,8 +235,6 @@ class Room:
             self.box(hole_lo, ly1 - wall + 1, hole_hi, ly1, AIR)
         elif hole_side == "top":
             self.box(hole_lo, ly0, hole_hi, ly0 + wall - 1, AIR)
-        elif hole_side == "left":
-            self.box(lx0, hole_lo, lx0 + wall - 1, hole_hi, AIR)
         elif hole_side == "right":
             self.box(lx1 - wall + 1, hole_lo, lx1, hole_hi, AIR)
 
