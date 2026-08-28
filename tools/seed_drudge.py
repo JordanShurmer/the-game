@@ -116,7 +116,7 @@ SOOT_PALE = (118, 108, 96, 255)
 
 # The lamp. Its light is not its own colour in the game — `src/drudge.odin`
 # says it borrows Fire's brightness and colour rather than spend one of
-# the shipped material table's 32 rows on a lamp — but the ink here has
+# the shipped material table's rows on a lamp — but the ink here has
 # to be drawn in some colour, and it is drawn in exactly the colours the
 # game paints that borrowed light: Fire's own RGB (`data/materials.txt`,
 # `[Fire] color = 0xFFFF6A00`) for the glow, and `LIGHT_CORE`

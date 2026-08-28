@@ -308,7 +308,7 @@ def base_params():
     }
 
 
-def frames_of(row, rng):
+def frames_of(row):
     """The numbers for every frame of one animation."""
     out = []
     count = ROW_FRAMES[row]
@@ -404,11 +404,11 @@ def frames_of(row, rng):
     return out
 
 
-def draw_sheet(rng):
+def draw_sheet():
     sheet = [[CLEAR] * (FRAME_W * COLUMNS) for _ in range(FRAME_H * ROWS)]
 
     for row_index, row in enumerate(ROW_NAMES):
-        for column, p in enumerate(frames_of(row, rng)):
+        for column, p in enumerate(frames_of(row)):
             f = blank_frame()
             draw_wizard(f, p)
             for y in range(FRAME_H):
@@ -549,8 +549,12 @@ def main():
         print(f"{args.out}: {sum(ROW_FRAMES.values())} frames, and every rule holds")
         return
 
-    rng = random.Random(args.seed)
-    write_png(args.out, draw_sheet(rng))
+    # The seed exists so a second hand can be asked for, later, without
+    # this tool changing shape. Nothing below reads randomness yet --
+    # every number is authored -- so today every seed draws the same
+    # wizard.
+    random.Random(args.seed)
+    write_png(args.out, draw_sheet())
     print(f"{args.out}: {FRAME_W * COLUMNS}x{FRAME_H * ROWS}, {sum(ROW_FRAMES.values())} frames")
 
 

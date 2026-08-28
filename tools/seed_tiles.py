@@ -80,10 +80,10 @@ a line to STYLES below if the default palette is wrong for it, then run
 this. The set starts as flat fill until something draws it, so a biome
 with no entry here still works; it just looks like nothing.
 
-THREE TILES ARE A BUILT ROOM, NOT NOISE
+FOUR TILES ARE A BUILT ROOM, NOT NOISE
 
-`ROOMS` below names three of the Coalmine set's 32 tiles, one for each
-count of open sides that a room can make sense of, and only their
+`ROOMS` below names four of the Coalmine set's 32 tiles -- the
+Cistern, the Magazine, the Well, and the Grotto -- and only their
 second variant, so the first is still plain cave and a player meets
 the room sometimes and not always. Each is a **shell set into the
 cave**, not a hole cut in a solid block: `seed_set` runs
@@ -1345,12 +1345,11 @@ def place_bracket_ledge(grid, overlay, colors, material, inside, wall_x, out, y,
     else:
         x0, x1 = wall_x - out, wall_x
     fit_rect(grid, overlay, colors, material, inside, x0, x1, y, y + thickness)
-    for bx in (x0 + out * 0.15, x0 + out * 0.75) if from_west else (x1 - out * 0.15, x1 - out * 0.75):
-        if from_west:
-            bx0, bx1 = wall_x - into, wall_x
-        else:
-            bx0, bx1 = wall_x, wall_x + into
-        fit_rect(grid, overlay, colors, material, inside, int(bx0), int(bx1), y - 6, y)
+    if from_west:
+        bx0, bx1 = wall_x - into, wall_x
+    else:
+        bx0, bx1 = wall_x, wall_x + into
+    fit_rect(grid, overlay, colors, material, inside, int(bx0), int(bx1), y - 6, y)
     strut_w = max(4, thickness // 2)
     far_x = wall_x + out * 0.78 if from_west else wall_x - out * 0.78
     place_brace(grid, overlay, colors, material, inside, wall_x, y + thickness + 22, far_x, y + thickness + 2, width=strut_w)
@@ -1711,9 +1710,9 @@ def room_well(grid, rng, colors):
 # rooms so far, and only their second variant carries one.
 # The water level of the Grotto, in tile cells from the top of its
 # tile. The Odin side reads the water back out of the tile to home the
-# fireflies over it, so this number lives only here; what the game
-# knows is GROTTO_SIGNATURE and GROTTO_VARIANT in src/pond.odin, which
-# name the tile, and a test holds the tile to actually holding water.
+# fireflies over it, so this number lives only here; the game finds
+# the tile by its firefly marks (grotto_of in src/pond.odin), and a
+# test holds the tile to actually holding water.
 GROTTO_LEVEL = 300
 
 
