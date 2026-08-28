@@ -215,9 +215,6 @@ GRAIN_X = 76          # cells across one lobe of the noise
 GRAIN_Y = 52          # and down, so the masses lie down
 GRAIN_DETAIL = 0.20   # a second octave at half the spacing, this strong
 INTERIOR_OPEN = 0.45  # of the middle of a tile
-BAND_OPEN = 0.50      # of a band a passage crosses, the channel aside
-BAND_CLOSED_OPEN = 0.50  # of a band with no promised way through, the same
-                         # as the rest, or the border shows as a change of density
 SMOOTH_PASSES = 2     # of a plain 3x3 majority, to make the edges organic
 BLEND = 80            # cells a band fades into the middle of its tile
 ORE_SEEDS = 85        # veins started per 100k cells of tile, before ore_rate
@@ -925,7 +922,6 @@ WALL_T = 6   # the shell's own wall, in the room's material
 PACK_T = 4   # the course of Rock packed between that wall and the cave
 SHELL_T = WALL_T + PACK_T
 
-ROOM_MOUTH_LO, ROOM_MOUTH_HI = MOUTH_LO - 10, MOUTH_HI + 10
 
 
 def room_carve(grid, x0, x1, y0, y1, value):
@@ -1173,7 +1169,7 @@ def cut_doorway(grid, overlay, colors, material, side, near, far, wall_at, span=
             solid_rect(grid, overlay, colors, material, c0, c1, a0, a1)
 
 
-def carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry):
+def carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1):
     """Walk a tunnel from the mouth this side forces open to the
     doorway that faces it, the way any two rooms of cave are joined --
     `carve_walk` gives it throats and galleries, not one straight bore.
@@ -1487,7 +1483,7 @@ def room_cistern(grid, rng, colors):
             "W": (x0 - SHELL_T - 6, x0 + 30, x0), "E": (x1 + SHELL_T + 6, x1 - 30, x1),
         }[side]
         cut_doorway(grid, overlay, colors, "Steel", side, near, far, wall_at)
-        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1)
 
     place_ribs(grid, overlay, colors, "Steel", x0, x1, y0, y1, top_ry, bot_ry, rng,
                skip=((MOUTH_LO - 4, MOUTH_HI + 4),))
@@ -1560,7 +1556,7 @@ def room_magazine(grid, rng, colors):
     for side in "EW":
         near, far, wall_at = {"W": (x0 - SHELL_T - 6, x0 + 30, x0), "E": (x1 + SHELL_T + 6, x1 - 30, x1)}[side]
         cut_doorway(grid, overlay, colors, "Rock", side, near, far, wall_at)
-        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1)
 
     door_span = (MOUTH_LO - 4, MOUTH_HI + 4)
     place_ribs(grid, overlay, colors, "Rock", x0, x1, y0, y1, top_ry, bot_ry, rng, skip=(door_span,))
@@ -1659,7 +1655,7 @@ def room_well(grid, rng, colors):
     for side in "NS":
         near, far, wall_at = {"N": (y0 - SHELL_T - 6, y0 + 30, y0), "S": (y1 + SHELL_T + 6, y1 - 30, y1)}[side]
         cut_doorway(grid, overlay, colors, "Rock", side, near, far, wall_at)
-        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+        carve_mouth_tunnel(grid, rng, side, x0, x1, y0, y1)
 
     place_ribs(grid, overlay, colors, "Rock", x0, x1, y0, y1, top_ry, bot_ry, rng)
 
@@ -1743,7 +1739,7 @@ def room_grotto(grid, rng, colors):
     inside, shell_mask = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     cut_doorway(grid, overlay, colors, "Rock", "E", x1 + SHELL_T + 6, x1 - 30, x1)
-    carve_mouth_tunnel(grid, rng, "E", x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    carve_mouth_tunnel(grid, rng, "E", x0, x1, y0, y1)
 
     # The water, to a flat level below the doorway's sill.
     for y in range(GROTTO_LEVEL, y1 + bot_ry + 4):

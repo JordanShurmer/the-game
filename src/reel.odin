@@ -113,8 +113,6 @@ reel_parse_segment :: proc(line: string) -> (seg: Reel_Segment, ok: bool) {
 			seg.held += {.Run}
 		case word == "left":
 			going_left = true
-		case word == "right":
-			going_left = false
 		case word == "jump":
 			seg.tap_jump = true
 		case word == "fly":

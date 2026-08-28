@@ -71,7 +71,7 @@ library only if LFS objects can be fetched:
 - Where they cannot, and `git-lfs` is installed, the smudge filter
   fails the checkout, and the clone leaves a half tree behind.
 
-**Packages.** Three, and only for the link:
+**Packages.** Four:
 
 | Package | Why |
 | --- | --- |
