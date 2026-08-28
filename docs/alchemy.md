@@ -37,9 +37,8 @@ reaction front stays where the eye can find it.
 
 `Sparkle` is `state = Special`, the state `Fire` and `Blast` are: it
 lives in a cell, it rises, and it decays. Its `lifetime` is 10 ticks,
-a sixth of a second, and it decays to `Air`. It has no `contact` and
-no `immersion`, so it burns nothing, wets nothing, and poisons
-nothing. It is light and nothing else.
+a sixth of a second, and it decays to `Air`. It has no `contact`
+effect, so it burns nothing. It is light and nothing else.
 
 ## The mix
 
@@ -159,7 +158,7 @@ Every light in the world is a material and the light of this one is
 rung, and `test_the_lights_of_the_world_are_ordered` holds it:
 
 ```
-Blast 255 >= Orb_Light 255 > Sparkle 190 > Light_Crystal 168 > Firefly_Light 96
+Blast 255 >= Orb_Light 255 > Sparkle 190 > Light_Crystal 110 > Firefly_Light 96
 ```
 
 A sparkle burns brighter than the trail the wizard leaves and it never
@@ -461,10 +460,9 @@ not spent doing it, it blinds a gleam back to dead black glass, and it
 and the cure undo each other into `Smylt`, so the two magics cancel the
 way an acid and a base do.
 
-The cure carries `contact = Heals` and `immersion = Heals`, and the
-world has nothing to heal yet. Those were effects the material format
-already knew and nothing had ever used; they say what the liquid is
-for, and the day the wizard can be hurt they are already written down.
+The world has nothing to heal yet. The day the wizard can be hurt,
+healing becomes rows in the reaction table, the way every other
+effect of the world already is.
 
 ## The alchemy gallery
 

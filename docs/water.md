@@ -175,8 +175,9 @@ small floods.
 - **A shot draws water flat.** `bin/shot` has no GPU and no window, and
   the look lives in the shader, so a PNG from it shows the pond as the
   flat blue of the material. Use the window shot above for the water.
-- **One pond.** `World` holds room for `POND_MAX` (4) of them and the
-  overlay walks them all, but the game digs one, beside the spawn.
+- **Ponds go where the lattice puts them.** The Grotto is one tile of
+  the Coalmine's wang set, so the seed decides how many ponds a world
+  holds and where; nothing places one by hand.
 - **GLSL 330 only.** There is no `#version 100` twin of the shader, so
   a GL ES build would fall back to flat water.
 - **The water does not move the light.** Light passes through water as

@@ -287,7 +287,7 @@ oldest crystal stops being drawn — but its light was flooded into
 `stat` and stays there, so the place it lit stays lit. The light soaks
 into a place; the crystal is only the thing you can see it coming from.
 
-**The trail never outshines the orb.** `Light_Crystal` burns at 168
+**The trail never outshines the orb.** `Light_Crystal` burns at 110
 against `Orb_Light`'s 255, held by
 `test_the_lights_of_the_world_are_ordered` and by
 `test_the_trail_he_leaves_never_outshines_the_orb_he_carries`. Break
@@ -299,9 +299,10 @@ the picture stops saying which is which.
 A firefly is a light with no body: a home over the water, two sine
 waves that carry it away from that home and back, a pulse that makes it
 blink, and nothing else. `src/firefly.odin` holds the whole of it in 36
-bytes, and `firefly_gather` puts `FIREFLY_PER_POND` (7) of them over
-every pond the world digs, spread across its mouth and hanging
-`FIREFLY_HOVER` cells above the water.
+bytes. The flies themselves are cells of `Firefly_Light` painted into
+the Grotto tile, lifted out by the tile loader as marks, and
+`firefly_gather` collects the marks nearest the player into the swarm,
+each fly hanging where the tile painted it.
 
 They drift on the swarm's own clock, which advances one tick at a time,
 so the same ticks always put them in the same places and a replay of
@@ -316,7 +317,7 @@ difference between a firefly and a crystal, and
 `test_a_firefly_leaves_no_light_behind_it` is the line between them.
 
 The order of the lights is a rule as well: **96 against the crystals'
-168 against the orb's 255**. A pond that outshone the trail would tell
+110 against the orb's 255**. A pond that outshone the trail would tell
 the player the wrong thing about where he has been.
 
 `docs/water.md` says what the pond is that they gather over.
