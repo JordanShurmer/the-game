@@ -16,8 +16,6 @@ SPRITE_BODY_Y :: 11
 SPRITE_BODY_W :: 8
 SPRITE_BODY_H :: 13
 
-SPRITE_FOOT_Y :: SPRITE_BODY_Y + SPRITE_BODY_H - 1
-
 #assert(SPRITE_BODY_W == PLAYER_BODY_W, "the sprite's body box and the player's collision box must be the same width")
 #assert(SPRITE_BODY_H == PLAYER_BODY_H, "the sprite's body box and the player's collision box must be the same height")
 
@@ -36,9 +34,7 @@ Sprite_Load_Error :: enum u8 {
 }
 
 Sprite_Load_Result :: struct {
-	width:  i32,
-	height: i32,
-	err:    Sprite_Load_Error,
+	err: Sprite_Load_Error,
 }
 
 // The wizard's own sheet size is the default, so every existing caller reads
@@ -70,7 +66,7 @@ load_sprite_sheet :: proc(
 	want_w := frame_w * columns
 	want_h := frame_h * rows
 	if img.width != want_w || img.height != want_h {
-		return {}, {err = .Wrong_Size, width = img.width, height = img.height}
+		return {}, {err = .Wrong_Size}
 	}
 
 	loaded := rl.LoadImageColors(img)

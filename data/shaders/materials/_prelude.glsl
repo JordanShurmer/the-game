@@ -35,7 +35,6 @@ out vec4 finalColor;
 struct Surf {
     vec2 uv;     // where on the world texture
     vec2 cell;   // the world cell, which does not move when the camera does
-    vec3 base;   // the colour the world drew, lit
     float lux;   // the light the world shades by, 0 to 1
     float glow;  // the lamp light that fell on the cell, before the response
     float sky;   // how much of the light on it is the day, 0 to 1

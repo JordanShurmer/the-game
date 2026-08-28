@@ -133,10 +133,6 @@ input_queue_depth :: proc(q: ^Input_Queue) -> (pending: int) {
 	return pending
 }
 
-input_queue_depth_at :: proc(q: ^Input_Queue, tick: u64) -> int {
-	return int(q.counts[int(tick & INPUT_SLOT_MASK)])
-}
-
 input_queue_peek :: proc(q: ^Input_Queue, tick: u64) -> []Input_Command {
 	slot := int(tick & INPUT_SLOT_MASK)
 	return q.slots[slot][:q.counts[slot]]
@@ -156,7 +152,6 @@ test_input_delay_sets_the_execution_tick :: proc(t: ^testing.T) {
 	testing.expect(t, status == .Accepted)
 	testing.expect(t, out.tick == 103, "delay 3 must place the command three ticks ahead")
 	testing.expect(t, input_queue_depth(&q) == 1)
-	testing.expect(t, input_queue_depth_at(&q, 103) == 1)
 }
 
 @(test)

@@ -63,7 +63,6 @@ Material_Shader :: struct {
 	shader: rl.Shader,
 	at:     [Material_Uniform]i32,
 	cell:   Cell,
-	name:   string,
 	brush:  bool, // drawn again over the wizard: see material_shaders_draw_front
 }
 
@@ -141,7 +140,6 @@ material_shaders_load :: proc(
 		one := Material_Shader {
 			shader = shader,
 			cell   = Cell(i),
-			name   = name,
 			brush  = material_is_brush(materials.materials[i]),
 		}
 		for uniform_name, u in material_uniform_name {
@@ -190,11 +188,6 @@ material_shaders_unload :: proc(ms: ^Material_Shaders) {
 // cells of the same material stand over it. `seen` comes back saying
 // which materials the view holds at all, so the draw skips the rest.
 //
-// The light goes in twice. The green channel holds the light the world
-// shades by, which is the response curve applied, so a shader that mixes
-// its own colour sinks into the dark exactly as the flat picture does.
-// The alpha channel holds the raw light, which is what says how close a
-// cell stands to a lamp.
 // Four bytes a texel: the material, the light on it, how deep it sits
 // in a body of its own material, and the part of that light a *lamp*
 // threw. The response curve moved into the shader prelude to free the
@@ -379,8 +372,6 @@ material_shaders_draw_front :: proc(
 
 @(test)
 test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^testing.T) {
-	light_response_init()
-
 	W :: 4
 	H :: 3
 	cells := [W * H]Cell{1, 2, 2, 3, 1, 1, 2, 3, 4, 1, 2, 3}

@@ -145,12 +145,6 @@ sim_open_sandbox :: proc(s: ^Sim, width, height, origin_x, origin_y: i32, seed: 
 	return .None
 }
 
-sim_refill_sandbox :: proc(s: ^Sim) {
-	sandbox_fill_from_world(&s.sandbox, s.world, s.sandbox.origin_x, s.sandbox.origin_y)
-	s.sandbox.tick = 0
-	input_queue_init(&s.queue, s.queue.delay)
-}
-
 sim_enqueue :: proc(s: ^Sim, command: Input_Command, at_tick: i64 = -1) -> (Input_Command, Enqueue_Status) {
 	return input_queue_push(&s.queue, s.sandbox.tick, command, at_tick)
 }
@@ -582,7 +576,7 @@ test_a_tile_edit_reaches_the_sandbox :: proc(t: ^testing.T) {
 	for k in 0 ..< wang_set_size(b) {
 		tile_fill(s.world.tiles, b.tile_base + Tile_Id(k), Cell(gold))
 	}
-	sim_refill_sandbox(&s)
+	sandbox_fill_from_world(&s.sandbox, s.world, ox, oy)
 
 	counts := make([]int, len(s.world.materials.materials))
 	defer delete(counts)
