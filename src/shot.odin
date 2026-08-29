@@ -1,7 +1,6 @@
 package game
 
 import "core:math"
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -411,7 +410,7 @@ test_a_shot_holds_the_world_the_generator_makes :: proc(t: ^testing.T) {
 	}
 
 	path := "shot_round_trip.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, world_shot(s.world, shot, path), "the shot must be written")
 
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
@@ -456,7 +455,7 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	path := "shot_refused.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 
 	testing.expect(t, !world_shot(s.world, Shot{view = {w = 8, h = 8, step = 1}, scale = 0}, path))
 	testing.expect(t, !world_shot(s.world, Shot{view = {w = 0, h = 8, step = 1}, scale = 1}, path))
@@ -465,7 +464,7 @@ test_a_shot_refuses_a_size_it_cannot_draw :: proc(t: ^testing.T) {
 		!world_shot(s.world, Shot{view = {w = 20000, h = 20000, step = 1}, scale = 4}, path),
 		"a shot larger than SHOT_MAX_PIXELS is a typo, not a request",
 	)
-	testing.expect(t, !os.exists(path), "a refused shot must write nothing")
+	testing.expect(t, !file_exists(path), "a refused shot must write nothing")
 }
 
 @(private = "file")
@@ -493,17 +492,17 @@ test_a_shot_with_the_player_differs_from_the_same_shot_without_him :: proc(t: ^t
 
 	without_path := "shot_diff_without_player.tmp.png"
 	with_path := "shot_diff_with_player.tmp.png"
-	defer os.remove(without_path)
-	defer os.remove(with_path)
+	defer file_remove(without_path)
+	defer file_remove(with_path)
 
 	testing.expect(t, world_shot(s.world, Shot{view = view, scale = 1}, without_path))
 	testing.expect(t, world_shot(s.world, Shot{view = view, scale = 1, player = player, sprite = sheet}, with_path))
 
-	without_bytes, err1 := os.read_entire_file_from_path(without_path, context.allocator)
+	without_bytes, without_ok := file_read(without_path, context.allocator)
 	defer delete(without_bytes)
-	with_bytes, err2 := os.read_entire_file_from_path(with_path, context.allocator)
+	with_bytes, with_ok := file_read(with_path, context.allocator)
 	defer delete(with_bytes)
-	if !testing.expect(t, err1 == nil && err2 == nil, "both shots must be written") do return
+	if !testing.expect(t, without_ok && with_ok, "both shots must be written") do return
 
 	differs := len(without_bytes) != len(with_bytes)
 	if !differs {
@@ -549,7 +548,7 @@ test_the_wizards_pixels_land_where_the_body_box_says_they_should :: proc(t: ^tes
 	wx, wy := ox + ink_x, oy + ink_y
 
 	path := "shot_body_box.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	shot := Shot{view = World_View{x = wx, y = wy, w = 1, h = 1, step = 1}, scale = 1, player = player, sprite = sheet}
 	if !testing.expect(t, world_shot(s.world, shot, path), "the shot must be written") do return
 
@@ -591,7 +590,7 @@ test_a_shot_with_the_player_still_writes_a_valid_png_of_the_expected_size :: pro
 	}
 
 	path := "shot_valid_with_player.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, world_shot(s.world, shot, path), "a shot with a player must still be written")
 
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
@@ -624,8 +623,8 @@ test_a_shot_with_ticks_differs_from_the_same_shot_without_them :: proc(t: ^testi
 
 	before_path := "shot_ticks_before.tmp.png"
 	after_path := "shot_ticks_after.tmp.png"
-	defer os.remove(before_path)
-	defer os.remove(after_path)
+	defer file_remove(before_path)
+	defer file_remove(after_path)
 
 	shot := Shot{view = view, scale = 1, sandbox = &s.sandbox}
 	testing.expect(t, world_shot(s.world, shot, before_path), "the before shot must be written")
@@ -633,11 +632,11 @@ test_a_shot_with_ticks_differs_from_the_same_shot_without_them :: proc(t: ^testi
 	sim_run(&s, 200)
 	testing.expect(t, world_shot(s.world, shot, after_path), "the after shot must be written")
 
-	before_bytes, err1 := os.read_entire_file_from_path(before_path, context.allocator)
+	before_bytes, before_ok := file_read(before_path, context.allocator)
 	defer delete(before_bytes)
-	after_bytes, err2 := os.read_entire_file_from_path(after_path, context.allocator)
+	after_bytes, after_ok := file_read(after_path, context.allocator)
 	defer delete(after_bytes)
-	if !testing.expect(t, err1 == nil && err2 == nil, "both shots must be written") do return
+	if !testing.expect(t, before_ok && after_ok, "both shots must be written") do return
 
 	differs := len(before_bytes) != len(after_bytes)
 	if !differs {
@@ -705,8 +704,8 @@ test_the_orb_lights_what_is_near_him_and_the_gloom_keeps_the_rest :: proc(t: ^te
 
 	dim_path := "shot_gloom_off.tmp.png"
 	lit_path := "shot_gloom_on.tmp.png"
-	defer os.remove(dim_path)
-	defer os.remove(lit_path)
+	defer file_remove(dim_path)
+	defer file_remove(lit_path)
 
 	if !testing.expect(t, world_shot(s.world, shot, dim_path), "the unlit shot must be written") do return
 	shot.light = &s.light

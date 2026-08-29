@@ -1,6 +1,5 @@
 package game
 
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -22,7 +21,7 @@ Tile_Load_Result :: struct {
 load_tile_png :: proc(path: string, materials: Material_Table, dst: []Cell, size: i32 = TILE_SIZE, marks: ^[dynamic]Tile_Mark = nil) -> Tile_Load_Result {
 	assert(len(dst) == int(size) * int(size), "a tile buffer must hold size*size cells")
 
-	if !os.exists(path) {
+	if !file_exists(path) {
 		return {err = .File_Unreadable}
 	}
 
@@ -111,7 +110,7 @@ load_tile_set :: proc(
 			path := biome_tile_path(biomes, Biome_Id(i), tile)
 			cells := tile_cells(set, tile)
 
-			if os.exists(path) {
+			if file_exists(path) {
 				lifted := make([dynamic]Tile_Mark, context.temp_allocator)
 				r := load_tile_png(path, materials, cells, TILE_SIZE, &lifted)
 				if r.err != .None {
@@ -263,7 +262,7 @@ test_tile_png_round_trip :: proc(t: ^testing.T) {
 	tile_set_cell(set, 0, TILE_SIZE - 1, TILE_SIZE - 1, Cell(air))
 
 	path := "tile_round_trip.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, save_tile_png(tile_cells(set, 0), materials, path), "save must succeed")
 
 	loaded := make_tile_set(1)
@@ -295,7 +294,7 @@ test_tile_png_unmatched_color_is_an_error :: proc(t: ^testing.T) {
 		format  = .UNCOMPRESSED_R8G8B8A8,
 	}
 	path := "tile_bad_color.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
 
 	dst := make([]Cell, TILE_AREA)
@@ -322,7 +321,7 @@ test_tile_png_wrong_size_is_an_error :: proc(t: ^testing.T) {
 		format  = .UNCOMPRESSED_R8G8B8A8,
 	}
 	path := "tile_wrong_size.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
 
 	dst := make([]Cell, TILE_AREA)
@@ -364,7 +363,7 @@ test_load_image_set_refuses_the_wrong_size :: proc(t: ^testing.T) {
 	}
 	prefix := "image_wrong_size.tmp"
 	path := image_path(prefix, 0)
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
 
 	table := Biome_Table {
@@ -481,8 +480,8 @@ test_load_tile_set_fills_a_missing_set_with_the_biome_fill :: proc(t: ^testing.T
 	body := "[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
 		"[B]\ncolor = 0xFF000002\nfill_0 = Sand\ngenerator = wang\ntiles = tile_absent.tmp\nvariants = 2\n"
 	path := "tile_set_missing.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil)
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body))
+	defer file_remove(path)
 
 	biomes, err, _ := load_biomes(path, materials)
 	testing.expectf(t, err == .None, "the table must load, got %v", err)
@@ -498,7 +497,7 @@ test_load_tile_set_fills_a_missing_set_with_the_biome_fill :: proc(t: ^testing.T
 		testing.expect(t, c == Cell(sand), "a new set starts as the fill of its biome")
 	}
 	testing.expect(t, !wang_find_conflict(set, biomes.biomes[1]).found, "a flat set has no seam trouble")
-	testing.expect(t, !os.exists("tile_absent_0000_0.png"), "create_missing off must write nothing")
+	testing.expect(t, !file_exists("tile_absent_0000_0.png"), "create_missing off must write nothing")
 }
 
 @(test)
@@ -510,8 +509,8 @@ test_tile_set_round_trip :: proc(t: ^testing.T) {
 	body := "[Map]\nbiome_off_map = A\n[A]\ncolor = 0xFF000001\nfill_0 = Rock\n" +
 		"[B]\ncolor = 0xFF000002\nfill_0 = Sand\ngenerator = wang\ntiles = tile_trip.tmp\n"
 	path := "tile_set_trip.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil)
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body))
+	defer file_remove(path)
 
 	biomes, err, _ := load_biomes(path, materials)
 	testing.expectf(t, err == .None, "the table must load, got %v", err)
@@ -533,12 +532,12 @@ test_tile_set_round_trip :: proc(t: ^testing.T) {
 	testing.expect(t, written == WANG_SIGNATURES, "one file per tile")
 	defer {
 		for k in 0 ..< wang_set_size(b) {
-			os.remove(biome_tile_path(biomes, 1, b.tile_base + Tile_Id(k)))
+			file_remove(biome_tile_path(biomes, 1, b.tile_base + Tile_Id(k)))
 		}
 	}
 
-	testing.expect(t, os.exists("tile_trip.tmp_0000_0.png"), "the name carries the edge colors")
-	testing.expect(t, os.exists("tile_trip.tmp_1111_0.png"))
+	testing.expect(t, file_exists("tile_trip.tmp_0000_0.png"), "the name carries the edge colors")
+	testing.expect(t, file_exists("tile_trip.tmp_1111_0.png"))
 
 	reloaded, result, _ := load_tile_set(biomes, materials, false)
 	testing.expectf(t, result.err == .None, "the set must reload, got %v", result.err)

@@ -2,7 +2,6 @@ package game
 
 import "core:fmt"
 import "core:math"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
@@ -84,156 +83,175 @@ BACKGROUND :: rl.Color{18, 20, 26, 255}
 BEAM_GLOW :: rl.Color{110, 210, 255, 255}
 BEAM_CORE :: rl.Color{236, 250, 255, 255}
 
-main :: proc() {
-	shot, args_ok := read_window_shot(os.args[1:])
+// What one run of the game carries from frame to frame: the picture it
+// was asked for, the script it plays, and the frames it has drawn. The
+// desktop fills it from the command line. The browser leaves it empty
+// and plays.
+Run :: struct {
+	shot:   Window_Shot,
+	reel:   Reel,
+	frames: int,
+}
+
+// Everything before the first frame: the data, the window, the view,
+// and whatever the arguments asked for. It answers false where the old
+// `main` used to exit, because a browser has nothing to exit to.
+app_start :: proc(app: ^App, run: ^Run, args: []string) -> bool {
+	args_ok: bool
+	run.shot, args_ok = read_window_shot(args)
 	if !args_ok {
-		fmt.eprintln(GAME_USAGE)
-		os.exit(1)
+		fault(GAME_USAGE)
+		return false
 	}
 
-	app: App
-	if !app_load_data(&app, shot.seed) {
-		os.exit(1)
-	}
-	defer app_unload_data(&app)
+	if !app_load_data(app, run.shot.seed) do return false
 
 	rl.InitWindow(WINDOW_W, WINDOW_H, "The Game - biome generation")
-	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
 
-	app_init_view(&app)
-	defer app_destroy_view(&app)
+	app_init_view(app)
 
-	if shot.look != "" && !app_look_at(&app, shot.look) {
-		fmt.eprintfln("no material is named %s, so there is nothing to look at", shot.look)
-		os.exit(1)
+	if run.shot.look != "" && !app_look_at(app, run.shot.look) {
+		fault("no material is named %s, so there is nothing to look at", run.shot.look)
+		return false
 	}
 
-	if shot.on && !app.look.on do app_walk(&app, shot.walk)
-	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
-	if shot.on && !shot.throw do app_settle(&app, shot.ticks)
+	if run.shot.on && !app.look.on do app_walk(app, run.shot.walk)
+	if run.shot.on && run.shot.throw do app_throw(app, run.shot.aim, run.shot.ticks)
+	if run.shot.on && !run.shot.throw do app_settle(app, run.shot.ticks)
 
-	reel: Reel
-	if shot.script != "" {
-		loaded, reel_ok := reel_load(shot.script)
+	if run.shot.script != "" {
+		loaded, reel_ok := reel_load(run.shot.script)
 		if !reel_ok {
-			fmt.eprintfln("the script %s could not be read", shot.script)
-			os.exit(1)
+			fault("the script %s could not be read", run.shot.script)
+			return false
 		}
-		reel = loaded
-		reel.dir = shot.record
-		if reel.dir != "" do os.make_directory(reel.dir)
+		run.reel = loaded
+		run.reel.dir = run.shot.record
+		if run.reel.dir != "" do file_make_directory(run.reel.dir)
 		app.hud_off = true
 	}
 
-	frames := 0
-	for !rl.WindowShouldClose() {
-		// A reel must come out the same twice, so its clock is the
-		// frame count and not the wall.
-		app.clock = app.look.on || reel.on ? f32(frames) / 60 : f32(rl.GetTime())
-		if !shot.on && !reel.on do app_handle_input(&app)
+	return true
+}
 
-		filming := false
-		if reel.on && !reel_done(reel) {
-			filming = reel_step(&reel, &app)
-			app_follow_player(&app)
-		}
+app_stop :: proc(app: ^App) {
+	app_destroy_view(app)
+	rl.CloseWindow()
+	app_unload_data(app)
+}
 
-		playing := !app.editor.open && !app.tile_edit.open
-		if app.dirty || (playing && app.follow_player) {
-			app_regenerate(&app)
-			app.dirty = false
-		}
+// One frame: the world steps, the picture is drawn, and the answer says
+// whether the run is over. The desktop calls it in a loop. The browser
+// hands it to the page, one call a frame, because a page may not sit in
+// a loop of its own.
+app_frame :: proc(app: ^App, run: ^Run) -> (done: bool) {
+	// A reel must come out the same twice, so its clock is the frame
+	// count and not the wall.
+	app.clock = app.look.on || run.reel.on ? f32(run.frames) / 60 : f32(rl.GetTime())
+	if !run.shot.on && !run.reel.on do app_handle_input(app)
 
-		w, h := app_view_cells(&app)
-
-		draw := prof_begin()
-		rl.BeginDrawing()
-		rl.ClearBackground(BACKGROUND)
-		rl.DrawTexturePro(
-			app.texture,
-			rl.Rectangle{0, 0, f32(w), f32(h)},
-			rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
-			rl.Vector2{0, 0},
-			0,
-			rl.WHITE,
-		)
-		app_draw_materials(&app, w, h)
-		if !app.look.on {
-			// Bodies first, then the wizard with the front of the crop
-			// over him, then every glow that is only light: a halo is
-			// the light of the world, and the light of the world sits
-			// over the crop, or the front pass rubs a hole in it the
-			// exact shape of his frame.
-			app_draw_water(&app, w, h)
-			app_draw_drudges(&app)
-			app_draw_pots(&app, &app.pots)
-			app_draw_pots(&app, &app.drudge_pots)
-			app_draw_player(&app)
-			app_draw_crystals(&app)
-			app_draw_fireflies(&app)
-			app_draw_bangs(&app)
-			app_draw_sparks(&app)
-			app_draw_orb(&app)
-			app_draw_beam(&app)
-			if !app.hud_off do draw_hud(&app)
-			draw_prof(&app)
-			editor_draw(&app)
-			tile_editor_draw(&app)
-		}
-		rl.EndDrawing()
-		prof_end(.Draw, draw)
-		prof.frames += 1
-
-		// The overlay reads a snapshot a second old, so the numbers hold
-		// still long enough to read. A shot run keeps the whole record
-		// instead and prints it once at the end.
-		if !shot.on && prof.frames >= 60 {
-			app.prof_view = prof
-			prof_reset()
-		}
-
-		frames += 1
-
-		if reel.on {
-			if filming {
-				if reel.dir != "" && reel.shown % REEL_EVERY == 0 {
-					frame_path := fmt.tprintf("%s/frame_%05d.png", reel.dir, reel.wrote)
-					rl.TakeScreenshot(strings.clone_to_cstring(frame_path, context.temp_allocator))
-					reel.wrote += 1
-				}
-				reel.shown += 1
-			}
-			if reel_done(reel) {
-				// Where he ended is how a route is tuned: run the reel,
-				// read the landing, move the digging a few cells.
-				fmt.printfln(
-					"%s: %d frames from %d segments, wizard at %.0f,%.0f",
-					reel.dir != "" ? reel.dir : "(unrecorded)",
-					reel.wrote, len(reel.segments), app.player.x, app.player.y,
-				)
-				free_all(context.temp_allocator)
-				break
-			}
-		}
-
-		if shot.on && frames >= shot.frames {
-			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
-			// The file is the result of the run, so it is named the
-			// same way bin/shot names the one it draws.
-			fmt.printfln(
-				"%s: %dx%d pixels, after %d frames",
-				shot.path, WINDOW_W, WINDOW_H, frames,
-			)
-			if shot.profile {
-				fmt.eprintln(prof_report(prof, context.temp_allocator))
-			}
-			free_all(context.temp_allocator)
-			break
-		}
-
-		free_all(context.temp_allocator)
+	filming := false
+	if run.reel.on && !reel_done(run.reel) {
+		filming = reel_step(&run.reel, app)
+		app_follow_player(app)
 	}
+
+	playing := !app.editor.open && !app.tile_edit.open
+	if app.dirty || (playing && app.follow_player) {
+		app_regenerate(app)
+		app.dirty = false
+	}
+
+	w, h := app_view_cells(app)
+
+	draw := prof_begin()
+	rl.BeginDrawing()
+	rl.ClearBackground(BACKGROUND)
+	rl.DrawTexturePro(
+		app.texture,
+		rl.Rectangle{0, 0, f32(w), f32(h)},
+		rl.Rectangle{0, 0, WINDOW_W, WINDOW_H},
+		rl.Vector2{0, 0},
+		0,
+		rl.WHITE,
+	)
+	app_draw_materials(app, w, h)
+	if !app.look.on {
+		// Bodies first, then the wizard with the front of the crop
+		// over him, then every glow that is only light: a halo is
+		// the light of the world, and the light of the world sits
+		// over the crop, or the front pass rubs a hole in it the
+		// exact shape of his frame.
+		app_draw_water(app, w, h)
+		app_draw_drudges(app)
+		app_draw_pots(app, &app.pots)
+		app_draw_pots(app, &app.drudge_pots)
+		app_draw_player(app)
+		app_draw_crystals(app)
+		app_draw_fireflies(app)
+		app_draw_bangs(app)
+		app_draw_sparks(app)
+		app_draw_orb(app)
+		app_draw_beam(app)
+		if !app.hud_off do draw_hud(app)
+		draw_prof(app)
+		editor_draw(app)
+		tile_editor_draw(app)
+	}
+	rl.EndDrawing()
+	prof_end(.Draw, draw)
+	prof.frames += 1
+
+	// The overlay reads a snapshot a second old, so the numbers hold
+	// still long enough to read. A shot run keeps the whole record
+	// instead and prints it once at the end.
+	if !run.shot.on && prof.frames >= 60 {
+		app.prof_view = prof
+		prof_reset()
+	}
+
+	run.frames += 1
+
+	if run.reel.on {
+		if filming {
+			if run.reel.dir != "" && run.reel.shown % REEL_EVERY == 0 {
+				frame_path := fmt.tprintf("%s/frame_%05d.png", run.reel.dir, run.reel.wrote)
+				rl.TakeScreenshot(strings.clone_to_cstring(frame_path, context.temp_allocator))
+				run.reel.wrote += 1
+			}
+			run.reel.shown += 1
+		}
+		if reel_done(run.reel) {
+			// Where he ended is how a route is tuned: run the reel,
+			// read the landing, move the digging a few cells.
+			result(
+				"%s: %d frames from %d segments, wizard at %.0f,%.0f",
+				run.reel.dir != "" ? run.reel.dir : "(unrecorded)",
+				run.reel.wrote, len(run.reel.segments), app.player.x, app.player.y,
+			)
+			free_all(context.temp_allocator)
+			return true
+		}
+	}
+
+	if run.shot.on && run.frames >= run.shot.frames {
+		rl.TakeScreenshot(strings.clone_to_cstring(run.shot.path, context.temp_allocator))
+		// The file is the result of the run, so it is named the
+		// same way bin/shot names the one it draws.
+		result(
+			"%s: %dx%d pixels, after %d frames",
+			run.shot.path, WINDOW_W, WINDOW_H, run.frames,
+		)
+		if run.shot.profile {
+			fault("%s", prof_report(prof, context.temp_allocator))
+		}
+		free_all(context.temp_allocator)
+		return true
+	}
+
+	free_all(context.temp_allocator)
+	return false
 }
 
 // F3: what every phase of the tick and the frame costs, averaged over
@@ -285,7 +303,7 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot, ok: bool) {
 	number :: proc(key, value: string) -> (int, bool) {
 		n, parsed := strconv.parse_int(value)
 		if !parsed {
-			fmt.eprintfln("%s wants a whole number, and %q is not one", key, value)
+			fault("%s wants a whole number, and %q is not one", key, value)
 			return 0, false
 		}
 		return n, true
@@ -294,7 +312,7 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot, ok: bool) {
 	for arg in args {
 		split := strings.index_byte(arg, '=')
 		if split < 0 {
-			fmt.eprintfln("arguments are key=value, and %q is not", arg)
+			fault("arguments are key=value, and %q is not", arg)
 			return shot, false
 		}
 		key := arg[:split]
@@ -342,10 +360,10 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot, ok: bool) {
 			if read {
 				shot.seed = seed
 			} else {
-				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
+				fault("seed wants a whole number that fits in 64 bits, and %q is not one", value)
 			}
 		case:
-			fmt.eprintfln("there is no argument %q", key)
+			fault("there is no argument %q", key)
 			return shot, false
 		}
 		if !read do return shot, false
@@ -445,17 +463,17 @@ app_init_view :: proc(app: ^App) {
 
 	app.water = water_load(app.world.materials, WINDOW_W, WINDOW_H)
 	if !app.water.on {
-		fmt.eprintfln("%s did not load: the water is drawn flat", WATER_SHADER_PATH)
+		fault("%s did not load: the water is drawn flat", WATER_SHADER_PATH)
 	}
 
 	app.shaders = material_shaders_load(app.world.materials, WINDOW_W, WINDOW_H)
 	if !app.shaders.on {
-		fmt.eprintfln("%s brought no shader: every material is drawn flat", MATERIAL_SHADER_DIR)
+		fault("%s brought no shader: every material is drawn flat", MATERIAL_SHADER_DIR)
 	}
 
 	sheet, result := load_sprite_sheet(SPRITE_SHEET_PATH)
 	if result.err != .None {
-		fmt.eprintfln("the sprite sheet could not load: %v", result.err)
+		fault("the sprite sheet could not load: %v", result.err)
 	}
 	app.sprite = sheet
 
@@ -473,7 +491,7 @@ app_init_view :: proc(app: ^App) {
 
 	drudge_sheet, drudge_result := load_drudge_sprite_sheet()
 	if drudge_result.err != .None {
-		fmt.eprintfln("the drudge sprite sheet could not load: %v", drudge_result.err)
+		fault("the drudge sprite sheet could not load: %v", drudge_result.err)
 	}
 	app.drudge_sprite = drudge_sheet
 
