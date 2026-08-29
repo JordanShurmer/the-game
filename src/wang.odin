@@ -1,7 +1,7 @@
 package game
 
 import "core:fmt"
-import "core:testing"
+import testing "check"
 
 WANG_COLORS :: 2
 WANG_BITS :: 1

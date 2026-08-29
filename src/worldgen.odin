@@ -2,7 +2,7 @@ package game
 
 import "core:fmt"
 import "core:slice"
-import "core:testing"
+import testing "check"
 
 Cell :: u8
 

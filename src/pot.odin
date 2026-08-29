@@ -1,7 +1,7 @@
 package game
 
 import "core:math"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 POT_MAX      :: 8      // pots in the air at once

@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 // A bang is an explosion the world remembers: the place a blast went off and

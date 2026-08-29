@@ -1,7 +1,7 @@
 package game
 
 import "core:slice"
-import "core:testing"
+import testing "check"
 
 TILE_SIZE :: 512
 TILE_MASK :: TILE_SIZE - 1

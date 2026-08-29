@@ -12,7 +12,6 @@ package game
 // See docs/web.md, "What the web cannot have".
 
 import "core:c"
-import "core:c/libc"
 import "core:strings"
 import rl "vendor:raylib"
 
@@ -46,10 +45,17 @@ file_write :: proc(path: string, data: []byte) -> bool {
 	return bool(rl.SaveFileData(c_path(path), raw_data(data), c.int(len(data))))
 }
 
-// Only a test writes a file it then has to take away. libc removes it,
-// because raylib has no such call and `core:os` is not on this ladder.
+// Only a test writes a file it then has to take away. raylib has no
+// call for it, so this is the one place the game names a C library
+// procedure. `core:c/libc` brings the whole header and does not build
+// for WebAssembly; one line of it does.
+@(default_calling_convention = "c")
+foreign _ {
+	remove :: proc(path: cstring) -> c.int ---
+}
+
 file_remove :: proc(path: string) {
-	libc.remove(c_path(path))
+	remove(c_path(path))
 }
 
 // The reel writes its frames into a directory it is given, which may

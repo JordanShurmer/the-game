@@ -1,7 +1,7 @@
 package game
 
 import "core:fmt"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 TILE_VIEW_CELL :: 1

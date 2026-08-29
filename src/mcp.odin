@@ -2,7 +2,7 @@ package game
 
 import "core:encoding/json"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 MCP_SERVER_NAME    :: "the-game"
