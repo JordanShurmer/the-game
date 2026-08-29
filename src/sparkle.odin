@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 // A sparkle is the light the mix throws off: a dot that rises, flashes, and

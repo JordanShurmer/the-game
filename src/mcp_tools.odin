@@ -4,7 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:strings"
-import "core:testing"
+import testing "check"
 
 MCP_MAX_MAP_CELLS :: 20000
 

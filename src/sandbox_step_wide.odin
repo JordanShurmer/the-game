@@ -7,7 +7,7 @@ package game
 // table that does not fit is a fact about the materials and not about
 // the machine.
 
-import "core:testing"
+import testing "check"
 
 SANDBOX_WIDE_LANES :: 32
 

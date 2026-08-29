@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 
 INPUT_SLOT_COUNT :: 64
 INPUT_SLOT_MASK  :: u64(INPUT_SLOT_COUNT - 1)

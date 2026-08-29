@@ -2,7 +2,7 @@ package game
 
 import "core:math"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 SHOT_MAX_PIXELS :: 8192 * 8192

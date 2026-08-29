@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 
 // The homelands.
 //

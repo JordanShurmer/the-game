@@ -1,7 +1,7 @@
 package game
 
 import "core:strings"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 WATER_SHADER_PATH :: "data/shaders/water.fs"

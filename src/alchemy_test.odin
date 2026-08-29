@@ -6,7 +6,7 @@ package game
 // of one of them: every test here paints cells, steps the sandbox, and counts
 // what is left. See docs/alchemy.md, "The second alchemy".
 
-import "core:testing"
+import testing "check"
 
 @(private = "file")
 alchemy_sandbox :: proc(t: ^testing.T, width, height: i32, seed: u64) -> (Sandbox, Material_Table) {

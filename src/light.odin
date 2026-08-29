@@ -2,7 +2,7 @@ package game
 
 import "core:math"
 import "core:mem"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 LIGHT_CELL :: 4

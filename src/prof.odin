@@ -4,7 +4,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import "core:time"
 
 // What a tick and a frame spend, phase by phase. The clock starts at

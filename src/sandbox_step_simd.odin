@@ -2,7 +2,7 @@ package game
 
 import "base:intrinsics"
 import "core:simd"
-import "core:testing"
+import testing "check"
 
 SANDBOX_LANES :: 16
 
