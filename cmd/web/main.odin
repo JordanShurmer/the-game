@@ -24,6 +24,7 @@ Main_Loop :: #type proc "c" ()
 @(default_calling_convention = "c")
 foreign emscripten {
 	emscripten_set_main_loop :: proc(f: Main_Loop, fps: i32, simulate_infinite_loop: i32) ---
+	emscripten_run_script :: proc(script: cstring) ---
 	emscripten_cancel_main_loop :: proc() ---
 }
 
@@ -56,6 +57,10 @@ game_boot :: proc "c" () {
 	if !game.app_start(&app, &run, {}) {
 		return
 	}
+	// The world is loaded and the first frame is next, which is when
+	// the page may take its front down. See web/shell.html.
+	emscripten_run_script("if (window.game_ready) game_ready()")
+
 	emscripten_set_main_loop(frame, 0, 0)
 }
 
