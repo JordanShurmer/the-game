@@ -235,7 +235,6 @@ class Land:
         self.seed = seed
         self.rng = Rng(seed)
         self.cells = [[AIR] * IMG for _ in range(IMG)]
-        self.ploughed = [False] * IMG
         self.top = [EDGE_GROUND] * IMG
         # How far the gravel band and the rock roof have wandered from
         # their flat rows in each column, set by lay_ground and read
@@ -516,19 +515,6 @@ def plough(land, x0, x1, fallow):
     # third as slack for the ground it is heaped on.
     RIDGE_H = 2
     DEPTH = 15  # how far down the turned loam goes
-
-    # No column is ploughed twice. Two plots whose spans touch used to
-    # turn the same ground over with different periods, and a crown of
-    # one beside a furrow of the other stood four cells apart, which is
-    # over a wizard's step.
-    while x0 <= x1 and land.ploughed[x0]:
-        x0 += 1
-    while x1 >= x0 and land.ploughed[x1]:
-        x1 -= 1
-    if x1 - x0 < period:
-        return
-    for cx in range(x0, x1 + 1):
-        land.ploughed[cx] = True
 
     ridges = []
     x = x0
@@ -996,9 +982,9 @@ def paint_homeland(seed, i=0):
     land.rng = rng
 
     # West to east within each span, so a plot settles against ground
-    # that is already drawn: `plough` clamps its west end to whatever
-    # stands beside it, and out of order there is nothing there to clamp
-    # to. Knots put them out of order.
+    # that is already drawn, and so the dooryards, fences and hedges
+    # that overrun their own plot overwrite each other in the one
+    # order every seed sees.
     for (lo, hi), row in plots(rng, theme):
         for x, w, kind in sorted(row):
             if kind == "home":
