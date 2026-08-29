@@ -135,7 +135,7 @@ look_lux :: proc(u, v: f32) -> u8 {
 }
 
 // Draw the bench into the cells and the light the view shades by.
-look_fill :: proc(look: Look, cells: []Cell, lux: []u8, w, h: i32, air: Cell) {
+look_fill :: proc(look: Look, cells: []Cell, lux: []u8, w, h: i32) {
 	for y in 0 ..< int(h) {
 		v := (f32(y) + 0.5) / f32(h)
 		row := cells[y * int(w):][:w]
@@ -143,7 +143,7 @@ look_fill :: proc(look: Look, cells: []Cell, lux: []u8, w, h: i32, air: Cell) {
 
 		for x in 0 ..< int(w) {
 			u := (f32(x) + 0.5) / f32(w)
-			row[x] = look.cell if look_solid(u, v) else air
+			row[x] = look.cell if look_solid(u, v) else MATERIAL_AIR
 			lit[x] = look_lux(u, v)
 		}
 	}

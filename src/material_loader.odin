@@ -30,7 +30,6 @@ Material_Table :: struct {
 
 	fire:        u16,
 	soot:        u16,
-	powder:      u16,
 
 	// The lights of the world, and the material a bang is made of.
 	// See docs/lighting.md, "Every light is a material".
@@ -277,9 +276,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	if idx, found := find_material_index(table, "Soot"); found {
 		table.soot = u16(idx)
 	}
-	if idx, found := find_material_index(table, "Gunpowder"); found {
-		table.powder = u16(idx)
-	}
 	if idx, found := find_material_index(table, "Blast"); found {
 		table.blast = u16(idx)
 	}
@@ -482,8 +478,9 @@ test_soot_and_powder_resolve_to_a_real_material :: proc(t: ^testing.T) {
 		t, table.soot != u16(MATERIAL_AIR),
 		"soot must resolve to a real material, or a blast paints nothing on the walls it cannot break",
 	)
-	testing.expectf(
-		t, table.powder != u16(MATERIAL_AIR),
+	_, powder_found := find_material_index(table, "Gunpowder")
+	testing.expect(
+		t, powder_found,
 		"powder must resolve to a real material, or a pot's potency is always zero",
 	)
 }

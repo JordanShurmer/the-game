@@ -314,10 +314,11 @@ test_the_pot_carries_the_grains_its_blast_is_made_of :: proc(t: ^testing.T) {
 	defer destroy_material_table(table)
 	if !testing.expect(t, ok, "materials must load") do return
 
-	grains := i32(table.materials[int(table.powder)].force) * POT_GRAINS
+	powder, _ := find_material_index(table, "Gunpowder")
+	grains := i32(table.materials[powder].force) * POT_GRAINS
 	testing.expectf(
 		t, i32(pot_power(table)) == grains,
 		"the pot holds %d grains of black powder at a force of %d each, so its blast must be %d, and Blast carries %d",
-		i32(POT_GRAINS), table.materials[int(table.powder)].force, grains, pot_power(table),
+		i32(POT_GRAINS), table.materials[powder].force, grains, pot_power(table),
 	)
 }

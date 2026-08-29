@@ -17,7 +17,6 @@
 in vec2 fragTexCoord;
 in vec4 fragColor;
 
-uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 
 uniform sampler2D gbuf;
@@ -260,10 +259,6 @@ const vec3 M_HAZE = vec3(0.306, 0.251, 0.149);
 
 vec3 m_haze(vec3 col, float lux, float sky) {
     return col + M_HAZE*(lux*(1.0 - sky))*(1.0 - col);
-}
-
-vec3 m_haze(vec3 col, float lux) {
-    return m_haze(col, lux, 0.0);
 }
 
 // The blow-out the world gives a cell close to a light.

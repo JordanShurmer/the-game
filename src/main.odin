@@ -192,7 +192,7 @@ main :: proc() {
 
 		if reel.on {
 			if filming {
-				if reel.dir != "" && reel.shown % reel.every == 0 {
+				if reel.dir != "" && reel.shown % REEL_EVERY == 0 {
 					frame_path := fmt.tprintf("%s/frame_%05d.png", reel.dir, reel.wrote)
 					rl.TakeScreenshot(strings.clone_to_cstring(frame_path, context.temp_allocator))
 					reel.wrote += 1
@@ -503,7 +503,7 @@ app_look_at :: proc(app: ^App, name: string) -> bool {
 
 @(private = "file")
 app_regenerate_look :: proc(app: ^App, w, h: i32) {
-	look_fill(app.look, app.cells, app.lux, w, h, MATERIAL_AIR)
+	look_fill(app.look, app.cells, app.lux, w, h)
 
 	count := int(w) * int(h)
 	for i in 0 ..< count {
