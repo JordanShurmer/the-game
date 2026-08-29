@@ -7,8 +7,14 @@ import "core:strings"
 import testing "check"
 import rl "vendor:raylib"
 
-WINDOW_W :: 1280
-WINDOW_H :: 720
+// The window, and with it the sandbox: the world the game simulates is
+// the size of the picture it draws. A phone draws fewer pixels than a
+// desktop and has less to draw them with, so the size is a knob that
+// needs no code change:
+//
+//     odin build src -define:WINDOW_W=960 -define:WINDOW_H=540
+WINDOW_W :: #config(WINDOW_W, 1280)
+WINDOW_H :: #config(WINDOW_H, 720)
 
 WORLD_VIEW_MAX_STEP :: 256
 WORLD_VIEW_MAX_ZOOM :: 4
