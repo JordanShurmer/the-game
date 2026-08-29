@@ -1,5 +1,3 @@
-#version 330
-
 // The wave that bends what lies under the water is the wave of the
 // raylib example shader examples/shaders/resources/shaders/glsl330/wave.fs,
 // contributed by Anata (@anatagawa) and reviewed by Ramon Santamaria

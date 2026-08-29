@@ -87,7 +87,7 @@ material_shader_source :: proc(
 	prelude, body, epilogue: string,
 	allocator := context.allocator,
 ) -> string {
-	return strings.concatenate({prelude, "\n", body, "\n", epilogue, "\n"}, allocator)
+	return strings.concatenate({SHADER_HEADER, prelude, "\n", body, "\n", epilogue, "\n"}, allocator)
 }
 
 material_shaders_load :: proc(
@@ -588,6 +588,70 @@ test_every_material_shader_names_a_material_in_the_table :: proc(t: ^testing.T) 
 	free_all(context.temp_allocator)
 }
 
+// A word that GLSL 330 lets a shader use and GLSL ES 300 keeps for
+// itself. The desktop compiles such a shader and the browser refuses it,
+// which is a failure nobody sees until a phone draws the material flat:
+// `patch` was a local in two files and cost two materials their look.
+// See docs/web.md, "The shaders".
+@(private = "file")
+GLSL_ES_RESERVED :: [?]string{
+	"patch", "sample", "precise", "resource", "subroutine", "filter",
+	"attribute", "varying", "superp",
+}
+
+@(test)
+test_no_shader_uses_a_word_the_browser_keeps_for_itself :: proc(t: ^testing.T) {
+	files := file_list(MATERIAL_SHADER_DIR, ".fs", context.allocator)
+	defer {
+		for f in files do delete(f)
+		delete(files)
+	}
+
+	paths := make([dynamic]string, context.temp_allocator)
+	append(&paths, ..files)
+	append(&paths, MATERIAL_SHADER_PRELUDE, MATERIAL_SHADER_MAIN, WATER_SHADER_PATH)
+
+	for path in paths {
+		body, body_ok := file_read(path, context.temp_allocator)
+		if !testing.expectf(t, body_ok, "%s must be readable", path) do continue
+
+		for line, n in strings.split_lines(string(body), context.temp_allocator) {
+			code := line
+			if cut := strings.index(code, "//"); cut >= 0 do code = code[:cut]
+
+			for word in GLSL_ES_RESERVED {
+				testing.expectf(
+					t, !glsl_names(code, word),
+					"%s:%d uses %q, which GLSL ES 300 keeps for itself: %s",
+					path, n + 1, word, strings.trim_space(line),
+				)
+			}
+		}
+	}
+	free_all(context.temp_allocator)
+}
+
+// Whether the line uses the word as a name of its own, rather than as
+// part of a longer one: LOAM_PATCH is not `patch`.
+@(private = "file")
+glsl_names :: proc(line, word: string) -> bool {
+	part :: proc(c: byte) -> bool {
+		return c == '_' || (c >= '0' && c <= '9') ||
+		       (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+
+	rest := line
+	for {
+		at := strings.index(rest, word)
+		if at < 0 do return false
+		before := at == 0 || !part(rest[at - 1])
+		after_at := at + len(word)
+		after := after_at >= len(rest) || !part(rest[after_at])
+		if before && after do return true
+		rest = rest[after_at:]
+	}
+}
+
 @(test)
 test_the_prelude_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
 	source, ok := file_read(MATERIAL_SHADER_PRELUDE, context.allocator)
@@ -595,7 +659,10 @@ test_the_prelude_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
 	defer delete(source)
 
 	text := string(source)
-	testing.expect(t, strings.contains(text, "#version"), "the prelude must name the GLSL it is written in")
+	testing.expect(
+		t, !strings.contains(text, "#version"),
+		"the prelude must name no version: SHADER_HEADER brings the one this target takes",
+	)
 
 	for name, u in material_uniform_name {
 		testing.expectf(

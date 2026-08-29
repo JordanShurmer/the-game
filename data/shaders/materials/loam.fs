@@ -52,10 +52,10 @@ float loam_height(vec2 cell)
 
 vec3 loam_color(vec2 cell, float ridge)
 {
-    float patch = m_fbm(cell*LOAM_PATCH, 2);
-    patch = clamp((patch - 0.5)*2.2 + 0.5, 0.0, 1.0);
-    vec3 col = mix(LOAM_DARK, LOAM_MID, smoothstep(0.28, 0.72, patch));
-    col = mix(col, LOAM_PALE, smoothstep(0.70, 0.95, patch)*0.7);
+    float mottle = m_fbm(cell*LOAM_PATCH, 2);
+    mottle = clamp((mottle - 0.5)*2.2 + 0.5, 0.0, 1.0);
+    vec3 col = mix(LOAM_DARK, LOAM_MID, smoothstep(0.28, 0.72, mottle));
+    col = mix(col, LOAM_PALE, smoothstep(0.70, 0.95, mottle)*0.7);
 
     // The crown of a slice dries out pale; the trough beside it stays
     // wet and nearly black.

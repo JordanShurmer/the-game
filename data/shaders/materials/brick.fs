@@ -58,7 +58,7 @@ void brick_bond(vec2 cell, out vec2 id, out float joint)
     joint = 1.0 - smoothstep(0.0, BRICK_JOINT, d);
 }
 
-// The colour off the kiln for one brick, and a slow patch over the
+// The colour off the kiln for one brick, and a slow mottle over the
 // whole wall so neighbours share a family.
 vec3 brick_tone(vec2 id, vec2 cell)
 {
@@ -66,8 +66,8 @@ vec3 brick_tone(vec2 id, vec2 cell)
     vec3 col = mix(BRICK_PALE, BRICK_RED, smoothstep(0.10, 0.55, fire));
     col = mix(col, BRICK_BURNT, smoothstep(0.72, 0.98, fire));
 
-    float patch = m_fbm(cell*0.020, 2);
-    col *= mix(0.88, 1.12, patch);
+    float mottle = m_fbm(cell*0.020, 2);
+    col *= mix(0.88, 1.12, mottle);
 
     // The face of a brick is not flat colour: a fine sand grain in it.
     col *= 1.0 + (m_noise(cell*1.9 + id*7.3) - 0.5)*0.16;
