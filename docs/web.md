@@ -141,6 +141,26 @@ a thumb, so a hand that has touched the screen once would dig at every
 step and aim at wherever it last let go. A touched screen has no
 cursor, and the game stops reading one.
 
+## Looking at the page
+
+`bin/shot` is how to look at the world. `tools/play_web.mjs` is how to
+look at the page:
+
+```sh
+make web
+node tools/play_web.mjs shots/web 844 390    # a phone's size
+```
+
+It loads the page in a headless browser, presses play, holds a thumb on
+the pad and on JUMP the way a hand would, and writes a picture at each
+step. Everything the page says goes to the terminal, which is where a
+shader that will not compile in the browser turns up. It needs node and
+playwright, which are not part of the game's toolchain; the header of
+the file says how to get them, and `node_modules` is ignored by git.
+
+The browser it drives has no GPU and draws in software, so it is a few
+frames a second there and that says nothing about a phone.
+
 ## The window, and what a frame costs
 
 `WINDOW_W` and `WINDOW_H` are `#config` constants, and the sandbox is
