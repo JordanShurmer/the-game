@@ -42,12 +42,11 @@ Material_Table :: struct {
 // next chains to the next row for the same pair, -1 for the end of the
 // chain. See docs/alchemy.md, "A chain of rows".
 Reaction :: struct {
-	a, b:   u16,
 	c, d:   u16,
 	chance: u8,
 	next:   i16,
 }
-#assert(size_of(Reaction) == 12)
+#assert(size_of(Reaction) == 8)
 
 @(private = "file")
 Raw_Reaction :: struct {
@@ -336,7 +335,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		}
 
 		idx_fwd := i16(len(reactions))
-		append(&reactions, Reaction{a = u16(ai), b = u16(bi), c = u16(ci), d = u16(di), chance = row.chance, next = -1})
+		append(&reactions, Reaction{c = u16(ci), d = u16(di), chance = row.chance, next = -1})
 		append(&reaction_line, row.line)
 		if tail_fwd >= 0 {
 			reactions[tail_fwd].next = idx_fwd
@@ -346,7 +345,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 
 		tail_rev, _ := reaction_chain_tail(reactions[:], reaction_at[bi*n+ai])
 		idx_rev := i16(len(reactions))
-		append(&reactions, Reaction{a = u16(bi), b = u16(ai), c = u16(di), d = u16(ci), chance = row.chance, next = -1})
+		append(&reactions, Reaction{c = u16(di), d = u16(ci), chance = row.chance, next = -1})
 		append(&reaction_line, row.line)
 		if tail_rev >= 0 {
 			reactions[tail_rev].next = idx_rev
@@ -745,7 +744,6 @@ test_shipped_cold_targets_all_resolve :: proc(t: ^testing.T) {
 	testing.expect(t, checked > 0, "the shipped file must actually name some targets")
 
 	for r in table.reactions {
-		testing.expect(t, int(r.a) < len(table.materials) && int(r.b) < len(table.materials))
 		testing.expect(t, int(r.c) < len(table.materials) && int(r.d) < len(table.materials))
 	}
 }
@@ -769,11 +767,9 @@ test_reaction_reads_both_ways_round :: proc(t: ^testing.T) {
 	testing.expect(t, forward != backward, "the two directions are different rows")
 
 	fr := table.reactions[int(forward)]
-	testing.expect(t, int(fr.a) == water && int(fr.b) == lava)
 	testing.expect(t, int(fr.c) == steam && int(fr.d) == obsidian, "water becomes steam, lava becomes obsidian")
 
 	br := table.reactions[int(backward)]
-	testing.expect(t, int(br.a) == lava && int(br.b) == water, "the operands are swapped")
 	testing.expect(t, int(br.c) == obsidian && int(br.d) == steam, "the results are swapped to match")
 	testing.expect(t, br.chance == fr.chance, "the odds do not change with the side you meet it from")
 }

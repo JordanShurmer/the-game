@@ -172,22 +172,21 @@ The loader stores each row twice, once as written and once with both
 sides swapped, so a lookup never has to try the pair both ways.
 
 ```odin
-// 12 bytes, and the #assert holds it there.
+// 8 bytes, and the #assert holds it there.
 Reaction :: struct {
-	a, b:   u16, // what meets
 	c, d:   u16, // what it becomes
 	chance: u8,  // out of 255, per probe
 	next:   i16, // the next row for the same pair, -1 at the end
 }
-#assert(size_of(Reaction) == 12)
+#assert(size_of(Reaction) == 8)
 ```
 
-The table carries four things:
+A row does not name what meets: the key that reaches it says that. The
+table carries three things:
 
 ```odin
 reactions: []Reaction, // every row, both ways round
 reaction_at: []i16,    // n*n; the head of a pair's chain of rows, or -1
-reacts: []bool,        // n; whether this material is in any row at all
 partners: []u64,       // n; one bit per partner, the coarse filter
 ```
 
@@ -198,8 +197,9 @@ the game ships that is 2916 entries, or 5832 bytes. A table of 200
 materials would cost 80 KB, which is the bound worth knowing and far
 past what this game needs.
 
-`reacts` is the gate that keeps the step cheap. Air is in no row, so
-the common cell pays one byte of lookup and nothing else.
+The `.Reacts` bit of a cell's `work` is the gate that keeps the step
+cheap. Air is in no row, so the common cell pays one bit and nothing
+else.
 
 **One roll per cell per tick, against a side that has a partner on
 it.** The step walks the four sides anyway, because whether any side

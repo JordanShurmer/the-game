@@ -58,7 +58,6 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 		row_bits := sb.dirty_rows[cy * sb.chunks_x:(cy + 1) * sb.chunks_x]
 		for r, k in chunk_row {
 			if row_bits[k] & bit == 0 do continue // nothing on this row
-			if y < r.min_y || y > r.max_y do continue
 			sandbox_step_row(sb, table, y, r.min_x, r.max_x)
 		}
 	}
