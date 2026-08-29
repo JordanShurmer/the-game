@@ -59,6 +59,8 @@ App :: struct {
 
 	dirty:   bool,
 	hud_off: bool, // a reel films the game, not the debug readout
+
+	touch: Touch, // the thumbs, on a screen that has no keys
 }
 
 WINDOW_SHOT_FRAMES :: 90
@@ -188,7 +190,10 @@ app_frame :: proc(app: ^App, run: ^Run) -> (done: bool) {
 		app_draw_sparks(app)
 		app_draw_orb(app)
 		app_draw_beam(app)
-		if !app.hud_off do draw_hud(app)
+		if !app.hud_off {
+			draw_hud(app)
+			touch_draw(app.touch, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight()))
+		}
 		draw_prof(app)
 		editor_draw(app)
 		tile_editor_draw(app)
@@ -803,14 +808,30 @@ app_handle_play :: proc(app: ^App) {
 	if rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT) do held += {.Right}
 	if rl.IsKeyDown(.LEFT_SHIFT) || rl.IsKeyDown(.RIGHT_SHIFT) do held += {.Run}
 	if rl.IsKeyDown(.SPACE) || rl.IsKeyDown(.W) || rl.IsKeyDown(.UP) do held += {.Jump}
-	if rl.IsKeyDown(.E) || rl.IsMouseButtonDown(.LEFT) do held += {.Dig}
-	if rl.IsKeyDown(.Q) || rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
+	if rl.IsKeyDown(.E) do held += {.Dig}
+	if rl.IsKeyDown(.Q) do held += {.Throw}
 
 	jump_pressed := rl.IsKeyPressed(.SPACE) || rl.IsKeyPressed(.W) || rl.IsKeyPressed(.UP)
 
-	cursor_x, cursor_y := app_cursor_cell(app)
-	centre_x, centre_y := player_centre(app.player)
-	aim := player_aim_of(f32(cursor_x - centre_x), f32(cursor_y - centre_y))
+	// A screen with no keys says the same things through the pad and
+	// the three buttons. See src/touch.odin.
+	thumbs, newly := touch_step(&app.touch, f32(rl.GetScreenWidth()), f32(rl.GetScreenHeight()))
+	held += thumbs.held
+	jump_pressed ||= .Jump in newly
+
+	// A touched screen has no cursor. A browser makes a mouse out of a
+	// thumb, so a hand that has touched the glass once would dig at
+	// every step and aim at wherever it last let go.
+	aim := app.player.aim
+	if !app.touch.seen {
+		if rl.IsMouseButtonDown(.LEFT) do held += {.Dig}
+		if rl.IsMouseButtonDown(.RIGHT) do held += {.Throw}
+
+		cursor_x, cursor_y := app_cursor_cell(app)
+		centre_x, centre_y := player_centre(app.player)
+		aim = player_aim_of(f32(cursor_x - centre_x), f32(cursor_y - centre_y))
+	}
+	if thumbs.aim_set do aim = thumbs.aim
 
 	app_step_player(app, rl.GetFrameTime(), held, jump_pressed, aim)
 	app_follow_player(app)
