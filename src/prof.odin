@@ -51,7 +51,7 @@ Prof_Count :: enum u8 {
 }
 
 Prof :: struct {
-	spent: [Prof_Phase]time.Duration,
+	spent: [Prof_Phase]f64, // seconds
 	calls: [Prof_Phase]int,
 	count: [Prof_Count]int,
 	ticks: int,
@@ -60,12 +60,41 @@ Prof :: struct {
 
 prof: Prof
 
-prof_begin :: #force_inline proc() -> time.Tick {
-	return time.tick_now()
+// The clock, which is not the same clock on both targets. `core:time`
+// has none in a browser: `tick_now` answers zero there, and a profile
+// of nothing but zeroes is worse than no profile, because it reads as
+// "this costs nothing" on the one target where the cost is in doubt.
+// emscripten's own clock is the browser's monotonic one, in
+// milliseconds. See docs/web.md.
+when ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 {
+	@(default_calling_convention = "c")
+	foreign _ {
+		emscripten_get_now :: proc() -> f64 ---
+	}
+
+	Prof_Tick :: f64
+
+	prof_begin :: #force_inline proc() -> Prof_Tick {
+		return emscripten_get_now()
+	}
+
+	prof_since :: #force_inline proc(start: Prof_Tick) -> f64 {
+		return (emscripten_get_now() - start) / 1000
+	}
+} else {
+	Prof_Tick :: time.Tick
+
+	prof_begin :: #force_inline proc() -> Prof_Tick {
+		return time.tick_now()
+	}
+
+	prof_since :: #force_inline proc(start: Prof_Tick) -> f64 {
+		return time.duration_seconds(time.tick_since(start))
+	}
 }
 
-prof_end :: #force_inline proc(phase: Prof_Phase, start: time.Tick) {
-	prof.spent[phase] += time.tick_since(start)
+prof_end :: #force_inline proc(phase: Prof_Phase, start: Prof_Tick) {
+	prof.spent[phase] += prof_since(start)
 	prof.calls[phase] += 1
 }
 
@@ -94,7 +123,7 @@ prof_line :: proc(b: ^strings.Builder, p: Prof, phase: Prof_Phase) {
 	over := prof_over(p, phase)
 	if over == 0 || p.calls[phase] == 0 do return
 
-	ms := time.duration_milliseconds(p.spent[phase])
+	ms := p.spent[phase] * 1000
 	fmt.sbprintfln(b, "%-12s %.3f ms  over %d", phase, ms / f64(over), over)
 }
 
@@ -143,7 +172,7 @@ prof_brief :: proc(p: Prof, allocator := context.allocator) -> string {
 			if phase not_in phases do continue
 			over := prof_over(p, phase)
 			if over == 0 || p.calls[phase] == 0 do continue
-			ms := time.duration_milliseconds(p.spent[phase]) / f64(over)
+			ms := p.spent[phase] * 1000 / f64(over)
 			append(&measured, Share{phase = phase, ms = ms})
 			total += ms
 		}
@@ -201,9 +230,9 @@ test_the_profiler_reports_what_it_measured_and_nothing_else :: proc(t: ^testing.
 	p.ticks = 2
 	p.frames = 1
 
-	p.spent[.Step_Rows] = 4 * time.Millisecond
+	p.spent[.Step_Rows] = 0.004 // 4 ms
 	p.calls[.Step_Rows] = 1
-	p.spent[.Shade] = 1 * time.Millisecond
+	p.spent[.Shade] = 0.001 // 1 ms
 	p.calls[.Shade] = 1
 
 	report := prof_report(p, context.temp_allocator)
@@ -246,11 +275,11 @@ test_the_breakdown_puts_the_widest_phase_first_and_divides_the_group :: proc(t: 
 
 	// Three tick phases with times a reader can check by eye: Light is
 	// the widest, and the three are the whole of the group.
-	p.spent[.Step_Wake] = 1 * time.Millisecond
+	p.spent[.Step_Wake] = 0.001 // 1 ms
 	p.calls[.Step_Wake] = 1
-	p.spent[.Light] = 7 * time.Millisecond
+	p.spent[.Light] = 0.007 // 7 ms
 	p.calls[.Light] = 1
-	p.spent[.Player] = 2 * time.Millisecond
+	p.spent[.Player] = 0.002 // 2 ms
 	p.calls[.Player] = 1
 	p.count[.Reacts] = 40
 
@@ -278,7 +307,7 @@ test_the_breakdown_puts_the_widest_phase_first_and_divides_the_group :: proc(t: 
 	)
 
 	// A frame phase makes the second line appear, divided on its own.
-	p.spent[.Shade] = 3 * time.Millisecond
+	p.spent[.Shade] = 0.003 // 3 ms
 	p.calls[.Shade] = 1
 	brief = prof_brief(p, context.temp_allocator)
 	testing.expectf(
