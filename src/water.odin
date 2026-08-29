@@ -68,8 +68,14 @@ water_load :: proc(materials: Material_Table, width, height: i32) -> (water: Wat
 
 	if !file_exists(WATER_SHADER_PATH) do return water
 
-	path := strings.clone_to_cstring(WATER_SHADER_PATH, context.temp_allocator)
-	water.shader = rl.LoadShader(nil, path)
+	body, body_ok := file_read(WATER_SHADER_PATH, context.temp_allocator)
+	if !body_ok do return water
+
+	source := strings.concatenate(
+		{SHADER_HEADER, string(body), "\n"},
+		context.temp_allocator,
+	)
+	water.shader = rl.LoadShaderFromMemory(nil, strings.clone_to_cstring(source, context.temp_allocator))
 	if !rl.IsShaderValid(water.shader) {
 		rl.UnloadShader(water.shader)
 		water.shader = {}
@@ -232,7 +238,10 @@ test_the_shader_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
 	defer delete(source)
 
 	text := string(source)
-	testing.expect(t, strings.contains(text, "#version"), "the shader must name the GLSL it is written in")
+	testing.expect(
+		t, !strings.contains(text, "#version"),
+		"the shader must name no version: SHADER_HEADER brings the one this target takes",
+	)
 
 	for name, u in water_uniform_name {
 		testing.expectf(

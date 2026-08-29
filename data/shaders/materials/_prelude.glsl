@@ -1,5 +1,3 @@
-#version 330
-
 // The first part of every material shader. It declares what the game
 // sets, reads the g-buffer the game fills, and works out the two things
 // that make a flat grid of cells read as matter: which way the surface
