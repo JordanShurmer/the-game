@@ -17,7 +17,6 @@ Material_Table :: struct {
 
 	reactions:   []Reaction,
 	reaction_at: []i16,
-	reacts:      []bool,
 	partners:    []u64,
 
 	weight:      []u16,
@@ -106,7 +105,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		delete(crumbles_to)
 		delete(reactions)
 		delete(reaction_at, allocator)
-		delete(reacts, allocator)
 	}
 
 	current:         Material
@@ -296,6 +294,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	reaction_at = make([]i16, n * n, allocator)
 	for &r in reaction_at do r = -1
 	reacts = make([]bool, n, allocator)
+	// Only the load needs it: cell_work_of copies the bit into table.work.
+	defer delete(reacts, allocator)
 
 	// The line each stored row came from, so a row that can never fire
 	// names the row that filled the chain before it. Kept only for the
@@ -359,7 +359,6 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	}
 	table.reactions   = reactions[:]
 	table.reaction_at = reaction_at
-	table.reacts      = reacts
 	table.partners    = reaction_partners(reaction_at, n, allocator)
 
 	table.weight = make([]u16, n, allocator)
@@ -420,7 +419,6 @@ destroy_material_table :: proc(table: Material_Table, allocator := context.alloc
 	delete(table.crumbles_to, allocator)
 	delete(table.reactions, allocator)
 	delete(table.reaction_at, allocator)
-	delete(table.reacts, allocator)
 	delete(table.partners, allocator)
 	delete(table.weight, allocator)
 	delete(table.kind, allocator)
@@ -465,7 +463,7 @@ test_load_materials_count :: proc(t: ^testing.T) {
 	testing.expect(t, len(table.burns_to) == 54, "burn table must match materials")
 	testing.expect(t, len(table.crumbles_to) == 54, "crumble table must match materials")
 	testing.expect(t, len(table.reaction_at) == 54 * 54, "reaction_at must be n*n")
-	testing.expect(t, len(table.reacts) == 54, "reacts must match materials")
+	testing.expect(t, len(table.work) == 54, "work must match materials")
 }
 
 @(test)
@@ -787,10 +785,10 @@ test_reacts_is_set_only_for_materials_in_a_row :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 
 	air, _ := find_material_index(table, "Air")
-	testing.expect(t, !table.reacts[air], "air must not react")
+	testing.expect(t, .Reacts not_in table.work[air], "air must not react")
 
 	acid, _ := find_material_index(table, "Acid")
-	testing.expect(t, table.reacts[acid], "acid has rows in the table")
+	testing.expect(t, .Reacts in table.work[acid], "acid has rows in the table")
 }
 
 @(test)

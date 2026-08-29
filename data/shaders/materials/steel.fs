@@ -89,13 +89,11 @@ vec3 shade(Surf s)
     // shape, and once drawn out into a line by the grinding. The streak
     // is the one that says the plate was ground.
     float point = steel_ggx(n, h, STEEL_ROUGH);
-    Surf g = s;
-    g.n = n;
 
     // The streak breaks where the scratches do, or it reads as bands
     // laid across the plate instead of light caught in the grind.
     float catch = 0.45 + 0.55*m_noise(vec2(s.cell.x*0.15, s.cell.y*1.1));
-    float streak = m_spec_aniso(g, vec2(1.0, 0.0), 0.55, 0.24)*catch;
+    float streak = m_spec_aniso(s, vec2(1.0, 0.0), 0.55, 0.24)*catch;
 
     float shadow = ndl/(ndl*0.6 + 0.4);
     vec3 lamp = fresnel*(point*0.40 + streak*0.85)*shadow;
