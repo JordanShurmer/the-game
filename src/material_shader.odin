@@ -26,7 +26,7 @@ package game
 
 import "core:mem"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 MATERIAL_SHADER_DIR :: "data/shaders/materials"

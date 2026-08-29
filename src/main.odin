@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 WINDOW_W :: 1280

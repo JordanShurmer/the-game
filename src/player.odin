@@ -1,7 +1,7 @@
 package game
 
 import "core:math"
-import "core:testing"
+import testing "check"
 
 Player_Button :: enum u8 {
 	Left,

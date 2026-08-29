@@ -2,7 +2,7 @@ package game
 
 import "core:fmt"
 import "core:strings"
-import "core:testing"
+import testing "check"
 import "core:time"
 
 // What a tick and a frame spend, phase by phase. The clock starts at

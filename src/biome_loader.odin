@@ -3,7 +3,7 @@ package game
 import "base:runtime"
 import "core:strconv"
 import "core:strings"
-import "core:testing"
+import testing "check"
 
 Biome_Load_Error :: enum u8 {
 	None,

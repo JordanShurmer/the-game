@@ -1,7 +1,7 @@
 package game
 
 import "core:math"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 // The drudge's own sheet, drawn by tools/seed_drudge.py. This is

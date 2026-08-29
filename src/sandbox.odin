@@ -3,7 +3,7 @@ package game
 import "core:math"
 import "core:mem"
 import "core:slice"
-import "core:testing"
+import testing "check"
 
 SANDBOX_MAX_WIDTH  :: 2048
 SANDBOX_MAX_HEIGHT :: 2048

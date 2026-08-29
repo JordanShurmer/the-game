@@ -2,7 +2,7 @@ package game
 
 import "core:strconv"
 import "core:strings"
-import "core:testing"
+import testing "check"
 
 // The reel.
 //

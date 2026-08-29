@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 
 Biome_Map :: struct {
 	cells:  []Biome_Id,

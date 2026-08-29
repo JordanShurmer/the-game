@@ -1,7 +1,7 @@
 package game
 
 import "core:math"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 DRUDGE_MAX     :: 4    // drudges the bag can ever hold

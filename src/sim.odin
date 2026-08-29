@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 
 MATERIALS_PATH :: "data/materials.txt"
 BIOMES_PATH :: "data/biomes.txt"
