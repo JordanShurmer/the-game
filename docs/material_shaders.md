@@ -75,6 +75,9 @@ without knowing that any of them exist.
 
 Lighting: `m_diffuse`, `m_spec(s, gloss)`, `m_spec_aniso(s, grain, along,
 across)`, `m_fresnel(s, power)`, and `M_VIEW`, which is the eye.
+`m_spec_aniso` draws its lobe from the light direction alone and never
+reads `s.n`, so handing it a surface with a bumped normal changes
+nothing.
 
 Grain: `m_hash`, `m_hash2`, `m_noise`, `m_fbm(p, octaves)`,
 `m_ridge(p, octaves)` for folds, `m_cells(p)` for a scatter of grains or

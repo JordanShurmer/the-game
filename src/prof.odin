@@ -81,13 +81,12 @@ prof_over :: proc(phase: Prof_Phase) -> int {
 	return phase in tick_phases ? prof.ticks : prof.frames
 }
 
-prof_line :: proc(b: ^strings.Builder, phase: Prof_Phase) -> bool {
+prof_line :: proc(b: ^strings.Builder, phase: Prof_Phase) {
 	over := prof_over(phase)
-	if over == 0 || prof.calls[phase] == 0 do return false
+	if over == 0 || prof.calls[phase] == 0 do return
 
 	ms := time.duration_milliseconds(prof.spent[phase])
 	fmt.sbprintfln(b, "%-12s %.3f ms  over %d", phase, ms / f64(over), over)
-	return true
 }
 
 prof_report :: proc(allocator := context.allocator) -> string {
