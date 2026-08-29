@@ -72,7 +72,6 @@ Material_Shaders :: struct {
 	texture: rl.Texture2D,
 	run:     []u8, // a column each: how far the run of one material reaches
 	above:   []Cell, // a column each: what the cell above holds
-	seen:    [256]bool,
 	box:     [256]Sandbox_Rect, // the cells each material actually covers
 	on:      bool,
 }
@@ -168,6 +167,11 @@ material_shaders_load :: proc(
 	ms.texture = rl.LoadTextureFromImage(blank)
 	rl.SetTextureFilter(ms.texture, .POINT)
 
+	// An empty box is how the draw reads "the view does not hold this",
+	// so the boxes must start empty rather than at the zero rect, which
+	// would read as one cell at the origin.
+	for i in 0 ..< 256 do ms.box[i] = SANDBOX_RECT_EMPTY
+
 	ms.on = true
 	return ms
 }
@@ -185,8 +189,9 @@ material_shaders_unload :: proc(ms: ^Material_Shaders) {
 }
 
 // One texel a cell: what the cell holds, the light on it, and how many
-// cells of the same material stand over it. `seen` comes back saying
-// which materials the view holds at all, so the draw skips the rest.
+// cells of the same material stand over it. `box` comes back saying
+// where each material lies, and an empty box says the view does not
+// hold it at all, so the draw skips the rest.
 //
 // Four bytes a texel: the material, the light on it, how deep it sits
 // in a body of its own material, and the part of that light a *lamp*
@@ -202,14 +207,10 @@ material_gbuffer_fill :: proc(
 	run: []u8,
 	above: []Cell,
 	out: []u8,
-	seen: ^[256]bool,
 	box: ^[256]Sandbox_Rect,
 	sky: []u8 = nil,
 ) {
-	for i in 0 ..< 256 {
-		seen[i] = false
-		box[i] = SANDBOX_RECT_EMPTY
-	}
+	for i in 0 ..< 256 do box[i] = SANDBOX_RECT_EMPTY
 	for i in 0 ..< int(w) {
 		run[i] = 0
 		above[i] = 0
@@ -232,7 +233,6 @@ material_gbuffer_fill :: proc(
 				above[x] = c
 			}
 
-			seen[c] = true
 			b := &box[c]
 			b.min_x = min(b.min_x, i32(x))
 			b.min_y = min(b.min_y, i32(y))
@@ -253,7 +253,7 @@ material_gbuffer_fill :: proc(
 
 material_shaders_mark :: proc(ms: ^Material_Shaders, cells: []Cell, lux: []u8, w, h: i32, sky: []u8 = nil) {
 	if !ms.on do return
-	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.seen, &ms.box, sky)
+	material_gbuffer_fill(cells, lux, w, h, ms.run, ms.above, ms.gbuf, &ms.box, sky)
 	rl.UpdateTextureRec(ms.texture, rl.Rectangle{0, 0, f32(w), f32(h)}, raw_data(ms.gbuf))
 }
 
@@ -326,8 +326,9 @@ material_shaders_draw :: proc(
 	if !ms.on do return
 
 	for &one in ms.list {
-		if !ms.seen[u32(one.cell) & 255] do continue
-		sub_src, sub_dst := material_shader_rects(ms.box[u32(one.cell) & 255], src, dst)
+		b := ms.box[u32(one.cell) & 255]
+		if b.min_x > b.max_x do continue // the view does not hold it
+		sub_src, sub_dst := material_shader_rects(b, src, dst)
 		material_shader_pass(ms, &one, world, sub_src, sub_dst, size, origin, step, seconds, 0)
 	}
 }
@@ -354,7 +355,6 @@ material_shaders_draw_front :: proc(
 
 	for &one in ms.list {
 		if !one.brush do continue
-		if !ms.seen[u32(one.cell) & 255] do continue
 
 		b := ms.box[u32(one.cell) & 255]
 		clipped := Sandbox_Rect {
@@ -380,10 +380,9 @@ test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^test
 	out: [W * H * 4]u8
 	run: [W]u8
 	above: [W]Cell
-	seen: [256]bool
 	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box)
 
 	for c, i in cells {
 		testing.expectf(t, out[i * 4] == u8(c), "texel %d holds material %d and the buffer says %d", i, c, out[i * 4])
@@ -401,7 +400,7 @@ test_the_gbuffer_names_the_material_and_the_light_of_every_cell :: proc(t: ^test
 	// And with the day on it, the fourth byte is what is left after the
 	// sky, which is what stops a shader blooming a field at noon.
 	sky := [W * H]u8{0, 10, 5, 30, 0, 20, 60, 80, 40, 0, 100, 55}
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box, sky[:])
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box, sky[:])
 
 	for _, i in cells {
 		want := lux[i] - min(sky[i], lux[i])
@@ -432,10 +431,9 @@ test_the_gbuffer_counts_the_run_of_one_material_over_a_cell :: proc(t: ^testing.
 	out: [W * H * 4]u8
 	run: [W]u8
 	above: [W]Cell
-	seen: [256]bool
 	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box)
 
 	want := [W * H]u8 {
 		1, 1, 1,
@@ -465,15 +463,14 @@ test_the_gbuffer_names_only_the_materials_the_view_holds :: proc(t: ^testing.T) 
 	out: [W * H * 4]u8
 	run: [W]u8
 	above: [W]Cell
-	seen: [256]bool
 	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box)
 
-	testing.expect(t, seen[3], "the view holds material 3")
-	testing.expect(t, seen[9], "the view holds material 9")
-	testing.expect(t, !seen[0], "the view holds no air, so no pass may draw it")
-	testing.expect(t, !seen[255], "the view holds no material 255")
+	testing.expect(t, box[3].min_x <= box[3].max_x, "the view holds material 3")
+	testing.expect(t, box[9].min_x <= box[9].max_x, "the view holds material 9")
+	testing.expect(t, box[0].min_x > box[0].max_x, "the view holds no air, so no pass may draw it")
+	testing.expect(t, box[255].min_x > box[255].max_x, "the view holds no material 255")
 }
 
 @(test)
@@ -485,12 +482,11 @@ test_the_run_never_reaches_past_the_deepest_a_texel_can_hold :: proc(t: ^testing
 	out: [W * H * 4]u8
 	run: [W]u8
 	above: [W]Cell
-	seen: [256]bool
 	box: [256]Sandbox_Rect
 
 	for i in 0 ..< len(cells) do cells[i] = Cell(6)
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box)
 
 	testing.expect(t, out[2] == 1, "the top of a body of one material is its surface")
 	testing.expectf(
@@ -518,10 +514,9 @@ test_the_gbuffer_boxes_each_material_to_the_cells_it_covers :: proc(t: ^testing.
 	out: [W * H * 4]u8
 	run: [W]u8
 	above: [W]Cell
-	seen: [256]bool
 	box: [256]Sandbox_Rect
 
-	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &seen, &box)
+	material_gbuffer_fill(cells[:], lux[:], W, H, run[:], above[:], out[:], &box)
 
 	b := box[rock]
 	testing.expectf(
