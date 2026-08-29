@@ -478,15 +478,15 @@ def gradient_noise(rng, grain_x, grain_y):
     return field
 
 
-def noise_field(rng, grain_x=None, grain_y=None):
+def noise_field(rng):
     """The two octaves of gradient noise, summed, as floats.
 
     The first says how big a mass is and the second gives it lobes and
     inlets. It stays a float field because the bands and the middle of
     a tile have to be mixed before either is cut, not after.
     """
-    grain_x = grain_x or GRAIN_X
-    grain_y = grain_y or GRAIN_Y
+    grain_x = GRAIN_X
+    grain_y = GRAIN_Y
     coarse = gradient_noise(rng, grain_x, grain_y)
     fine = gradient_noise(rng, max(2, grain_x // 2), max(2, grain_y // 2))
     for y in range(TILE):

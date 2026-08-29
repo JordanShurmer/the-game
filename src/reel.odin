@@ -40,10 +40,12 @@ Reel_Segment :: struct {
 	skip:      bool,
 }
 
+// Record every Nth frame: 2 films at 60 and plays at 30.
+REEL_EVERY :: 2
+
 Reel :: struct {
 	segments: [dynamic]Reel_Segment,
 	dir:      string,
-	every:    int, // record every Nth frame; 2 films at 60 and plays at 30
 
 	at:    int,
 	tick:  int,
@@ -58,7 +60,6 @@ reel_load :: proc(path: string, allocator := context.allocator) -> (reel: Reel, 
 	defer delete(data, allocator)
 
 	reel.segments = make([dynamic]Reel_Segment, allocator)
-	reel.every = 2
 
 	text := string(data)
 	for raw_line in strings.split_lines_iterator(&text) {

@@ -464,14 +464,14 @@ def blob(land, cx, cy, r, name, flat=1.0):
             land.set(x, y, name)
 
 
-def coal_seam(land, cx, cy, rng, length=None, thick=None):
+def coal_seam(land, cx, cy, rng):
     """A bedded seam of coal: long, thin and near level, wandering
     gently up and down along its run and pinching to nothing at both
     ends instead of swelling into a round lump. It only ever replaces
     Rock, so a seam sits in the rock it was laid down in and never
     bleeds into the soil or the gravel either side of it."""
-    length = length or rng.between(70, 170)
-    thick = thick or rng.between(3, 7)
+    length = rng.between(70, 170)
+    thick = rng.between(3, 7)
     # A bed dips and rises over the length of itself, not every few
     # cells. One slow wave across the whole run, and a second half as
     # fast and a third as deep, so it is not a drawn sine either.
@@ -585,7 +585,7 @@ def plough(land, x0, x1, fallow):
             cx += rng.between(2, 3)
 
 
-def hedge(land, x, height=None):
+def hedge(land, x):
     """A hedgerow: a low bank of thrown-up dirt with the hedge itself
     grown up along the top of it, the way a field boundary that has
     stood a long time looks."""
@@ -593,7 +593,7 @@ def hedge(land, x, height=None):
     # The bank is a step, not a wall: the hedge on top of it is Brush
     # and he walks through that, so the only thing here that can stop
     # him is the earth it stands on.
-    h = height or rng.between(12, 19)
+    h = rng.between(12, 19)
     for dx in range(-2, 3):
         top = land.ground(x + dx)
         taper = min(2 - abs(dx), PLAYER_STEP - 2)
@@ -622,7 +622,7 @@ def ditch(land, x):
 GATE_W = 18  # wider than a wizard's body (8), so he walks straight through
 
 
-def fence(land, x0, x1, gate=True):
+def fence(land, x0, x1):
     """Posts and two rails of wood, following the ground, with a gap
     left open in the middle of the run.
 
@@ -633,7 +633,7 @@ def fence(land, x0, x1, gate=True):
     rail_hi = 12
     rail_lo = 6
     span = x1 - x0
-    gate_x0 = x0 + (span - GATE_W) // 2 if gate and span > GATE_W + 8 else x1 + 1
+    gate_x0 = x0 + (span - GATE_W) // 2 if span > GATE_W + 8 else x1 + 1
     gate_x1 = gate_x0 + GATE_W - 1
 
     for x in range(x0, x1 + 1):

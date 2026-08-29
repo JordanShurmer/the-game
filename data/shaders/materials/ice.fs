@@ -67,7 +67,6 @@ float ice_bubble(vec2 c)
 vec3 shade(Surf s)
 {
     vec3 n = s.n;
-    vec3 h = normalize(s.l + M_VIEW);
 
     float ndl = max(dot(n, s.l), 0.0);
     float ndv = max(dot(n, M_VIEW), 0.0);
