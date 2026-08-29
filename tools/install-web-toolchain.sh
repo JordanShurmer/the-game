@@ -45,9 +45,12 @@ if [ ! -d "$EMSDK" ]; then
 fi
 "$EMSDK/emsdk" install latest
 "$EMSDK/emsdk" activate latest
-# shellcheck disable=SC1091
-. "$EMSDK/emsdk_env.sh"
-emcc --version | head -1
+
+# emsdk_env.sh is not a POSIX shell script, and this one is: the tools
+# are taken by their path instead, which is what the Makefile does too.
+PATH="$EMSDK/upstream/emscripten:$PATH"
+export PATH
+emcc --version | sed -n 1p
 
 say "raylib $RAYLIB_VERSION for WebGL 2"
 if [ ! -d "$RAYLIB_SRC" ]; then
