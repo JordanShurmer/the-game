@@ -105,7 +105,7 @@ WEB        ?= web/build
 web: $(WEB)/index.html
 
 $(WEB)/index.html: $(SOURCES) $(wildcard cmd/web/*.odin) $(wildcard src/check/*.odin) \
-		web/entry.c web/shell.html $(shell find data -type f)
+		web/entry.c web/shell.html web/manifest.webmanifest $(shell find data -type f)
 	$(Q)mkdir -p $(WEB)
 	$(Q)$(ODIN) build cmd/web -target:freestanding_wasm32 -build-mode:obj -o:speed \
 		-define:RAYLIB_WASM_LIB=env.o -out:$(WEB)/game.wasm.o
@@ -114,8 +114,16 @@ $(WEB)/index.html: $(SOURCES) $(wildcard cmd/web/*.odin) $(wildcard src/check/*.
 		-O2 -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=192MB \
 		-sSTACK_SIZE=4mb -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 \
 		-sEXPORTED_RUNTIME_METHODS=HEAPF32 --preload-file data \
-		--shell-file web/shell.html $(TIMES:-show-timings=)
+		--shell-file web/shell.html
+	$(Q)cp web/manifest.webmanifest web/icon-192.png web/icon-512.png $(WEB)/
 	$(call wrote,$@)
+
+# The icons the page and an APK are known by: the wizard where he
+# starts, drawn by the game itself. They are data in the repository, so
+# this only needs running when he is redrawn.
+icons: $(BIN)/shot
+	$(Q)./$(BIN)/shot player=1 w=64 h=64 scale=8 out=web/icon-512.png
+	$(Q)./$(BIN)/shot player=1 w=64 h=64 scale=3 out=web/icon-192.png
 
 # The whole suite lives beside the code it covers. tools/test.sh is the
 # quiet front for `odin test src`: a mark for each test, and the

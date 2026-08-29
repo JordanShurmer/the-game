@@ -1,0 +1,15 @@
+{
+	"name": "The Game",
+	"short_name": "The Game",
+	"description": "A Noita-like game written in Odin from scratch.",
+	"start_url": "index.html",
+	"scope": ".",
+	"display": "fullscreen",
+	"orientation": "landscape",
+	"background_color": "#12141a",
+	"theme_color": "#12141a",
+	"icons": [
+		{"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
+		{"src": "icon-512.png", "sizes": "512x512", "type": "image/png"}
+	]
+}
