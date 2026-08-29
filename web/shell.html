@@ -4,49 +4,139 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#12141a">
+<meta name="description" content="A Noita-like game written in Odin from scratch.">
+<link rel="manifest" href="manifest.webmanifest">
 <title>The Game</title>
 <style>
 	html, body {
 		margin: 0;
-		padding: 0;
-		width: 100%;
 		height: 100%;
 		overflow: hidden;
 		background: #12141a;
 		color: #cfd3dc;
-		font: 16px/1.4 system-ui, sans-serif;
+		font: 16px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+		/* A game reads a touch itself: the page must not also scroll,
+		   zoom or select on it. */
 		touch-action: none;
 		overscroll-behavior: none;
 		-webkit-user-select: none;
 		user-select: none;
+		-webkit-tap-highlight-color: transparent;
 	}
-	canvas {
-		display: block;
-		width: 100%;
-		height: 100%;
-		background: #12141a;
-	}
-	#loading {
+
+	/* The canvas keeps the shape the game draws in and the page puts
+	   the bars beside it, so a touch lands where the picture is. */
+	#frame {
 		position: fixed;
 		inset: 0;
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
+
+	canvas {
+		display: block;
+		background: #12141a;
+		image-rendering: pixelated;
+		outline: none;
+	}
+
+	#front {
+		position: fixed;
+		inset: 0;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 1.5rem;
+		background: #12141a;
+		text-align: center;
+	}
+
+	#front h1 {
+		margin: 0;
+		font-size: 1.6rem;
+		font-weight: 600;
+		letter-spacing: 0.14em;
+		text-transform: uppercase;
+	}
+
+	#front p { margin: 0; color: #7d8494; max-width: 24rem; }
+
+	#play {
+		font: inherit;
+		color: #12141a;
+		background: #cfd3dc;
+		border: 0;
+		border-radius: 2rem;
+		padding: 0.7rem 2.2rem;
+		cursor: pointer;
+	}
+
+	#play[disabled] { background: #333845; color: #7d8494; cursor: default; }
 </style>
 </head>
 <body>
-<canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
-<div id="loading">loading the world</div>
+<div id="frame"><canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas></div>
+
+<div id="front">
+	<h1>The Game</h1>
+	<p id="word">digging the world out&#8230;</p>
+	<button id="play" disabled>wait</button>
+</div>
+
 <script>
+	var canvas = document.getElementById('canvas');
+	var front = document.getElementById('front');
+	var word = document.getElementById('word');
+	var play = document.getElementById('play');
+
+	// The canvas draws at the size the game asked for and the page
+	// scales it whole, so one game pixel is the same number of screen
+	// pixels across and down and a thumb lands on the control it is on.
+	function fit() {
+		var w = canvas.width || 1280, h = canvas.height || 720;
+		var scale = Math.min(innerWidth / w, innerHeight / h);
+		canvas.style.width = Math.round(w * scale) + 'px';
+		canvas.style.height = Math.round(h * scale) + 'px';
+	}
+
+	addEventListener('resize', fit);
+	addEventListener('orientationchange', fit);
+	document.addEventListener('fullscreenchange', fit);
+
+	// The module calls this when the world is loaded and the first
+	// frame is about to be drawn. Until then the page holds its front.
+	window.game_ready = function () {
+		fit();
+		word.textContent = 'a pad walks, three buttons work';
+		play.disabled = false;
+		play.textContent = 'play';
+		play.focus();
+	};
+
+	play.addEventListener('click', function () {
+		front.remove();
+		fit();
+		canvas.focus();
+
+		// A phone is played in landscape and with no address bar in the
+		// way. Both are asked for and neither is required: a browser
+		// that says no still plays.
+		var frame = document.getElementById('frame');
+		if (frame.requestFullscreen) {
+			frame.requestFullscreen().then(function () {
+				if (screen.orientation && screen.orientation.lock) {
+					screen.orientation.lock('landscape').catch(function () {});
+				}
+			}).catch(function () {});
+		}
+	});
+
 	var Module = {
-		canvas: document.getElementById('canvas'),
+		canvas: canvas,
 		print: function (text) { console.log(text); },
 		printErr: function (text) { console.warn(text); },
-		onRuntimeInitialized: function () {
-			var loading = document.getElementById('loading');
-			if (loading) loading.remove();
-		},
 	};
 </script>
 {{{ SCRIPT }}}

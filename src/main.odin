@@ -1376,7 +1376,11 @@ draw_hud :: proc(app: ^App) {
 		rl.RAYWHITE,
 	)
 
-	rl.DrawText("A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   Q/right-click throw a pot   wheel zoom   TAB world editor", 12, 100, 16, rl.GRAY)
+	// A screen that has been touched is a screen with no keys on it,
+	// and the keys are not what its player has to be told.
+	keys :: "A D walk   SHIFT run   SPACE/W/UP jump, hold to fly   E/click dig where you point   Q/right-click throw a pot   wheel zoom   TAB world editor"
+	thumbs :: "the pad walks, and pushed to its rim runs   the pad also aims, so dig and throw go where the thumb points   JUMP held flies"
+	rl.DrawText(app.touch.seen ? thumbs : keys, 12, 100, 16, rl.GRAY)
 }
 
 // The fast shade and the plain one must be the same picture. The fine
