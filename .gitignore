@@ -46,3 +46,4 @@ __pycache__/
 *.wasm
 web/build/
 android/build/
+node_modules
