@@ -64,20 +64,18 @@ LIGHT_CRYSTAL_FALL :: Light_Fall{open = 234, open_diag = 225, dense = 108, dense
 
 LIGHT_CRYSTALS :: 1024
 
-// The dimmest the trail may run before the next crystal falls. The
-// stat grid is the memory of every crystal dropped, thinned by the
-// flood's own falloff -- walls counted -- so reading it under the orb
-// is what "how close is the nearest crystal" means here. Bright enough
-// says this place is already left lit and nothing falls; dim says the
-// trail has all but run out, and one falls to carry it on.
-LIGHT_DROP_BELOW :: 6
-
-// And never nearer than this to a crystal already hanging, whatever
-// the light says: half the 320 cell view the game opens on. Through
-// cut rock and around a corner the light behind him dies in a few
-// samples, and without a floor the darkness rule bunches gems down
-// every winding stair; with it the trail stays a scatter of small far
-// lights whichever way the path bends.
+// How near a crystal may fall to one already hanging: half the 320
+// cell view the game opens on, so the trail stays a scatter of small
+// far lights whichever way the path bends.
+//
+// This is the whole rule now. A crystal once had to fall into the
+// dark as well, read off the stat grid, but the trail was retuned --
+// luminosity 110, reach 31, a steeper falloff -- until a crystal's
+// own light dies about 116 cells out, well inside this floor. The
+// darkness test could no longer turn anything away that the floor did
+// not, so it is gone. Soften LIGHT_CRYSTAL_FALL or lower this floor
+// and something like it has to come back: even at the brightest a
+// material row can carry, a crystal reaches only about 150 cells.
 LIGHT_DROP_APART :: 160.0
 
 LIGHT_GLOOM_R :: 30
@@ -593,18 +591,19 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	// field in the day must not lay one.
 	if light_day_at(l, x, y) >= LIGHT_ORB_WAKES do return
 
-	// A crystal falls where the trail has gone dim, and nowhere else.
-	// The stat grid under the orb already says how close the other
-	// crystals are -- through the flood's own falloff, walls counted --
-	// so a walk back over lit ground drops nothing, and the goal is
-	// exactly what is left behind: light where he has been.
+	// Nothing falls outside the light square: the orb hangs above him,
+	// so he can stand in the top rows with the staff head over the
+	// edge, and a crystal recorded out there would have no flood
+	// behind it.
 	lx := light_slot(x - l.origin_x)
 	ly := light_slot(y - l.origin_y)
 	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return
-	if l.stat[int(ly) * LIGHT_W + int(lx)] >= LIGHT_DROP_BELOW do return
 
-	// And never beside one that already hangs, however dark the rock
-	// between them keeps the reading.
+	// A crystal falls where the trail has run out, and nowhere else:
+	// never beside one that already hangs, however dark the rock
+	// between them keeps the place. The goal is exactly what it leaves
+	// behind -- light where he has been -- so a walk back over his own
+	// trail drops nothing.
 	for i in 0 ..< int(l.count) {
 		dx := f32(x) - l.crystals[i].x
 		dy := f32(y) - l.crystals[i].y
