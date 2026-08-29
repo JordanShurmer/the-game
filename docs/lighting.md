@@ -244,24 +244,27 @@ into a broad readable gradient with a bright heart.
 
 ## The crystals
 
-A crystal falls out of the orb where the trail has gone dim, and
-nowhere else. `light_drop` reads the `stat` grid under the orb — which
-is the memory of every crystal already dropped, thinned by the flood's
-own falloff, walls counted — and drops one only where that reading has
-sunk under `LIGHT_DROP_BELOW`. That is the whole rule, and the goal is
-exactly what it leaves behind: light where he has been. A walk back
-over the lit trail drops nothing
+A crystal falls out of the orb where the trail has run out, and
+nowhere else: `light_drop` drops one only where no crystal already
+hangs within `LIGHT_DROP_APART` (160 cells — half the 320 the game
+opens on). That is the whole rule, and the goal is exactly what it
+leaves behind: light where he has been. A walk back over the lit trail
+drops nothing
 (`test_no_crystal_falls_where_the_trail_already_lights_the_place`).
-The bar sits close to `LIGHT_FAINT`, and the floor below does the
-rest, so the crystals hang at least half a screen apart — 160 cells
-against the 320 the game opens on. Around a corner the pool dies with
-the corridor that carried it,
-so the trail turns the corner with him and a crystal falls in the side
-passage though the last one is near as the crow flies
-(`test_the_trail_turns_a_corner_with_him`). And however dark the rock
-keeps the reading, none falls within `LIGHT_DROP_APART` (160 cells —
-half that screen) of one already hanging: without the floor, the
-darkness rule bunched gems down every winding stair.
+Around a corner the distance is measured as the crow flies, so the
+trail turns the corner with him and the shaft past it gets a crystal
+of its own once he is far enough down it
+(`test_the_trail_turns_a_corner_with_him`).
+
+A crystal used to have to fall into the dark as well, read off the
+`stat` grid under the orb. The trail was retuned until that could not
+decide anything: at luminosity 110, reach 31 and the steeper falloff,
+a crystal's own light dies about 116 cells out, so anywhere the grid
+still read bright there was already a crystal inside the 160 cell
+floor. The floor does the whole of it now. Soften
+`LIGHT_CRYSTAL_FALL` or lower the floor and a darkness rule has to
+come back — even at the brightest a material row can carry, a crystal
+reaches only about 150 cells.
 
 A crystal is drawn as a tiny rupee of light: a slim six-sided gem,
 amber at the rim and white at the heart, inside a small faint halo
