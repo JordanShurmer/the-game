@@ -45,6 +45,19 @@ behind it, climb the debug ladder: `make V=1`, `tools/test.sh -v`,
 `./bin/shot ... debug=2`, or `GAME_DEBUG=3` in the environment for a
 whole shell. `AGENTS.md`, "How loud the toolset is", holds the rungs.
 
+The game also runs in a browser, which is how it reaches a phone:
+
+```sh
+sudo tools/install-web-toolchain.sh   # emscripten, and a raylib for the web
+make web                              # web/build/index.html
+tools/serve_web.py                    # http://127.0.0.1:8000
+```
+
+The page is the same package the window is, drawing the same world
+through WebGL 2, with a thumb pad in place of the keys.
+`tools/build-apk.sh` wraps it in an APK. `docs/web.md` says what the
+browser cannot have and what each of those costs.
+
 If `odin` is not on the PATH, `sudo tools/install-toolchain.sh`
 downloads the Odin release archive, which holds the compiler and the
 raylib library it links. It takes about half a minute.

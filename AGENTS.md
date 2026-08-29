@@ -10,7 +10,15 @@ make check              # types, and the things vet catches
 make test               # the whole suite: a mark for each test
 make                    # bin/the-game, bin/game-mcp, bin/shot
 make bench              # bin/bench, which times a tick
+make web                # web/build/index.html, the game in a browser
 ```
+
+The web build needs its own toolchain, `sudo
+tools/install-web-toolchain.sh`, and it holds rules the desktop build
+does not: no `core:os`, no `core:testing`, no `asm`, no loop of its
+own, and no `#version` in a shader. Read `docs/web.md` before adding
+an import to `src/`, and run `make web` after: the desktop build will
+not tell you that the browser one broke.
 
 If `odin` is not on the PATH, install it:
 `sudo tools/install-toolchain.sh` takes about half a minute and needs
@@ -208,12 +216,15 @@ of the whole world.
 | `cmd/mcp/` | the MCP server, for authoring and playing through a model |
 | `cmd/shot/` | the world as a PNG |
 | `cmd/bench/` | what a tick costs, on a real region |
+| `cmd/web/` | the game in a browser: the boot, and the heap it allocates from |
 | `data/rooms/` | the painted regions: the galleries, the homelands, the cavemouth |
 | `data/biome_map*.png` | the two worlds: the ordinary one, and the Laboratory |
 | `data/shaders/materials/` | one shader a material, and the prelude they share |
 | `data/` | materials, biomes, the biome maps, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
+| `web/` | the page, its manifest and its icons; `web/build` is what `make web` writes |
+| `android/` | the APK: a manifest, one WebView, and the page in its assets |
+| `tools/` | the toolchain installs, the APK build, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
 
 ## The two worlds
 
