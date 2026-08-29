@@ -1,7 +1,6 @@
 package game
 
 import "base:runtime"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
@@ -39,8 +38,8 @@ load_biomes :: proc(
 	err: Biome_Load_Error,
 	line_no: int,
 ) {
-	data, read_err := os.read_entire_file(path, allocator)
-	if read_err != nil {
+	data, read_ok := file_read(path, allocator)
+	if !read_ok {
 		return {}, .File_Unreadable, 0
 	}
 	defer delete(data, allocator)
@@ -514,8 +513,8 @@ test_biome_load_errors :: proc(t: ^testing.T) {
 
 	for c in cases {
 		path := "biome_error_case.tmp.txt"
-		testing.expect(t, os.write_entire_file(path, transmute([]byte)c.body) == nil, "write temp file")
-		defer os.remove(path)
+		testing.expect(t, file_write(path, transmute([]byte)c.body), "write temp file")
+		defer file_remove(path)
 
 		table, err, _ := load_biomes(path, materials)
 		testing.expectf(t, err == c.want, "%s: want %v, got %v", c.name, c.want, err)

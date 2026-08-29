@@ -1,7 +1,6 @@
 package game
 
 import "core:fmt"
-import "core:os"
 import "core:slice"
 import "core:testing"
 
@@ -494,7 +493,7 @@ test_live_map_matches_saved_map :: proc(t: ^testing.T) {
 	defer destroy_test_world(world)
 
 	path := "worldgen_live_vs_saved.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, save_biome_map_png(world.biome_map, world.biomes, path))
 
 	loaded, result := load_biome_map_png(path, world.biomes)
@@ -548,7 +547,7 @@ test_live_tile_edit_matches_saved_tiles :: proc(t: ^testing.T) {
 	testing.expect(t, written == wang_set_size(b))
 	defer {
 		for k in 0 ..< wang_set_size(b) {
-			os.remove(biome_tile_path(saved_table, Biome_Id(mine), b.tile_base + Tile_Id(k)))
+			file_remove(biome_tile_path(saved_table, Biome_Id(mine), b.tile_base + Tile_Id(k)))
 		}
 	}
 
@@ -660,7 +659,7 @@ make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, 
 		destroy_material_table(materials)
 		return {}, nil, false
 	}
-	defer os.remove(IMAGE_TEST_PNG)
+	defer file_remove(IMAGE_TEST_PNG)
 
 	body := fmt.tprintf(
 		"[Map]\nbiome_off_map = Ground\norigin_pixel = 1 0\ncells_per_pixel = %d\n" +
@@ -668,12 +667,12 @@ make_image_test_world :: proc(t: ^testing.T) -> (world: World, painted: []Cell, 
 		"[Gallery]\ncolor = 0xFF000002\nfill_0 = Rock\ngenerator = image\nimage = %s\n",
 		TILE_SIZE, IMAGE_TEST_PREFIX,
 	)
-	if !testing.expect(t, os.write_entire_file(IMAGE_TEST_TXT, transmute([]byte)body) == nil, "write temp biomes.txt") {
+	if !testing.expect(t, file_write(IMAGE_TEST_TXT, transmute([]byte)body), "write temp biomes.txt") {
 		delete(painted)
 		destroy_material_table(materials)
 		return {}, nil, false
 	}
-	defer os.remove(IMAGE_TEST_TXT)
+	defer file_remove(IMAGE_TEST_TXT)
 
 	biomes, err, line := load_biomes(IMAGE_TEST_TXT, materials)
 	if !testing.expectf(t, err == .None, "biomes must load, got %v at line %d", err, line) {

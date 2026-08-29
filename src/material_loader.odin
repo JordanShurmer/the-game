@@ -1,8 +1,6 @@
 package game
 
 import "base:runtime"
-import "core:fmt"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
@@ -70,8 +68,8 @@ reaction_chain_tail :: proc(reactions: []Reaction, head: i16) -> (tail: i16, flo
 }
 
 load_materials :: proc(path: string, allocator := context.allocator) -> (table: Material_Table, ok: bool) {
-	data, read_err := os.read_entire_file(path, allocator)
-	if read_err != nil {
+	data, read_ok := file_read(path, allocator)
+	if !read_ok {
 		return {}, false
 	}
 	defer delete(data, allocator)
@@ -158,12 +156,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 				n += 1
 			}
 			if n != 8 || fields[1] != "+" || fields[3] != "->" || fields[5] != "+" {
-				fmt.eprintfln("%s:%d: bad [Reactions] row: %q", path, line_index, trimmed)
+				note("%s:%d: bad [Reactions] row: %q", path, line_index, trimmed)
 				return {}, false
 			}
 			chance, chance_ok := strconv.parse_uint(fields[7], 10)
 			if !chance_ok || chance > 255 {
-				fmt.eprintfln("%s:%d: [Reactions] chance must be 0..255: %q", path, line_index, trimmed)
+				note("%s:%d: [Reactions] chance must be 0..255: %q", path, line_index, trimmed)
 				return {}, false
 			}
 			append(&reaction_rows, Raw_Reaction{a = fields[0], b = fields[2], c = fields[4], d = fields[6], chance = u8(chance), line = line_index})
@@ -259,7 +257,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		for product in products {
 			if int(product.to) == i do continue
 			if !material_is_phantom(table.materials[product.to]) do continue
-			fmt.eprintfln(
+			note(
 				"%s: %s %s %s, which has no physical interaction and cannot be in a cell",
 				path, table.names[i], product.what, table.names[product.to],
 			)
@@ -311,12 +309,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if aok do bad = row.b
 			if aok && bok do bad = row.c
 			if aok && bok && cok do bad = row.d
-			fmt.eprintfln("%s:%d: [Reactions] names unknown material %q", path, row.line, bad)
+			note("%s:%d: [Reactions] names unknown material %q", path, row.line, bad)
 			return {}, false
 		}
 
 		if material_is_phantom(table.materials[ci]) || material_is_phantom(table.materials[di]) {
-			fmt.eprintfln(
+			note(
 				"%s:%d: [Reactions] makes %s, which has no physical interaction and cannot be in a cell",
 				path, row.line, table.names[material_is_phantom(table.materials[ci]) ? ci : di],
 			)
@@ -327,7 +325,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		// never fire. See docs/alchemy.md, "A chain of rows".
 		tail_fwd, floor := reaction_chain_tail(reactions[:], reaction_at[ai*n+bi])
 		if floor >= 256 {
-			fmt.eprintfln(
+			note(
 				"%s:%d: [Reactions] row can never fire: the chain from %s:%d already reaches %d of 255",
 				path, row.line, path, reaction_line[tail_fwd], floor,
 			)
@@ -557,10 +555,10 @@ color       = 0xFF445566
 flammability= 4
 burns_to    = Wisp
 `
-	if !testing.expect(t, os.write_entire_file(path, transmute([]byte)text) == nil, "write temp file") {
+	if !testing.expect(t, file_write(path, transmute([]byte)text), "write temp file") {
 		return
 	}
-	defer os.remove(path)
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(
@@ -718,8 +716,8 @@ test_shipped_cold_targets_all_resolve :: proc(t: ^testing.T) {
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "the shipped table must load")
 
-	data, read_err := os.read_entire_file("data/materials.txt", context.allocator)
-	testing.expect(t, read_err == nil, "must be able to re-read the shipped file")
+	data, read_ok := file_read("data/materials.txt", context.allocator)
+	testing.expect(t, read_ok, "must be able to re-read the shipped file")
 	defer delete(data)
 	text := string(data)
 
@@ -805,8 +803,8 @@ test_reaction_at_is_minus_one_for_an_unrelated_pair :: proc(t: ^testing.T) {
 test_unknown_material_in_reaction_fails_the_load :: proc(t: ^testing.T) {
 	body := "[Air]\nstate = Gas\ncolor = 0x00000000\n\n[Rock]\nstate = Solid\ndensity = 2.5\nhardness = 8\ncolor = 0xFF010101\n\n[Reactions]\nRock + Unobtainium -> Air + Air   10\n"
 	path := "material_reaction_error_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(t, !ok, "an unknown material in a reaction row must fail the load")
@@ -842,8 +840,8 @@ color = 0xFF040404
 test_reaction_rows_chain_in_the_order_they_are_written :: proc(t: ^testing.T) {
 	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   100\nA + B -> D + D    50\n"
 	path := "material_chain_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	defer destroy_material_table(table)
@@ -898,8 +896,8 @@ test_the_loader_refuses_a_chain_row_that_can_never_fire :: proc(t: ^testing.T) {
 	// roll can ever be left over for the third.
 	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   200\nA + B -> D + D   100\nA + B -> C + D    10\n"
 	path := "material_chain_overflow_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(

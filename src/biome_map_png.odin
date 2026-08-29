@@ -1,6 +1,5 @@
 package game
 
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -26,7 +25,7 @@ load_biome_map_png :: proc(
 	m: Biome_Map,
 	result: Biome_Map_Load_Result,
 ) {
-	if !os.exists(path) {
+	if !file_exists(path) {
 		return {}, {err = .File_Unreadable}
 	}
 
@@ -109,7 +108,7 @@ test_biome_map_png_round_trip :: proc(t: ^testing.T) {
 	biome_map_set(m, 5, 3, Biome_Id(lake))
 
 	path := "biome_map_round_trip.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, save_biome_map_png(m, table, path), "save must succeed")
 
 	loaded, result := load_biome_map_png(path, table)
@@ -141,7 +140,7 @@ test_biome_map_png_unmatched_color_is_an_error :: proc(t: ^testing.T) {
 		format  = .UNCOMPRESSED_R8G8B8A8,
 	}
 	path := "biome_map_bad_color.tmp.png"
-	defer os.remove(path)
+	defer file_remove(path)
 	testing.expect(t, bool(rl.ExportImage(img, strings.clone_to_cstring(path, context.temp_allocator))))
 
 	_, result := load_biome_map_png(path, table)

@@ -1,8 +1,6 @@
 package game
 
-import "core:bufio"
 import "core:encoding/json"
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -46,28 +44,6 @@ list_biomes print.`
 
 mcp_silence_graphics_log :: proc() {
 	rl.SetTraceLogLevel(.NONE)
-}
-
-mcp_serve :: proc(s: ^Sim) {
-	reader: bufio.Reader
-	bufio.reader_init(&reader, os.to_stream(os.stdin), 64 * 1024)
-	defer bufio.reader_destroy(&reader)
-
-	for {
-		line, err := bufio.reader_read_string(&reader, '\n', context.allocator)
-		if err != nil do break
-		defer delete(line)
-
-		text := strings.trim_space(line)
-		if len(text) > 0 {
-			out := strings.builder_make(context.temp_allocator)
-			mcp_handle(s, text, &out)
-			if strings.builder_len(out) > 0 {
-				_, _ = os.write_string(os.stdout, strings.to_string(out))
-			}
-		}
-		free_all(context.temp_allocator)
-	}
 }
 
 mcp_handle :: proc(s: ^Sim, text: string, out: ^strings.Builder) {

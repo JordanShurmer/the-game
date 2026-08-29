@@ -1,6 +1,5 @@
 package game
 
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
@@ -55,8 +54,8 @@ Reel :: struct {
 }
 
 reel_load :: proc(path: string, allocator := context.allocator) -> (reel: Reel, ok: bool) {
-	data, err := os.read_entire_file(path, allocator)
-	if err != nil do return {}, false
+	data, read_ok := file_read(path, allocator)
+	if !read_ok do return {}, false
 	defer delete(data, allocator)
 
 	reel.segments = make([dynamic]Reel_Segment, allocator)
@@ -214,8 +213,8 @@ test_a_reel_line_reads_as_the_keys_it_stands_for :: proc(t: ^testing.T) {
 test_a_reel_runs_its_segments_in_order_and_ends :: proc(t: ^testing.T) {
 	path := "reel_test.tmp.txt"
 	body := "# a comment\n3 wait\n4 skip\n2 walk\n"
-	if !testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "the script must write") do return
-	defer os.remove(path)
+	if !testing.expect(t, file_write(path, transmute([]byte)body), "the script must write") do return
+	defer file_remove(path)
 
 	reel, ok := reel_load(path)
 	if !testing.expect(t, ok, "the script must load") do return

@@ -1,7 +1,5 @@
 package game
 
-import "core:fmt"
-import "core:os"
 import "core:testing"
 
 MATERIALS_PATH :: "data/materials.txt"
@@ -54,20 +52,20 @@ Sim_Error :: enum u8 {
 sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOMES_PATH) -> Sim_Error {
 	materials, mat_ok := load_materials(materials_path)
 	if !mat_ok {
-		fmt.eprintfln("cannot read %s (run from the repo root)", materials_path)
+		note("cannot read %s (run from the repo root)", materials_path)
 		return .Materials_Not_Found
 	}
 
 	air, air_found := find_material_index(materials, "Air")
 	if !air_found || air != int(MATERIAL_AIR) {
-		fmt.eprintfln("%s: Air must be the first material", materials_path)
+		note("%s: Air must be the first material", materials_path)
 		destroy_material_table(materials)
 		return .Air_Not_First
 	}
 
 	biomes, err, line := load_biomes(biomes_path, materials)
 	if err != .None {
-		fmt.eprintfln("%s: %v at line %d", biomes_path, err, line)
+		note("%s: %v at line %d", biomes_path, err, line)
 		destroy_material_table(materials)
 		return .Biomes_Not_Found
 	}
@@ -299,17 +297,17 @@ load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) 
 		path := found ? biome_tile_path(biomes, owner, id) : "a tile"
 		switch result.err {
 		case .Unmatched_Color:
-			fmt.eprintfln(
+			note(
 				"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
 				path, result.x, result.y, result.color, MATERIALS_PATH,
 			)
 		case .Wrong_Size:
-			fmt.eprintfln(
+			note(
 				"%s: the tile is %dx%d, but every tile must be %dx%d",
 				path, result.x, result.y, i32(TILE_SIZE), i32(TILE_SIZE),
 			)
 		case .File_Unreadable:
-			fmt.eprintfln("cannot read or write %s", path)
+			note("cannot read or write %s", path)
 		case .None:
 		}
 		return {}, false
@@ -320,7 +318,7 @@ load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) 
 		conflict := wang_find_conflict(loaded, b)
 		if !conflict.found do continue
 
-		fmt.eprintfln(
+		note(
 			"%s: %s and %s disagree at cell (%d,%d), where the edge color they share says they must not. Open the set and press N.",
 			biomes.names[i],
 			biome_tile_path(biomes, Biome_Id(i), conflict.a),
@@ -338,17 +336,17 @@ load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (im
 		cpp := biomes.cells_per_pixel
 		switch result.err {
 		case .Unmatched_Color:
-			fmt.eprintfln(
+			note(
 				"%s: pixel (%d,%d) has color %08X, which no material in %s claims",
 				path, result.x, result.y, result.color, MATERIALS_PATH,
 			)
 		case .Wrong_Size:
-			fmt.eprintfln(
+			note(
 				"%s: the image is %dx%d, but it must be %dx%d",
 				path, result.x, result.y, cpp, cpp,
 			)
 		case .File_Unreadable:
-			fmt.eprintfln("cannot read %s", path)
+			note("cannot read %s", path)
 		case .None:
 		}
 		return {}, false
@@ -359,17 +357,17 @@ load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (im
 load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool) {
 	path := biomes.map_image_path
 
-	if os.exists(path) {
+	if file_exists(path) {
 		loaded, result := load_biome_map_png(path, biomes)
 		if result.err == .Unmatched_Color {
-			fmt.eprintfln(
+			note(
 				"%s: pixel (%d,%d) has color %08X, which no biome in %s claims",
 				path, result.x, result.y, result.color, BIOMES_PATH,
 			)
 			return {}, false
 		}
 		if result.err != .None {
-			fmt.eprintfln("%s: %v", path, result.err)
+			note("%s: %v", path, result.err)
 			return {}, false
 		}
 		return loaded, true
@@ -377,11 +375,11 @@ load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool
 
 	m = make_starter_biome_map(biomes)
 	if !save_biome_map_png(m, biomes, path) {
-		fmt.eprintfln("cannot write %s", path)
+		note("cannot write %s", path)
 		destroy_biome_map(m)
 		return {}, false
 	}
-	fmt.eprintfln("wrote a starter map to %s", path)
+	note("wrote a starter map to %s", path)
 	return m, true
 }
 
