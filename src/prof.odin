@@ -49,7 +49,7 @@ Prof_Count :: enum u8 {
 }
 
 Prof :: struct {
-	spent: [Prof_Phase]time.Duration,
+	spent: [Prof_Phase]f64, // seconds
 	calls: [Prof_Phase]int,
 	count: [Prof_Count]int,
 	ticks: int,
@@ -58,12 +58,41 @@ Prof :: struct {
 
 prof: Prof
 
-prof_begin :: #force_inline proc() -> time.Tick {
-	return time.tick_now()
+// The clock, which is not the same clock on both targets. `core:time`
+// has none in a browser: `tick_now` answers zero there, and a profile
+// of nothing but zeroes is worse than no profile, because it reads as
+// "this costs nothing" on the one target where the cost is in doubt.
+// emscripten's own clock is the browser's monotonic one, in
+// milliseconds. See docs/web.md.
+when ODIN_ARCH == .wasm32 || ODIN_ARCH == .wasm64p32 {
+	@(default_calling_convention = "c")
+	foreign _ {
+		emscripten_get_now :: proc() -> f64 ---
+	}
+
+	Prof_Tick :: f64
+
+	prof_begin :: #force_inline proc() -> Prof_Tick {
+		return emscripten_get_now()
+	}
+
+	prof_since :: #force_inline proc(start: Prof_Tick) -> f64 {
+		return (emscripten_get_now() - start) / 1000
+	}
+} else {
+	Prof_Tick :: time.Tick
+
+	prof_begin :: #force_inline proc() -> Prof_Tick {
+		return time.tick_now()
+	}
+
+	prof_since :: #force_inline proc(start: Prof_Tick) -> f64 {
+		return time.duration_seconds(time.tick_since(start))
+	}
 }
 
-prof_end :: #force_inline proc(phase: Prof_Phase, start: time.Tick) {
-	prof.spent[phase] += time.tick_since(start)
+prof_end :: #force_inline proc(phase: Prof_Phase, start: Prof_Tick) {
+	prof.spent[phase] += prof_since(start)
 	prof.calls[phase] += 1
 }
 
@@ -85,7 +114,7 @@ prof_line :: proc(b: ^strings.Builder, phase: Prof_Phase) {
 	over := prof_over(phase)
 	if over == 0 || prof.calls[phase] == 0 do return
 
-	ms := time.duration_milliseconds(prof.spent[phase])
+	ms := prof.spent[phase] * 1000
 	fmt.sbprintfln(b, "%-12s %.3f ms  over %d", phase, ms / f64(over), over)
 }
 
