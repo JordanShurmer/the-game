@@ -1,7 +1,6 @@
 package game
 
 import "base:runtime"
-import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:testing"
@@ -74,8 +73,8 @@ reaction_chain_tail :: proc(reactions: []Reaction, head: i16) -> (tail: i16, flo
 }
 
 load_materials :: proc(path: string, allocator := context.allocator) -> (table: Material_Table, ok: bool) {
-	data, read_err := os.read_entire_file(path, allocator)
-	if read_err != nil {
+	data, read_ok := file_read(path, allocator)
+	if !read_ok {
 		return {}, false
 	}
 	defer delete(data, allocator)
@@ -570,10 +569,10 @@ color       = 0xFF445566
 flammability= 4
 burns_to    = Wisp
 `
-	if !testing.expect(t, os.write_entire_file(path, transmute([]byte)text) == nil, "write temp file") {
+	if !testing.expect(t, file_write(path, transmute([]byte)text), "write temp file") {
 		return
 	}
-	defer os.remove(path)
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(
@@ -731,8 +730,8 @@ test_shipped_cold_targets_all_resolve :: proc(t: ^testing.T) {
 	defer destroy_material_table(table)
 	testing.expect(t, ok, "the shipped table must load")
 
-	data, read_err := os.read_entire_file("data/materials.txt", context.allocator)
-	testing.expect(t, read_err == nil, "must be able to re-read the shipped file")
+	data, read_ok := file_read("data/materials.txt", context.allocator)
+	testing.expect(t, read_ok, "must be able to re-read the shipped file")
 	defer delete(data)
 	text := string(data)
 
@@ -818,8 +817,8 @@ test_reaction_at_is_minus_one_for_an_unrelated_pair :: proc(t: ^testing.T) {
 test_unknown_material_in_reaction_fails_the_load :: proc(t: ^testing.T) {
 	body := "[Air]\nstate = Gas\ncolor = 0x00000000\n\n[Rock]\nstate = Solid\ndensity = 2.5\nhardness = 8\ncolor = 0xFF010101\n\n[Reactions]\nRock + Unobtainium -> Air + Air   10\n"
 	path := "material_reaction_error_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(t, !ok, "an unknown material in a reaction row must fail the load")
@@ -855,8 +854,8 @@ color = 0xFF040404
 test_reaction_rows_chain_in_the_order_they_are_written :: proc(t: ^testing.T) {
 	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   100\nA + B -> D + D    50\n"
 	path := "material_chain_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	defer destroy_material_table(table)
@@ -911,8 +910,8 @@ test_the_loader_refuses_a_chain_row_that_can_never_fire :: proc(t: ^testing.T) {
 	// roll can ever be left over for the third.
 	body := CHAIN_MATERIALS + "\n[Reactions]\nA + B -> C + C   200\nA + B -> D + D   100\nA + B -> C + D    10\n"
 	path := "material_chain_overflow_case.tmp.txt"
-	testing.expect(t, os.write_entire_file(path, transmute([]byte)body) == nil, "write temp file")
-	defer os.remove(path)
+	testing.expect(t, file_write(path, transmute([]byte)body), "write temp file")
+	defer file_remove(path)
 
 	table, ok := load_materials(path)
 	testing.expect(

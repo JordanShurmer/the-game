@@ -1,6 +1,5 @@
 package game
 
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -67,7 +66,7 @@ water_load :: proc(materials: Material_Table, width, height: i32) -> (water: Wat
 	if !found do return water
 	water.cell = Cell(cell)
 
-	if !os.exists(WATER_SHADER_PATH) do return water
+	if !file_exists(WATER_SHADER_PATH) do return water
 
 	path := strings.clone_to_cstring(WATER_SHADER_PATH, context.temp_allocator)
 	water.shader = rl.LoadShader(nil, path)
@@ -228,8 +227,8 @@ test_the_depth_map_never_runs_past_the_deepest_it_can_hold :: proc(t: ^testing.T
 
 @(test)
 test_the_shader_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
-	source, err := os.read_entire_file_from_path(WATER_SHADER_PATH, context.allocator)
-	if !testing.expectf(t, err == nil, "%s must ship with the game, got %v", WATER_SHADER_PATH, err) do return
+	source, ok := file_read(WATER_SHADER_PATH, context.allocator)
+	if !testing.expectf(t, ok, "%s must ship with the game", WATER_SHADER_PATH) do return
 	defer delete(source)
 
 	text := string(source)

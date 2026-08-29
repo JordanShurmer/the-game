@@ -24,10 +24,7 @@ package game
 // how deep in the body of the material the cell lies) the prelude reads
 // out of that buffer.
 
-import "core:fmt"
 import "core:mem"
-import "core:os"
-import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -99,12 +96,12 @@ material_shaders_load :: proc(
 ) -> (
 	ms: Material_Shaders,
 ) {
-	prelude, prelude_err := os.read_entire_file_from_path(MATERIAL_SHADER_PRELUDE, context.allocator)
-	if prelude_err != nil do return ms
+	prelude, prelude_ok := file_read(MATERIAL_SHADER_PRELUDE, context.allocator)
+	if !prelude_ok do return ms
 	defer delete(prelude)
 
-	epilogue, epilogue_err := os.read_entire_file_from_path(MATERIAL_SHADER_MAIN, context.allocator)
-	if epilogue_err != nil do return ms
+	epilogue, epilogue_ok := file_read(MATERIAL_SHADER_MAIN, context.allocator)
+	if !epilogue_ok do return ms
 	defer delete(epilogue)
 
 	list := make([dynamic]Material_Shader)
@@ -113,11 +110,11 @@ material_shaders_load :: proc(
 		if i > 255 do break
 
 		path := material_shader_path(name, context.temp_allocator)
-		if !os.exists(path) do continue
+		if !file_exists(path) do continue
 
-		body, body_err := os.read_entire_file_from_path(path, context.temp_allocator)
-		if body_err != nil {
-			fmt.eprintfln("%s did not read: %v", path, body_err)
+		body, body_ok := file_read(path, context.temp_allocator)
+		if !body_ok {
+			fault("%s did not read", path)
 			continue
 		}
 
@@ -131,7 +128,7 @@ material_shaders_load :: proc(
 
 		shader := rl.LoadShaderFromMemory(nil, text)
 		if !rl.IsShaderValid(shader) {
-			fmt.eprintfln("%s did not compile: %s is drawn flat", path, name)
+			fault("%s did not compile: %s is drawn flat", path, name)
 			rl.UnloadShader(shader)
 			continue
 		}
@@ -569,17 +566,13 @@ test_every_material_shader_names_a_material_in_the_table :: proc(t: ^testing.T) 
 	if !testing.expect(t, ok, "the material table must load") do return
 	defer destroy_material_table(table)
 
-	pattern := strings.concatenate({MATERIAL_SHADER_DIR, "/*.fs"}, context.allocator)
-	defer delete(pattern)
-
-	files, err := filepath.glob(pattern, context.allocator)
-	if !testing.expectf(t, err == nil, "%s must be readable, got %v", MATERIAL_SHADER_DIR, err) do return
+	files := file_list(MATERIAL_SHADER_DIR, ".fs", context.allocator)
 	defer {
 		for f in files do delete(f)
 		delete(files)
 	}
 
-	testing.expect(t, len(files) > 0, "at least one material must bring a shader")
+	testing.expectf(t, len(files) > 0, "%s must bring at least one shader", MATERIAL_SHADER_DIR)
 
 	for file in files {
 		found := false
@@ -597,8 +590,8 @@ test_every_material_shader_names_a_material_in_the_table :: proc(t: ^testing.T) 
 
 @(test)
 test_the_prelude_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
-	source, err := os.read_entire_file_from_path(MATERIAL_SHADER_PRELUDE, context.allocator)
-	if !testing.expectf(t, err == nil, "%s must ship with the game, got %v", MATERIAL_SHADER_PRELUDE, err) do return
+	source, ok := file_read(MATERIAL_SHADER_PRELUDE, context.allocator)
+	if !testing.expectf(t, ok, "%s must ship with the game", MATERIAL_SHADER_PRELUDE) do return
 	defer delete(source)
 
 	text := string(source)
@@ -618,19 +611,15 @@ test_the_prelude_declares_every_value_the_game_sets :: proc(t: ^testing.T) {
 
 @(test)
 test_every_material_shader_holds_the_one_procedure_the_game_calls :: proc(t: ^testing.T) {
-	pattern := strings.concatenate({MATERIAL_SHADER_DIR, "/*.fs"}, context.allocator)
-	defer delete(pattern)
-
-	files, err := filepath.glob(pattern, context.allocator)
-	if !testing.expect(t, err == nil, "the shader folder must be readable") do return
+	files := file_list(MATERIAL_SHADER_DIR, ".fs", context.allocator)
 	defer {
 		for f in files do delete(f)
 		delete(files)
 	}
 
 	for file in files {
-		body, body_err := os.read_entire_file_from_path(file, context.temp_allocator)
-		if !testing.expectf(t, body_err == nil, "%s must be readable", file) do continue
+		body, body_ok := file_read(file, context.temp_allocator)
+		if !testing.expectf(t, body_ok, "%s must be readable", file) do continue
 
 		text := string(body)
 		testing.expectf(t, strings.contains(text, "vec3 shade(Surf s)"), "%s must hold `vec3 shade(Surf s)`, which is all the game calls", file)

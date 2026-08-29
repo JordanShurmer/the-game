@@ -20,7 +20,6 @@ package game
 
 import "base:runtime"
 import "core:fmt"
-import "core:os"
 import "core:strconv"
 import "core:testing"
 import rl "vendor:raylib"
@@ -41,9 +40,11 @@ noise_rung: int
 noise_init :: proc "contextless" () {
 	context = runtime.default_context()
 
-	text, found := os.lookup_env(NOISE_ENV, context.allocator)
-	defer if found do delete(text)
-	if found {
+	// Where the rung comes from is the one thing the browser cannot
+	// answer the way a shell does: a page has no environment. See
+	// src/noise_desktop.odin and src/noise_web.odin.
+	if text, found := noise_env(); found {
+		defer delete(text)
 		if n, ok := strconv.parse_int(text); ok {
 			noise_rung = clamp(n, NOISE_RESULT, NOISE_TRACE)
 		}
@@ -79,7 +80,14 @@ noise_graphics :: proc() {
 // A line that only a run asking for that rung sees.
 say :: proc(rung: int, format: string, args: ..any) {
 	if noise_rung < rung do return
-	fmt.eprintfln(format, ..args)
+	noise_talk(fmt.tprintf(format, ..args))
+}
+
+// The result of a run: the file a build wrote, the PNG a shot drew. It
+// carries no rung, and it goes to stdout, so a shell can keep it and
+// drop the talk.
+result :: proc(format: string, args: ..any) {
+	noise_result(fmt.tprintf(format, ..args))
 }
 
 // Something went wrong and the run is about to stop. A fault is not
@@ -94,7 +102,7 @@ fault :: proc(format: string, args: ..any) {
 	when ODIN_TEST {
 		if noise_rung < NOISE_STEP do return
 	}
-	fmt.eprintfln(format, ..args)
+	noise_talk(fmt.tprintf(format, ..args))
 }
 
 // ---------------------------------------------------------------- tests

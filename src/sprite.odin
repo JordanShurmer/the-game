@@ -1,7 +1,6 @@
 package game
 
 import "core:math"
-import "core:os"
 import "core:strings"
 import "core:testing"
 import rl "vendor:raylib"
@@ -52,7 +51,7 @@ load_sprite_sheet :: proc(
 	sheet: Sprite_Sheet,
 	result: Sprite_Load_Result,
 ) {
-	if !os.exists(path) do return {}, {err = .File_Unreadable}
+	if !file_exists(path) do return {}, {err = .File_Unreadable}
 
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	defer delete(cpath, context.temp_allocator)
