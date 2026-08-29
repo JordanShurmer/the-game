@@ -12,7 +12,7 @@ BIN  ?= bin
 
 SOURCES := $(wildcard src/*.odin)
 
-.PHONY: all game mcp shot bench test check run clean
+.PHONY: all game mcp shot bench test check run web clean
 
 all: game mcp shot
 
@@ -47,6 +47,31 @@ bench: $(BIN)/bench
 $(BIN)/bench: $(SOURCES) $(wildcard cmd/bench/*.odin)
 	@mkdir -p $(BIN)
 	$(ODIN) build cmd/bench -out:$@ -o:speed
+
+# The game as a page, which is how it reaches a phone. It needs the web
+# toolchain: sudo tools/install-web-toolchain.sh. See docs/web.md.
+#
+# RAYLIB_WASM_LIB=env.o is what makes the foreign names raylib's own
+# rather than the path of a library, which is what the emscripten
+# linker looks for.
+EMSDK      ?= $(HOME)/emsdk
+EMCC       ?= $(EMSDK)/upstream/emscripten/emcc
+RAYLIB_WEB ?= /usr/local/lib/raylib-web
+WEB        ?= web/build
+
+web: $(WEB)/index.html
+
+$(WEB)/index.html: $(SOURCES) $(wildcard cmd/web/*.odin) $(wildcard src/check/*.odin) \
+		web/entry.c web/shell.html $(shell find data -type f)
+	@mkdir -p $(WEB)
+	$(ODIN) build cmd/web -target:freestanding_wasm32 -build-mode:obj -o:speed \
+		-define:RAYLIB_WASM_LIB=env.o -out:$(WEB)/game.wasm.o
+	$(EMCC) -o $@ \
+		web/entry.c $(WEB)/game.wasm.o $(RAYLIB_WEB)/libraylib.web.a \
+		-O2 -sUSE_GLFW=3 -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=192MB \
+		-sSTACK_SIZE=4mb -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 \
+		-sEXPORTED_RUNTIME_METHODS=HEAPF32 --preload-file data \
+		--shell-file web/shell.html
 
 # The whole suite lives beside the code it covers.
 test:

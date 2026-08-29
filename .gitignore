@@ -44,3 +44,4 @@ __pycache__/
 *.ll
 *.bc
 *.wasm
+web/build/
