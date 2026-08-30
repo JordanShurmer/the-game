@@ -25,6 +25,7 @@ Material :: struct {
 	flammability:   u8,
 	force:          u8, // expulsive: the power and the reach of the blast it makes
 	luminosity:     u8, // the light it gives
+	spread:         u8, // how far a fluid looks along its row for a way on
 }
 
 #assert(size_of(Material) == 24)

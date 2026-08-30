@@ -107,6 +107,7 @@ main :: proc() {
 
 	if shot.on && !app.look.on do app_walk(&app, shot.walk)
 	if shot.on && shot.throw do app_throw(&app, shot.aim, shot.ticks)
+	if shot.on && !shot.throw do app_settle(&app, shot.ticks)
 
 	reel: Reel
 	if shot.script != "" {
@@ -288,6 +289,21 @@ app_walk :: proc(app: ^App, ticks: int) {
 
 	for _ in 0 ..< abs(ticks) {
 		sim_step_player(&app.sim, held, false)
+		sandbox_step(&app.sandbox, app.world.materials)
+	}
+	app_follow_player(app)
+	app.dirty = true
+}
+
+// Stand still and let the world run. `walk` moves him and steps the
+// sandbox with him, which is how a shot of the trail is taken; this is
+// for a shot of matter that moves on its own -- water running out of a
+// sluice, a fire walking a hedge -- where he is a bystander and moving
+// him would only put him in the way.
+@(private = "file")
+app_settle :: proc(app: ^App, ticks: int) {
+	for _ in 0 ..< ticks {
+		sim_step_player(&app.sim, {}, false)
 		sandbox_step(&app.sandbox, app.world.materials)
 	}
 	app_follow_player(app)

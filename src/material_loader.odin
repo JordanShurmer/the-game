@@ -205,6 +205,8 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if v, vok := strconv.parse_uint(value, 10); vok do current.force = u8(v)
 		case "luminosity":
 			if v, vok := strconv.parse_uint(value, 10); vok do current.luminosity = u8(v)
+		case "spread":
+			if v, vok := strconv.parse_uint(value, 10); vok do current.spread = u8(v)
 		case "lifetime":
 			if v, vok := strconv.parse_i64(value); vok do current.lifetime = i32(v)
 		case "color":
@@ -363,8 +365,9 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.weight = make([]u16, n, allocator)
 	table.kind   = make([]Cell_Kind, n, allocator)
 	table.work   = make([]Cell_Works, n, allocator)
-	for m, i in table.materials {
+	for &m, i in table.materials {
 		is_air := Cell(i) == MATERIAL_AIR
+		m.spread = cell_spread_of(m)
 		table.weight[i] = cell_weight_of(m, is_air)
 		table.kind[i]   = cell_kind_of(m, is_air)
 		table.work[i]   = cell_work_of(m, reacts[i])

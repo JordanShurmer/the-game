@@ -86,6 +86,7 @@ GREEN_SALT = 0x6E7E5F31  # keys the green's own dice, apart from the plots'
 SWELL_SALT = 0x51E11B0D  # keys the swell's own dice, apart from everything else
 PLOT_SALT = 0x2F8C6A19  # keys the plots' own dice, apart from the ground's
 STRATA_SALT = 0x7A19C3E5  # keys the gravel band's and rock roof's own wander
+POND_SALT = 0x1D3A77C9  # keys the millpond's own dice, apart from everything else
 SKIN = 3  # cells of Grass standing over the soil line, not cut into it
 
 # PLAYER_CLIMB in src/player.odin: the step a wizard takes without
@@ -160,6 +161,37 @@ WINDOW = 9  # a window opening, square
 EAVES = 7  # how far the thatch oversails the wall
 THATCH_T = 7  # how thick the thatch is on the slope
 
+# The millpond: one village of the twelve is a mill village, and this is
+# its water. It is drawn into homelands_6 alone, which the shipped seed
+# lays in the region the wizard starts in, immediately west of the yard
+# he lands in. See docs/homelands.md, "The millpond".
+#
+# West to east: a pond dug into the green with a shelving bank, a stone
+# dam across it with a sluice through the foot of the dam, a deeper pool
+# under the sluice, and a slipway out of the pool into the village. The
+# pond is filled over the sluice, so the first tick of the world opens
+# the sluice and the pond runs into the pool until the two stand level
+# at the sluice. Everything about that flow is the sandbox's; the
+# picture only sets it going. See docs/physics.md, "The reach is the
+# flatness".
+POND_PICTURE = 6  # the one of the twelve that has a mill
+
+MILL_X0, MILL_X1 = 96, 206  # the whole site, levelled for the mill
+POND_X0, POND_X1 = 100, 146  # the water behind the dam
+DAM_X0, DAM_X1 = 147, 153  # the dam itself
+POOL_X0, POOL_X1 = 154, 188  # the pool the spillway falls into
+SLIP_X0, SLIP_X1 = 189, 204  # the slipway out of the pool, east into the green
+
+POND_SHALLOW = 3  # the pond bed, under the coping, at its west bank
+POND_SHELVE = 16  # cells of shelving bank between that and the deep water
+POND_DEEP = 22  # and the bed at the dam
+POOL_DEEP = 24  # the pool bed, under the coping
+SPILL_TOP = 6  # the head of the spillway through the dam, under the coping
+SPILL_H = 3  # and how tall the opening is: what the pond finally stands at
+PARAPET = 3  # cells the dam stands over the coping
+POND_FILL = 1  # the water line the pond is drawn full to, under the coping
+STONE = 3  # cells of rock lining the bed and the banks
+
 AIR = "Air"
 GRASS = "Grass"
 DIRT = "Dirt"
@@ -171,6 +203,7 @@ WOOD = "Wood"
 ROCK = "Rock"
 GRAVEL = "Gravel"
 COAL = "Coal"
+WATER = "Water"
 
 
 # --------------------------------------------------------------- the noise
@@ -1030,8 +1063,127 @@ def paint_homeland(seed, i=0):
     if green_rng.chance(0.5):
         tree(land, GREEN_X0 - 34)
 
+    # One village of the twelve has a mill, and the mill has the only
+    # water on the surface of the world. It is drawn last, over the
+    # track and whatever the green rolled onto it, and before the edges
+    # are stamped, which must always win.
+    if i == POND_PICTURE:
+        millpond(land)
+
     stamp_edges(land)
     return land
+
+
+def level_site(land, x0, x1, base):
+    """Cut a span of ground down to one level, and ramp the ground back
+    to the line it had at each end, a cell a column, so no step out of
+    the site is more than a wizard's stride.
+
+    A mill site is levelled: it is the one place in a village where the
+    ground was worked flat on purpose, and the pond needs it, because a
+    flat sheet of water in a rolling hollow stands at the height of the
+    lowest bank around it and drowns everything under that."""
+
+    def cut(x, top):
+        if not 0 <= x < IMG:
+            return
+        was = land.top[x]
+        if top <= was:
+            return
+        land.fill(x, was - SKIN, x, top - 1, AIR)
+        land.fill(x, top - SKIN, x, top - 1, GRASS)
+        for y in range(top, IMG):
+            land.cells[y][x] = stratum_at_col(land, x, y)
+        land.top[x] = top
+
+    for x in range(x0, x1 + 1):
+        cut(x, base)
+    for start, step in ((x0 - 1, -1), (x1 + 1, 1)):
+        top = base - 1
+        x = start
+        while 0 <= x < IMG and top > land.top[x]:
+            cut(x, top)
+            top -= 1
+            x += step
+
+
+def millpond(land):
+    """The mill: a pond dug into the green, a stone dam with a spillway
+    cut through it, a pool under the spillway, and a slipway out of the
+    pool into the village.
+
+    The pond is drawn full to POND_FILL under the coping, which is five
+    cells over the head of the spillway, so it is not a picture of still
+    water. The first tick of the world opens the spillway: the pond runs
+    through the dam, falls the depth of the dry pool, fills it, and
+    stops when the pond has come down to the spillway. What is left is a
+    pond thirteen cells deep, a pool nine deep six cells under it, and
+    the dam standing between them. It is the one place in the world
+    where water is doing something the moment he can see it, and it is
+    fifty cells west of where he lands.
+
+    Everything the water touches is lined in Rock. Dirt, Loam, Gravel
+    and Sand are all powders heavier than water, so an unlined bank
+    walks into the pond as soon as the sandbox reaches it.
+
+    The mill is one village of the twelve. Nothing here says which:
+    paint_homeland draws it into POND_PICTURE, and the world's seed
+    decides where that picture is laid. On the shipped seed it is the
+    region he starts in, and
+    test_the_wizard_starts_within_sight_of_the_millpond holds it
+    there."""
+    base = land.level(MILL_X0, MILL_X1)
+    level_site(land, MILL_X0, MILL_X1, base)
+
+    def bed(x):
+        """The floor of the works in one column, under the coping."""
+        if POND_X0 <= x <= POND_X1:
+            run = min(1.0, (x - POND_X0) / POND_SHELVE)
+            return base + POND_SHALLOW + round((POND_DEEP - POND_SHALLOW) * run)
+        if DAM_X0 <= x <= DAM_X1:
+            return base + POND_DEEP
+        if POOL_X0 <= x <= POOL_X1:
+            return base + POOL_DEEP
+        if SLIP_X0 <= x <= SLIP_X1:
+            return base + round(POOL_DEEP * (SLIP_X1 - x) / (SLIP_X1 - SLIP_X0))
+        return base
+
+    # Dig it and line it. The lining is a skin under the floor and a
+    # wall at each end, not a block: what is under a mill pond is still
+    # the ground the village stands on.
+    for x in range(POND_X0 - STONE, SLIP_X1 + STONE + 1):
+        floor = bed(x)
+        land.fill(x, base - SKIN, x, floor - 1, AIR)
+        land.fill(x, floor, x, floor + STONE - 1, ROCK)
+    for x in range(POND_X0 - STONE, POND_X0):
+        land.fill(x, base, x, bed(POND_X0) + STONE - 1, ROCK)
+    for x in range(SLIP_X1 + 1, SLIP_X1 + STONE + 1):
+        land.fill(x, base, x, base + STONE - 1, ROCK)
+
+    # The dam: solid from the pond's floor to a parapet over the green,
+    # with the spillway cut clean through it, pond to pool. The sill is
+    # what the pond finally stands at, and the drop under it is what the
+    # water falls down.
+    land.fill(DAM_X0, base - PARAPET, DAM_X1, base + POND_DEEP + STONE - 1, ROCK)
+    land.fill(DAM_X0, base + SPILL_TOP, DAM_X1, base + SPILL_TOP + SPILL_H - 1, AIR)
+
+    for x in range(POND_X0, POND_X1 + 1):
+        land.fill(x, base + POND_FILL, x, bed(x) - 1, WATER)
+
+    # The track through the village runs down the slipway to the water,
+    # which is what a village pond is for.
+    for x in range(SLIP_X0, SLIP_X1 + 1):
+        floor = bed(x)
+        land.fill(x, floor, x, floor + 2, GRAVEL)
+
+    # A few stones spilled at the rim, so the coping does not read as a
+    # line ruled across the grass.
+    rng = Rng(land.seed ^ POND_SALT)
+    for _ in range(14):
+        x = rng.between(MILL_X0, MILL_X1)
+        if POND_X0 - STONE <= x <= SLIP_X1 + STONE:
+            continue
+        blob(land, x, base + rng.between(0, 2), rng.between(1, 2), ROCK)
 
 
 def carve(land, cx, cy, r, flat=1.0):
