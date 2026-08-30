@@ -35,6 +35,7 @@ await new Promise(ready => server.listen(port, ready));
 // the right picture and draws it slowly: the page is a few frames a
 // second here and that says nothing about a phone.
 const browser = await chromium.launch({
+	executablePath: process.env.CHROMIUM || undefined,
 	args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox'],
 });
 const context = await browser.newContext({
