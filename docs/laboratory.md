@@ -231,9 +231,12 @@ it, because that is the world those rectangles are in.
 Without the seed, `biome=Gallery` says so:
 
 ```
-Gallery is not painted on the map this seed opens; the galleries want
-seed=0x1AB (see [Laboratory] in data/biomes.txt)
+Gallery is not painted on the map this seed opens; try seed=0x1AB (see
+[Laboratory] in data/biomes.txt)
 ```
+
+The seed in that line is read off `[Laboratory]`, not written into the
+message, so it cannot name a world the file no longer holds.
 
 ## What this leaves out
 
