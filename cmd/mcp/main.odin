@@ -21,9 +21,10 @@ main :: proc() {
 	paths := 0
 	for argument in os.args[1:] {
 		if strings.has_prefix(argument, "seed=") {
-			v, ok := strconv.parse_u64_maybe_prefixed(argument[len("seed="):])
+			value := argument[len("seed="):]
+			v, ok := strconv.parse_u64_maybe_prefixed(value)
 			if !ok {
-				fmt.eprintfln("seed wants a whole number, and %q is not one", argument)
+				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
 				os.exit(1)
 			}
 			seed = v

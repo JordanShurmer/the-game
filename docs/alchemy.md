@@ -256,11 +256,16 @@ because that behaviour is worth keeping even though the shipped table
 no longer needs it.
 
 The alchemy gallery itself, `bin/bench seed=0x1AB biome=Alchemy
-size=512 ticks=900`, costs 0.13 ms a tick against the physics gallery's
-0.30 at the same size: the alchemy rooms are quieter, not more
-expensive. The seed is the world the galleries are in; without it the
-bench says so and stops, rather than timing whatever is at world (0,0)
-of the ordinary map.
+size=512 ticks=900`, costs 0.86 ms a tick against the physics gallery's
+0.31 at the same size, interleaved best of seven. It is the busier of
+the two, by about three times. This paragraph used to say the opposite,
+0.13 against 0.30: the 0.13 was measured before the second alchemy, and
+the table below records the same climb from the other side, 0.20 to
+0.46 on another machine. The physics number never moved.
+
+The seed is the world the galleries are in; without it the bench says
+so and stops, rather than timing whatever is at world (0,0) of the
+ordinary map.
 
 The second alchemy added thirteen materials, which takes the shipped
 table from 35 to 48. That is still under `SANDBOX_WIDE_IDS` (64), so
