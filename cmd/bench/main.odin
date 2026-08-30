@@ -20,12 +20,13 @@ import "core:time"
 
 import game "../../src"
 
-USAGE :: `usage: bench [biome=NAME] [size=N] [ticks=N] [warm=N] [debug=0..3]
+USAGE :: `usage: bench [biome=NAME] [size=N] [ticks=N] [warm=N] [seed=N] [debug=0..3]
 
   biome  a name in data/biomes.txt      (Coalmine)
   size   the sandbox edge, in cells     (the play size)
   ticks  how many ticks to time         (100)
   warm   how many ticks to throw away   (10)
+  seed   which world to open; seed=0x1AB is the Laboratory
   debug  0 the result, 1 the steps, 2 the phase table, 3 everything
 
 Run it from the repository root: the data paths are relative to it.`
@@ -35,6 +36,7 @@ Options :: struct {
 	size:  i32,
 	ticks: int,
 	warm:  int,
+	seed:  Maybe(u64),
 }
 
 main :: proc() {
@@ -50,7 +52,7 @@ main :: proc() {
 	}
 
 	sim: game.Sim
-	if err := game.sim_load(&sim); err != .None {
+	if err := game.sim_load(&sim, seed = options.seed); err != .None {
 		fmt.eprintfln("the game could not start: %v", err)
 		os.exit(1)
 	}
@@ -61,7 +63,13 @@ main :: proc() {
 		fmt.eprintfln("there is no biome named %q", options.biome)
 		os.exit(1)
 	}
-	x, y, _ := game.shot_biome_origin(sim.world, game.Biome_Id(index))
+	// A biome the map this seed opens does not paint has no origin, and
+	// benching world (0,0) under its name would read as a timing of it.
+	x, y, painted := game.shot_biome_origin(sim.world, game.Biome_Id(index))
+	if !painted {
+		fmt.eprintfln("%s", game.biome_not_on_this_map(sim.world.biomes, sim.world.seed, options.biome))
+		os.exit(1)
+	}
 
 	if err := game.sim_open_sandbox(&sim, options.size, options.size, x, y, 7, 0); err != .None {
 		fmt.eprintfln("a %dx%d sandbox could not be opened: %v", options.size, options.size, err)
@@ -135,6 +143,15 @@ read_options :: proc(options: ^Options) -> bool {
 		case "warm":
 			v, ok = number(key, value, 0)
 			options.warm = int(v)
+		case "seed":
+			// A seed is a world, and hexadecimal is a seed too:
+			// seed=0x1AB benches a room of the Laboratory.
+			seed, seed_ok := game.parse_seed(value)
+			if !seed_ok {
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
+				return false
+			}
+			options.seed = seed
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false

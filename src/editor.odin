@@ -84,7 +84,9 @@ editor_save_map :: proc(s: ^Sim) -> (message: string, ok: bool) {
 		), false
 	}
 
-	path := s.world.biomes.map_image_path
+	// The picture this world is painted on, which is not always the
+	// ordinary one: a map edited in the Laboratory saves the Laboratory.
+	path := world_layout(s.world.biomes, s.world.seed).map_image_path
 	if save_biome_map_png(s.world.biome_map, s.world.biomes, path) {
 		return fmt.tprintf("saved %s", path), true
 	}

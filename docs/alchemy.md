@@ -255,9 +255,17 @@ holds the stand-down correct for a table that truly does outgrow 64,
 because that behaviour is worth keeping even though the shipped table
 no longer needs it.
 
-The alchemy gallery itself, `bin/bench biome=Alchemy size=512
-ticks=900`, costs 0.13 ms a tick against the physics gallery's 0.30 at
-the same size: the alchemy rooms are quieter, not more expensive.
+The alchemy gallery itself, `bin/bench seed=0x1AB biome=Alchemy
+size=512 ticks=900`, costs 0.86 ms a tick against the physics gallery's
+0.31 at the same size, interleaved best of seven. It is the busier of
+the two, by about three times. This paragraph used to say the opposite,
+0.13 against 0.30: the 0.13 was measured before the second alchemy, and
+the table below records the same climb from the other side, 0.20 to
+0.46 on another machine. The physics number never moved.
+
+The seed is the world the galleries are in; without it the bench says
+so and stops, rather than timing whatever is at world (0,0) of the
+ordinary map.
 
 The second alchemy added thirteen materials, which takes the shipped
 table from 35 to 48. That is still under `SANDBOX_WIDE_IDS` (64), so
@@ -276,6 +284,8 @@ not the absolute values:
 | `Coalmine` 2048, the shipped world | 0.88 ms | 0.91 ms |
 | `Gallery` 512, the physics rooms | 0.20 ms | 0.24 ms |
 | `Alchemy` 512, this gallery | 0.20 ms | 0.46 ms |
+
+The two gallery rows want `seed=0x1AB` to run again.
 
 The shipped world and the physics gallery hold their checksums exactly
 across the change, which is the number that matters: thirteen materials
@@ -481,11 +491,15 @@ effect of the world already is.
 
 ## The alchemy gallery
 
-A second hand painted region, east of the physics gallery: map pixel
-(9,3), world x 512 to 1023, y -2560 to -2049. Same shape as the first
-one, and drawn by the same code: sixteen rooms in a four by four grid,
-each 128 cells square including its bedrock wall, doors between the
-rooms of a row, shafts down the ends.
+A second hand painted region, east of the physics gallery. Same shape
+as the first one, and drawn by the same code: sixteen rooms in a four
+by four grid, each 128 cells square including its bedrock wall, doors
+between the rooms of a row, shafts down the ends.
+
+Both galleries live in a world of their own now, opened by
+`seed=0x1AB`, and this one is map pixel (10,2) of it: world x 1024 to
+1535, y -3072 to -2561. Every shot command below wants the seed in
+front of it. See `docs/laboratory.md`.
 
 `tools/seed_gallery.py` and the new `tools/seed_alchemy.py` share
 `tools/museum.py`: the canvas, the room, the doors, the shafts, the
@@ -497,7 +511,9 @@ regenerated and has to come back byte for byte the same file.
 Rooms 1 to 6 are the first alchemy and rooms 7 to 14 are the second.
 Room 10 and rooms 15 and 16 are halls with plinths, walled and doored
 and empty, because this gallery is meant to be filled as the alchemy
-grows, and it has been once already.
+grows, and it has been once already. The Laboratory is where they are
+filled from now on: another hall is another region of that map and
+another pixel beside these two.
 
 Room 10 is empty for a reason of its own: room 6 comes down into it,
 and room 6 is judged by what can be seen from it, so nothing in room 10
@@ -536,17 +552,18 @@ and the frame stays black.
 
 ```sh
 make shot
-./bin/shot biome=Alchemy out=shots/alchemy.png                       # as painted
-./bin/shot biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
-./bin/shot x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
-./bin/shot x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
-./bin/shot x=896 y=-2432 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
-./bin/shot x=896 y=-2304 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
-./bin/shot x=512 y=-2176 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
+S=seed=0x1AB   # the world the galleries are in; see docs/laboratory.md
+./bin/shot $S biome=Alchemy out=shots/alchemy.png                       # as painted
+./bin/shot $S biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
+./bin/shot $S x=1152 y=-3072 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
+./bin/shot $S x=1152 y=-2944 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
+./bin/shot $S x=1408 y=-2944 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
+./bin/shot $S x=1408 y=-2816 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
+./bin/shot $S x=1024 y=-2688 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
 ```
 
-A room of the second alchemy sits at world x `512 + 128 * col`, y
-`-2560 + 128 * row`, counting rooms 1 to 16 in reading order. Rooms 8,
+A room of the second alchemy sits at world x `1024 + 128 * col`, y
+`-3072 + 128 * row`, counting rooms 1 to 16 in reading order. Rooms 8,
 9, 11 and 14 make no light of their own, so shoot them flat: the
 picture to read there is what the colours have become, not what is lit.
 
@@ -554,11 +571,15 @@ Rooms 2 and 6 are lit by nothing but their own reaction, so there is no
 wizard to carry the light: `light=1` with no `player` follows the
 middle of the view instead of the origin, which is the only way a room
 this far from where he starts can be judged lit at all. `player=1`
-would light the shot from wherever he starts instead, nowhere near
-this gallery, and the room would read as dark for the wrong reason.
+would light the shot from where he lands instead, which is the roof of
+the gallery next door, and the room would read as dark for the wrong
+reason.
 
 The mix is a thing that flashes, so a still is a still of one tick.
 Judge it by a run of them, 30 ticks apart, and by the pool that is
-left when they stop. Room 6's burst is brief, measured at "Layering
-seals a slow drip" above: look inside the first 150 ticks or the shot
-misses it.
+left when they stop. Room 4's burst is the brief one, measured at
+"Layering seals a slow drip" above: look inside the first 150 ticks or
+the shot misses it. Room 6 is the room that section is the answer to,
+and it is the other way about — shot at 300, 700, 1300 and 1600 ticks
+the ribbon is still hanging there, so any tick inside the run of the
+two chambers gives a picture of it.

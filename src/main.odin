@@ -74,6 +74,7 @@ Window_Shot :: struct {
 	look:    string,
 	script:  string,
 	record:  string,
+	seed:    Maybe(u64),
 	on:      bool,
 	profile: bool,
 }
@@ -91,7 +92,7 @@ main :: proc() {
 	}
 
 	app: App
-	if !app_load_data(&app) {
+	if !app_load_data(&app, shot.seed) {
 		os.exit(1)
 	}
 	defer app_unload_data(&app)
@@ -269,6 +270,7 @@ instead, which is how the shots and the reel are made.
   script=PATH   play a reel script
   record=DIR    write every reel frame into DIR
   profile=1     print the phase table on exit
+  seed=N        which world to open; seed=0x1AB is the Laboratory
   debug=0..3    0 the result, 1 the steps, 2 the detail, 3 everything
 
 Run it from the repository root: the data paths are relative to it.`
@@ -328,6 +330,20 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot, ok: bool) {
 		case "profile":
 			n, read = number(key, value)
 			shot.profile = n != 0
+		case "seed":
+			// A seed is a world, and hexadecimal is a seed too, which
+			// is how seed=0x1AB opens the Laboratory. It is not read
+			// by `number` above because a world is a u64 where these
+			// are ints, and because a number too big for one must be
+			// refused rather than wrapped. See parse_seed in
+			// src/laboratory.odin.
+			seed, seed_ok := parse_seed(value)
+			read = seed_ok
+			if read {
+				shot.seed = seed
+			} else {
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
+			}
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return shot, false
@@ -377,8 +393,8 @@ app_throw :: proc(app: ^App, aim: u8, ticks: int) {
 	app.dirty = true
 }
 
-app_load_data :: proc(app: ^App) -> bool {
-	if err := sim_load(&app.sim); err != .None do return false
+app_load_data :: proc(app: ^App, seed: Maybe(u64) = nil) -> bool {
+	if err := sim_load(&app.sim, seed = seed); err != .None do return false
 
 	sim_play_begin(&app.sim)
 
@@ -1265,8 +1281,18 @@ draw_hud :: proc(app: ^App) {
 	id := world_biome_at(app.world, cx, cy)
 	b := app.world.biomes.biomes[id]
 
-	rl.DrawRectangle(0, 0, 460, 130, rl.Fade(rl.BLACK, 0.55))
-	rl.DrawText(fmt.ctprintf("centre %d, %d   %d cell/texel   %dx zoom", cx, cy, app.step, app.zoom), 12, 10, 18, rl.RAYWHITE)
+	// Which world he is standing in, because a seed is a world and one
+	// seed is a different one. See src/laboratory.odin.
+	world := world_is_laboratory(app.world.biomes, app.world.seed) ? "Laboratory" : "world"
+
+	rl.DrawRectangle(0, 0, 620, 130, rl.Fade(rl.BLACK, 0.55))
+	rl.DrawText(
+		fmt.ctprintf(
+			"centre %d, %d   %d cell/texel   %dx zoom   %s seed %d",
+			cx, cy, app.step, app.zoom, world, app.world.seed,
+		),
+		12, 10, 18, rl.RAYWHITE,
+	)
 	rl.DrawText(
 		fmt.ctprintf("biome at centre: %s", app.world.biomes.names[id]),
 		12,

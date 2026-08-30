@@ -22,6 +22,13 @@ The data paths are relative, so start the server from the repository
 root. Other files can be named as arguments:
 `game-mcp [materials-file] [biomes-file]`.
 
+`seed=N` may come anywhere among those arguments, and it opens the
+world that seed names. `./bin/game-mcp seed=0x1AB` serves the
+Laboratory, which is the world the two galleries are in; see
+`docs/laboratory.md`. The server says which world it opened, and its
+seed, on the line it prints when it starts, and `world_status` says it
+again.
+
 ## The three parts
 
 The tools follow the three things the game is made of.

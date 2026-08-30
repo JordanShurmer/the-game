@@ -480,9 +480,15 @@ world_spawn_fallback :: proc(t: Terrain) -> (x, y: i32, found: bool) {
 // lies on. The homelands are six regions of one biome and he starts on
 // the fourth of them, so the walk east to the caves is the longer half
 // of the village.
+//
+// The map and the spawn are what a seed can change, so both come from
+// the layout the seed opens rather than from the table: in the
+// Laboratory he starts on the roof of the physics gallery instead. See
+// src/laboratory.odin.
 @(private = "file")
 world_find_spawn_region :: proc(world: World) -> (px, py: i32, found: bool) {
-	id := world.biomes.spawn_biome
+	layout := world_layout(world.biomes, world.seed)
+	id := layout.spawn_biome
 	if id == BIOME_EMPTY do return 0, 0, false
 
 	m := world.biome_map
@@ -491,7 +497,7 @@ world_find_spawn_region :: proc(world: World) -> (px, py: i32, found: bool) {
 		for x in 0 ..< m.width {
 			if biome_map_at(m, x, y) != id do continue
 			seen += 1
-			if seen == world.biomes.spawn_region do return x, y, true
+			if seen == layout.spawn_region do return x, y, true
 		}
 	}
 	return 0, 0, false

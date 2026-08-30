@@ -33,6 +33,7 @@ USAGE :: `usage: shot [key=value ...]
   ticks    open a sandbox and run it this many ticks
   ignite   x,y[,r]          needs ticks=N
   explode  x,y[,r][,power]  needs ticks=N
+  seed     which world to open; seed=0x1AB is the Laboratory
   debug    0 the result, 1 the steps, 2 the detail, 3 everything
 
 Run it from the repository root: the data paths are relative to it.`
@@ -62,6 +63,7 @@ Options :: struct {
 	ticks_set:  bool,
 	ignite:     Point_Command,
 	explode:    Point_Command,
+	seed:       Maybe(u64),
 }
 
 main :: proc() {
@@ -83,7 +85,7 @@ main :: proc() {
 
 	game.say(game.NOISE_STEP, "loading the world")
 	sim: game.Sim
-	if err := game.sim_load(&sim); err != .None {
+	if err := game.sim_load(&sim, seed = options.seed); err != .None {
 		fmt.eprintfln("the world could not load: %v", err)
 		os.exit(1)
 	}
@@ -145,7 +147,7 @@ main :: proc() {
 		}
 		x, y, aimed := game.shot_biome_origin(sim.world, game.Biome_Id(idx))
 		if !aimed {
-			fmt.eprintfln("%s is not painted on the biome map yet", options.biome)
+			fmt.eprintfln("%s", game.biome_not_on_this_map(sim.world.biomes, sim.world.seed, options.biome))
 			os.exit(1)
 		}
 		if !options.aimed {
@@ -317,6 +319,15 @@ read_options :: proc(options: ^Options) -> bool {
 			options.ignite, ok = point_command(key, value, 0, 0)
 		case "explode":
 			options.explode, ok = point_command(key, value, EXPLODE_DEFAULT_RADIUS, EXPLODE_DEFAULT_POWER)
+		case "seed":
+			// A seed is a world, and hexadecimal is a seed too:
+			// seed=0x1AB opens the Laboratory. See docs/laboratory.md.
+			v, seed_ok := game.parse_seed(value)
+			if !seed_ok {
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
+				return false
+			}
+			options.seed = v
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false

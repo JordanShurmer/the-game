@@ -74,7 +74,10 @@ ways to read it, no tools to attach:
 
 A time names the phase to look at; the counts say whether the work
 itself grew or the work got slower. The checksum bench prints must not
-change under an optimization: same seed, same world, same bits.
+change under an optimization: same seed, same world, same bits. It
+moves when the world moves, and then the commit has to say so and say
+which windows moved with it -- see "What this leaves out" at the end of
+`docs/laboratory.md` for the shape of that.
 
 ## Look at the world
 
@@ -89,6 +92,7 @@ make shot
 ./bin/shot biome=Coalmine step=2 out=shots/wide.png     # pulled back
 ./bin/shot player=1 out=shots/wizard.png                # the wizard where he starts
 ./bin/shot walk=-600 out=shots/dark.png                 # walked, with the light he left
+./bin/shot seed=0x1AB biome=Gallery out=shots/museum.png  # the other world
 ```
 
 The water shader runs on the GPU, so `bin/shot` cannot draw it and
@@ -103,9 +107,9 @@ make game
 
 Its arguments are `shot` (the PNG to write), `frames` (how many frames
 to draw first), `walk` (ticks of walk before the picture, negative for
-left, toward the mill) and `ticks` (ticks with him standing still,
-which is how to watch water go somewhere without putting him in the
-way of it).
+left, toward the mill), `ticks` (ticks with him standing still, which
+is how to watch water go somewhere without putting him in the way of
+it) and `seed` (which world to open; see "The two worlds").
 
 ```sh
 ./bin/the-game shot=shots/mill.png frames=2 ticks=90   # the millpond, part way through
@@ -114,7 +118,7 @@ way of it).
 Then open the PNG and look at it. `grid=1` draws the tile lattice and
 the region borders, which is how to tell a shape you drew from a seam
 the lattice left. Arguments are `key=value`: `out biome x y w h step
-scale grid player light walk ticks ignite explode`. Shots are not kept
+scale grid player light walk ticks ignite explode seed`. Shots are not kept
 in the repository.
 
 `player=1` lights the shot; `light=0` turns that off and draws the
@@ -205,10 +209,51 @@ of the whole world.
 | `cmd/shot/` | the world as a PNG |
 | `cmd/bench/` | what a tick costs, on a real region |
 | `data/rooms/` | the painted regions: the galleries, the homelands, the cavemouth |
+| `data/biome_map*.png` | the two worlds: the ordinary one, and the Laboratory |
 | `data/shaders/materials/` | one shader a material, and the prelude they share |
-| `data/` | materials, biomes, the biome map, the tile sets, the sprites, the shaders |
+| `data/` | materials, biomes, the biome maps, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
-| `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, and the gallery seeders |
+| `tools/` | the toolchain install, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
+
+## The two worlds
+
+A seed is a world, and every binary that opens one takes `seed=N`:
+`./bin/the-game`, `./bin/shot`, `./bin/bench` and `./bin/game-mcp`.
+Hexadecimal counts, so `seed=0x1AB` and `seed=427` are the same world.
+
+Every seed but one lays the ordinary map out another way: another
+lattice of tiles, another six of the twelve homelands pictures. One
+seed does not lay it out at all. `seed=0x1AB` opens the **Laboratory**,
+which is the physics gallery and the alchemy gallery side by side at
+the bottom of a cutting in the rock, and nothing else, and it is the
+only way into either of them. `docs/laboratory.md` is the design note. Read it before
+changing `src/laboratory.odin`, `tools/seed_laboratory.py`, or the
+`[Laboratory]` section of `data/biomes.txt`.
+
+```sh
+./bin/shot seed=0x1AB biome=Gallery out=shots/gallery.png
+./bin/shot seed=0x1AB biome=Alchemy ticks=600 out=shots/alchemy.png
+tools/seed_laboratory.py           # draws data/biome_map_laboratory.png
+tools/seed_laboratory.py --check   # holds the file to the rules
+```
+
+Three rules there are easy to break and only visible in a shot of the
+whole world, and `--check` holds the map to all three:
+
+- **The two halls share a row.** Their bedrock roofs are the only
+  floor of that world, and two regions on different rows have no
+  joined roof at all.
+- **There is open sky the whole way up over both.** The roof is what
+  the wizard walks on, and a roof with earth over it is a cellar.
+- **The sky stops where the museum stops.** The light is drawn a
+  square at a time and everything outside that square is black, so the
+  world is laid in the middle of one: rock in the dark reads as rock,
+  and sky in the dark reads as a hole in the world.
+
+`test_the_wizard_walks_the_laboratory_into_both_galleries` plays the
+world through `sim_step_player`: down one door, back out on the
+jetpack, along the roof, and down the other. A change that makes the
+museum unwalkable fails there.
 
 ## The homelands
 

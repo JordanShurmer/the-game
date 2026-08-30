@@ -783,7 +783,7 @@ one cell's own cost, against the row each material sits in below.
 
 ### Looking at the ladder
 
-Room 13 of the gallery ("Digging," world (0,-2176)) is eight vertical
+Room 13 of the gallery ("Digging," world (512,-2688)) is eight vertical
 strips of material, softest to hardest: dirt, sand, coal, wood, rock,
 obsidian, steel, bedrock. It was built to show what the digger can
 cut. It shows what a blast grades even better, because one picture
@@ -791,11 +791,12 @@ holds every rung at once.
 
 ```sh
 odin build cmd/shot -out:/tmp/s -o:speed
-/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 out=shots/r3_strips.png
-/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 ticks=2 \
-       explode=64,-2112,36,36 out=shots/r3_strips_wood.png
-/tmp/s x=0 y=-2176 w=128 h=128 scale=4 light=0 ticks=2 \
-       explode=101,-2112,36,36 out=shots/r3_strips_steel.png
+S=seed=0x1AB   # the world the galleries are in; see docs/laboratory.md
+/tmp/s $S x=512 y=-2688 w=128 h=128 scale=4 light=0 out=shots/r3_strips.png
+/tmp/s $S x=512 y=-2688 w=128 h=128 scale=4 light=0 ticks=2 \
+       explode=576,-2624,36,36 out=shots/r3_strips_wood.png
+/tmp/s $S x=512 y=-2688 w=128 h=128 scale=4 light=0 ticks=2 \
+       explode=613,-2624,36,36 out=shots/r3_strips_steel.png
 ```
 
 The first blast sits on the wood and rock border. **Scatter** is the
@@ -1086,11 +1087,22 @@ The gallery goes at map pixel (8,3), which is world x 0 to 511 and y
 which is where `world_find_mouth` — the spawn rule the world had before
 there were homelands — would have been most likely to find it.
 
-He no longer starts there. `[Map]` names the homelands as the spawn
-biome, so he starts six regions west of the gallery and reaches it by
-walking east past the pit and along the roof of the museum to its
-door. See `docs/homelands.md`. Step 8 shoots the picture and says where
-he actually lands.
+That pixel is no longer on the ordinary map. A museum does not belong
+in the middle of a coal seam, so the two galleries were moved into a
+world of their own: `seed=0x1AB` opens the Laboratory, which is the
+physics gallery and the alchemy gallery side by side at the bottom of
+a cutting in the rock, and nothing else. See `docs/laboratory.md`.
+
+**The gallery is now at map pixel (9,2) of that map, which is world x
+512 to 1023 and y -3072 to -2561.** It moved because the light is
+drawn a square 2048 cells on a side at a time and everything outside
+that square is black, and the old rectangle lay against the edge of
+one. The museum is laid in the middle of a square now, with lit rock
+all round it. A room of the gallery is at world x `512 + 128 * col`, y
+`-3072 + 128 * row`, counting rooms 1 to 16 in reading order.
+
+The wizard lands on the roof of the museum, between its two doors.
+`[Laboratory]` names that spawn the way `[Map]` names the village one.
 
 ### The rooms
 
@@ -1154,10 +1166,13 @@ Three rules `--check` holds:
 after the physics runs:
 
 ```sh
-./bin/shot biome=Gallery out=shots/gallery.png              # as painted
-./bin/shot biome=Gallery ticks=600 out=shots/gallery600.png # after 10 seconds
-./bin/shot biome=Gallery x=0 y=-2560 w=128 h=128 scale=2 ticks=300 out=shots/room1.png
+./bin/shot seed=0x1AB biome=Gallery out=shots/gallery.png              # as painted
+./bin/shot seed=0x1AB biome=Gallery ticks=600 out=shots/gallery600.png # after 10 seconds
+./bin/shot seed=0x1AB x=512 y=-3072 w=128 h=128 scale=2 ticks=300 out=shots/room1.png
 ```
+
+`seed=0x1AB` is the world the galleries are in, and without it
+`biome=Gallery` says so and stops.
 
 `ticks=N` opens a sandbox on exactly the rectangle the shot asks for,
 runs N ticks, and draws that. The rectangle must fit
