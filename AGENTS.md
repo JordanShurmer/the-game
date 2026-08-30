@@ -55,8 +55,18 @@ talk. `src/noise.odin` holds the ladder for the Odin side and
 what a tick worked: rows stepped, cells loaded, reacts, swaps. Three
 ways to read it, no tools to attach:
 
-- `./bin/bench biome=Lake ticks=300` prints the cost of a tick, and
-  the phases and counts behind it at `debug=2`.
+- `./bin/bench biome=Lake ticks=300` prints the cost of a tick and the
+  shape under it: which phases the tick went to, widest first, with
+  each one's share, and how much matter the tick worked.
+
+  ```
+  Lake 2048x2048: 9.901 ms a tick, over 50 ticks (checksum 0x8b9619ef8a45e51c)
+  tick    Step_Rows 9.815 ms 99%  Step_Wake 0.083 ms 1%  Step_Age 0.001 ms 0%
+  work    4799 rows  201122 cells  3511 hot  92753 reacts  3250 moving  48888 swaps  a tick
+  ```
+
+  The same numbers one phase to a line, for a reader who has found the
+  phase and wants it exact, are at `debug=2`.
 - **F3** in the game window overlays the same, averaged over the last
   second.
 - A headless shot prints the whole run on exit with `profile=1`:
