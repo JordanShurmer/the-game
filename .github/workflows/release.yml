@@ -78,6 +78,7 @@ jobs:
 
       - name: The suite
         run: |
+          odin version
           make check
           make test
 

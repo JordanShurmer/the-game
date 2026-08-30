@@ -93,6 +93,14 @@ ODIN_RELEASE="${ODIN_RELEASE:-}"
 NIGHTLY_INDEX="https://odinbinaries.thisdrunkdane.io/file/odin-binaries/nightly.json"
 
 PREFIX="${PREFIX:-/usr/local/bin}"
+# Where the unpacked tree goes. Under `sudo` the environment's HOME is
+# root's, and /root is closed to everybody else: a compiler unpacked
+# there answers "Permission denied" to the very user who asked for it,
+# which is what a CI runner and a shared machine both see. So the home
+# that counts is the one of whoever called sudo.
+if [ -n "${SUDO_USER:-}" ] && [ -z "${WORK:-}" ]; then
+	WORK=$(eval echo "~$SUDO_USER")
+fi
 WORK="${WORK:-$HOME}"
 
 # RAYLIB_DIR is where the bindings look for the library on this arch.
