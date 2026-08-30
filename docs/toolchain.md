@@ -96,7 +96,12 @@ instead, and is how this repository goes back to a monthly release
 once one holds `asm` templates.
 
 Each build unpacks into its own directory in `$HOME`, about 220 MB,
-and `/usr/local/bin/odin` is a symlink into the one in use. So a
+and `/usr/local/bin/odin` is a symlink into the one in use. The home
+that counts is the home of whoever called `sudo`, not root's: `/root`
+is closed to everybody else, and a compiler unpacked there answers
+"Permission denied" to the user who asked for it. Set `WORK` to put
+the tree somewhere else, which is what a machine with more than one
+user who builds the game wants. So a
 second run of a build already on the machine only moves the symlink,
 and going back to one you have had is as quick. Delete the directories
 you do not want.

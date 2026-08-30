@@ -28,6 +28,14 @@ set -eu
 # names it: VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH.
 RAYLIB_VERSION="${RAYLIB_VERSION:-6.0}"
 
+# Where the unpacked tree goes. Under `sudo` the environment's HOME is
+# root's, and /root is closed to everybody else: a compiler unpacked
+# there answers "Permission denied" to the very user who asked for it,
+# which is what a CI runner and a shared machine both see. So the home
+# that counts is the one of whoever called sudo.
+if [ -n "${SUDO_USER:-}" ] && [ -z "${WORK:-}" ]; then
+	WORK=$(eval echo "~$SUDO_USER")
+fi
 WORK="${WORK:-$HOME}"
 EMSDK="${EMSDK:-$WORK/emsdk}"
 RAYLIB_SRC="${RAYLIB_SRC:-$WORK/raylib-$RAYLIB_VERSION}"
