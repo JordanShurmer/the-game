@@ -24,6 +24,15 @@
 #                 See docs/physics.md, "Explosions".
 #   luminosity  = the light this material gives, 0 to 255. See
 #                 docs/lighting.md, "Every light is a material".
+#   spread      = how many cells a liquid or a gas looks along its own row
+#                 for a way on -- down for a liquid, up for a gas -- when
+#                 it cannot go that way where it stands. It is how runny
+#                 the fluid is, and it is the flatness of a pool of it:
+#                 what settles is a surface that falls about one cell
+#                 every `spread` cells. Water is 64 and reads level; lava
+#                 is 3 and keeps the slope of a flow. A fluid that names
+#                 none gets SPREAD_DEFAULT (16). See docs/physics.md,
+#                 "The reach is the flatness".
 #
 # A material with `state = Phantom` has no physical interaction. Matter
 # cannot touch one and one cannot touch matter, so the cell grid never
@@ -95,6 +104,7 @@ lifetime    = -1
 color       = 0xFF3A7CA5
 contact     =
 glyph       = ~
+spread      = 64
 
 [Lava]
 state       = Liquid
@@ -106,6 +116,7 @@ lifetime    = -1
 color       = 0xFFFF4500
 contact     = Burns
 glyph       = L
+spread      = 3
 
 [Fire]
 state       = Special
@@ -117,6 +128,7 @@ lifetime    = 90         # ticks
 color       = 0xFFFF6A00
 contact     = Burns
 glyph       = *
+spread      = 3
 luminosity  = 120        # the light of a flame; a pot's fuse throws it
 decays_to   = Smoke
 
@@ -130,6 +142,7 @@ lifetime    = 180
 color       = 0xFF555555
 contact     =
 glyph       = %
+spread      = 48
 
 [Steam]
 state       = Gas
@@ -141,6 +154,7 @@ lifetime    = 240
 color       = 0xFFD0E0E8
 contact     =
 glyph       = "
+spread      = 48
 decays_to   = Water
 
 [Oil]
@@ -153,6 +167,7 @@ lifetime    = -1
 color       = 0xFF2F2F1E
 contact     =
 glyph       = o
+spread      = 24
 burns_to    = Fire
 
 [Acid]
@@ -165,6 +180,7 @@ lifetime    = -1
 color       = 0xFF39FF14
 contact     =
 glyph       = a
+spread      = 48
 
 [Gold]
 state       = Solid
@@ -319,6 +335,7 @@ lifetime    = -1
 color       = 0xFFE0E88A
 contact     =
 glyph       = f
+spread      = 64
 
 [Toxic_Sludge]
 state       = Liquid
@@ -330,6 +347,7 @@ lifetime    = -1
 color       = 0xFF556B2F
 contact     =
 glyph       = t
+spread      = 12
 
 [Steel]
 state       = Solid
@@ -473,6 +491,7 @@ lifetime    = 22         # ticks; a third of a second, then it is fire
 color       = 0xFFFFFAE6
 contact     = Burns
 glyph       = !
+spread      = 4
 force       = 36         # what three grains of black powder throw
 luminosity  = 255
 decays_to   = Fire
@@ -553,6 +572,7 @@ lifetime    = -1
 color       = 0xFFB8CE2E
 contact     =
 glyph       = a
+spread      = 40
 
 [Smylt]
 # smylte: calm, still, serene. The neutral liquid the mix leaves. It
@@ -566,6 +586,7 @@ lifetime    = -1
 color       = 0xFF9FB8C4
 contact     =
 glyph       = m
+spread      = 56
 
 [Sparkle]
 # A dot of light the mix throws off. It rises, flashes, and is gone.
@@ -580,6 +601,7 @@ lifetime    = 10         # ticks; a sixth of a second
 color       = 0xFFDFF3FF
 contact     =
 glyph       = *
+spread      = 2
 luminosity  = 190
 decays_to   = Air
 
@@ -620,6 +642,7 @@ lifetime    = -1
 color       = 0xFF7FA8B0
 contact     =
 glyph       = -
+spread      = 64
 
 [Nitre]
 # Saltpetre, swept off a cave wall. It is no fuel at all; it is what
@@ -660,6 +683,7 @@ lifetime    = 300
 color       = 0xFF9AA36B
 contact     =
 glyph       = r
+spread      = 40
 
 [Sweartsealt]
 # sweart: black. The black salt nitre and brimstone make where they
@@ -687,6 +711,7 @@ lifetime    = -1
 color       = 0xFFD6D8B8
 contact     =
 glyph       = y
+spread      = 48
 
 [Cwicseolfor]
 # cwicseolfor: quicksilver. A liquid metal, heavier than anything else
@@ -701,6 +726,7 @@ lifetime    = -1
 color       = 0xFFE8EDF2
 contact     =
 glyph       = q
+spread      = 80
 
 [Gemang]
 # gemang: a mingling. The soft solid quicksilver takes gold up into.
@@ -731,6 +757,7 @@ lifetime    = -1
 color       = 0xFF6E5BD8
 contact     =
 glyph       = x
+spread      = 56
 
 [Leoma]
 # leoma: a gleam, a ray of light. Rock that has taken a spell. It is
@@ -759,6 +786,7 @@ lifetime    = -1
 color       = 0xFFEFB9A0
 contact     =
 glyph       = h
+spread      = 56
 
 [Sceadu]
 # sceadu: a shadow. A heavy black liquid that puts fires out, blinds a
@@ -773,6 +801,7 @@ lifetime    = -1
 color       = 0xFF140F1C
 contact     =
 glyph       = D
+spread      = 20
 
 # ------------------------------------------------------------
 # Reactions. See docs/physics.md, "The reaction table".

@@ -49,3 +49,17 @@ cell_work_of :: proc(m: Material, reacts: bool) -> Cell_Works {
 	if m.state == .Brush   do work += {.Sieves}
 	return work
 }
+
+// How far a fluid looks along its own row for a way on, when its row in
+// data/materials.txt does not say. A liquid or a gas that named no
+// `spread` still has to flow; matter that stands still never asks.
+// See sandbox_flow, and docs/physics.md, "The reach is the flatness".
+SPREAD_DEFAULT :: 16
+
+cell_spread_of :: proc(m: Material) -> u8 {
+	if m.spread != 0 do return m.spread
+	#partial switch m.state {
+	case .Liquid, .Gas, .Special: return SPREAD_DEFAULT
+	}
+	return 0
+}

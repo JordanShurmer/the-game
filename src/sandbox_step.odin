@@ -15,12 +15,19 @@ sandbox_rises :: #force_inline proc "contextless" (src, dst: u16) -> bool {
 	return dst == CELL_AIR || sandbox_heavier(src, dst)
 }
 
-sandbox_spreads :: #force_inline proc "contextless" (self, side, below_side, above, above_side: u16) -> bool {
+// A fluid may step aside onto an empty cell, if nothing is about to drop
+// into that cell first. "Behind" is the row the fluid came from: over a
+// liquid, under a gas. Fluid behind the target is about to take it, so
+// stepping aside there would only walk the hole along the row and the
+// pool would never pack. See docs/physics.md, "The packing rule".
+//
+// Whether the step is worth taking is not asked here. That is the whole
+// question a fluid has, and sandbox_flow answers it by looking along the
+// row.
+sandbox_spreads :: #force_inline proc "contextless" (side, behind_side: u16) -> bool {
 	room      := side == CELL_AIR
-	unclaimed := above_side == CELL_AIR || above_side == CELL_WALL
-	downhill  := below_side == CELL_AIR
-	pressed   := above >= self && above != CELL_WALL
-	return room && unclaimed && (downhill || pressed)
+	unclaimed := behind_side == CELL_AIR || behind_side == CELL_WALL
+	return room && unclaimed
 }
 
 sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> u16 {
@@ -287,13 +294,15 @@ sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 	case climbs && sandbox_rises(w, r.above[far]):
 		return i16(-side), -1
 
-	case floats && sandbox_spreads(w, r.here[near], r.below[near], above, r.above[near]):
+	case floats && sandbox_spreads(r.here[near], r.above[near]):
 		return i16(side), 0
-	case floats && sandbox_spreads(w, r.here[far], r.below[far], above, r.above[far]):
+	case floats && sandbox_spreads(r.here[far], r.above[far]):
 		return i16(-side), 0
 
-	case climbs && r.here[near] == CELL_AIR:
+	case climbs && sandbox_spreads(r.here[near], r.below[near]):
 		return i16(side), 0
+	case climbs && sandbox_spreads(r.here[far], r.below[far]):
+		return i16(-side), 0
 	}
 	return 0, 0
 }
@@ -305,8 +314,100 @@ sandbox_apply_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 		dx := i32(sb.rows.dx[x])
 		dy := i32(sb.rows.dy[x])
 		if dx == 0 && dy == 0 do continue
+
+		// A fluid going sideways is not taking a step, it is looking for
+		// a way on, and how far it looks is what makes a pool level.
+		kind := sb.rows.kind[x + 1]
+		if dy == 0 && (kind == .Liquid || kind == .Riser) {
+			sandbox_flow(sb, table, x, y, dx, kind == .Liquid ? 1 : -1)
+			continue
+		}
 		sandbox_slide(sb, table, x, y, dx, dy)
 	}
+}
+
+// The way on, and how far a fluid looks for it.
+//
+// A liquid that cannot fall is not finished: somewhere along the row it
+// lies in there may be a cell it can fall out of, and water finds it. So
+// a stopped fluid looks along its own row -- a liquid for a cell it can
+// sink from, a gas for one it can climb from -- as far as the material's
+// `spread` says, and goes to the first one it finds. The cells between
+// are empty and of one kind, so going the whole way is the same picture
+// as walking it, and the walk would only leave a cell standing in the
+// row for the fluid behind to trip over.
+//
+// This one procedure is what levels a pool. Without it a liquid can only
+// step onto the cell beside it, a one-cell step down in its own surface
+// is a cell it will not step onto, and a staircase of one-cell steps is a
+// shape it holds for ever: measured, a column of water on a flat floor
+// froze as a 45 degree wedge within 50 ticks and had not moved at tick
+// 12000. With it, the reach is the flatness -- what settles is a surface
+// that falls about one cell every `spread` cells -- so water (64) reads
+// level and lava (3) keeps the slope of a lava flow.
+//
+// `ahead` is the way the fluid wants to go: down (+1) for a liquid, up
+// (-1) for a gas. Nothing else about the two differs, so one procedure
+// serves both.
+sandbox_flow :: proc(sb: ^Sandbox, table: Material_Table, x, y, side, ahead: i32) -> bool {
+	m := sb.cells[sandbox_index(sb, x, y)]
+	w := table.weight[m]
+	reach := i32(table.materials[m].spread)
+
+	for s in ([2]i32{side, -side}) {
+		for k in i32(1) ..= reach {
+			nx := x + s * k
+			if !sandbox_in_bounds(sb, nx, y) do break
+			ahead_of := sandbox_weight_at(sb, table, nx, y + ahead)
+			behind   := sandbox_weight_at(sb, table, nx, y - ahead)
+			if !sandbox_spreads(sandbox_weight_at(sb, table, nx, y), behind) do break
+
+			if !(ahead > 0 ? sandbox_sinks(w, ahead_of) : sandbox_rises(w, ahead_of)) do continue
+
+			// It has found the way on. A refused swap -- the cell it
+			// wants has already moved this tick -- still has to leave
+			// the cell awake, or the chunk sleeps with the fluid in
+			// mid-flow.
+			if !sandbox_swap(sb, x, y, nx, y) {
+				sandbox_mark(sb, x, y)
+				return false
+			}
+			sandbox_wake_reach(sb, x, y, k)
+			return true
+		}
+	}
+
+	// It found nothing this tick and stays awake to look again. What
+	// would let it on is further off than a swap wakes, and the far end
+	// of its reach can be changed by water it cannot see -- so a fluid
+	// with somewhere to step and nowhere to go keeps watch itself.
+	//
+	// This is only ever reached by a fluid with an empty cell beside it
+	// at its own level, which a packed pool has nowhere but at its two
+	// ends: the cells inside one are stopped by their own kind and never
+	// get here, so a settled pond still wakes no chunk at all. What it
+	// costs is a handful of cells at the open edge of a body of water,
+	// and what it buys is that a pond finds its level rather than
+	// leaving a shelf of it stranded up the bank.
+	sandbox_mark(sb, x, y)
+	return false
+}
+
+// The band a fluid that just moved has to wake behind it.
+//
+// A swap wakes the cells it touches and no more, which is enough while
+// matter moves one cell at a time. A fluid reads along its row until
+// something stops it, so a cell that saw the way on `k` cells off was
+// itself in view of any fluid up to `k` cells the other way, along the
+// same open run and in the row over and the row under. Wake that band,
+// or a flow leaves its own tail asleep and the pool stops half way.
+//
+// The band is as wide as the look that earned it, so it costs what the
+// flow costs: nothing where nothing moved, one cell either side in a
+// packed pool, and the whole reach only where a fluid is running the
+// length of a row.
+sandbox_wake_reach :: proc(sb: ^Sandbox, x, y, k: i32) {
+	sandbox_mark_box(sb, x - k - 1, y - 1, x + k + 1, y + 1)
 }
 
 sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {
@@ -314,27 +415,17 @@ sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {
 		sandbox_mark(sb, x, y)
 		return
 	}
+	// Only a straight fall carries on: sideways is sandbox_flow's, and a
+	// diagonal step has already found its floor.
 	cx, cy := x + dx, y + dy
-	if dy < 0 || (dx != 0 && dy != 0) do return
+	if dy <= 0 || dx != 0 do return
 
 	w     := table.weight[sb.cells[sandbox_index(sb, cx, cy)]]
 	speed := i32(table.materials[sb.cells[sandbox_index(sb, cx, cy)]].fall_speed)
 
 	for _ in 1 ..< speed {
-		nx, ny := cx + dx, cy + dy
-		ok: bool
-		if dy > 0 {
-			ok = sandbox_sinks(w, sandbox_weight_at(sb, table, nx, ny))
-		} else {
-			ok = sandbox_spreads(
-				w,
-				sandbox_weight_at(sb, table, nx, ny),
-				sandbox_weight_at(sb, table, nx, ny + 1),
-				sandbox_weight_at(sb, table, cx, cy - 1),
-				sandbox_weight_at(sb, table, nx, ny - 1),
-			)
-		}
-		if !ok do break
+		nx, ny := cx, cy + 1
+		if !sandbox_sinks(w, sandbox_weight_at(sb, table, nx, ny)) do break
 		if !sandbox_swap(sb, cx, cy, nx, ny) do break
 		cx, cy = nx, ny
 	}

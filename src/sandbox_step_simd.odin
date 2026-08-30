@@ -28,12 +28,10 @@ wide_rises :: #force_inline proc "contextless" (src, dst: Weights) -> Weights {
 }
 
 @(private = "file")
-wide_spreads :: #force_inline proc "contextless" (self, side, below_side, above, above_side: Weights) -> Weights {
+wide_spreads :: #force_inline proc "contextless" (side, behind_side: Weights) -> Weights {
 	room      := simd.lanes_eq(side, Weights(CELL_AIR))
-	unclaimed := simd.lanes_eq(above_side, Weights(CELL_AIR)) | simd.lanes_eq(above_side, Weights(CELL_WALL))
-	downhill  := simd.lanes_eq(below_side, Weights(CELL_AIR))
-	pressed   := simd.lanes_ge(above, self) & simd.lanes_ne(above, Weights(CELL_WALL))
-	return room & unclaimed & (downhill | pressed)
+	unclaimed := simd.lanes_eq(behind_side, Weights(CELL_AIR)) | simd.lanes_eq(behind_side, Weights(CELL_WALL))
+	return room & unclaimed
 }
 
 @(private = "file")
@@ -93,9 +91,10 @@ sandbox_intent_row :: proc(sb: ^Sandbox, y, x0, x1: i32) -> (moving: bool) {
 		climbs := simd.lanes_eq(kind, Weights(u16(Cell_Kind.Riser)))
 
 		dx, dy: Steps
-		wide_put(&dx, &dy, climbs & simd.lanes_eq(here_near, Weights(CELL_AIR)), near_step, 0)
-		wide_put(&dx, &dy, floats & wide_spreads(w, here_far, below_far, above, above_far), far_step, 0)
-		wide_put(&dx, &dy, floats & wide_spreads(w, here_near, below_near, above, above_near), near_step, 0)
+		wide_put(&dx, &dy, climbs & wide_spreads(here_far, below_far), far_step, 0)
+		wide_put(&dx, &dy, climbs & wide_spreads(here_near, below_near), near_step, 0)
+		wide_put(&dx, &dy, floats & wide_spreads(here_far, above_far), far_step, 0)
+		wide_put(&dx, &dy, floats & wide_spreads(here_near, above_near), near_step, 0)
 		wide_put(&dx, &dy, climbs & wide_rises(w, above_far), far_step, -1)
 		wide_put(&dx, &dy, climbs & wide_rises(w, above_near), near_step, -1)
 		wide_put(&dx, &dy, climbs & wide_rises(w, above), 0, -1)
