@@ -1,0 +1,146 @@
+# Every push to main becomes a release, and the release is an APK.
+#
+# The APK holds no game code: it holds the page `make web` builds, and
+# the WebView in android/ reads it out of the assets. So this is the
+# three commands of docs/web.md, in order, on a machine that has
+# neither toolchain:
+#
+#   sudo tools/install-toolchain.sh       # the Odin compiler
+#   sudo tools/install-web-toolchain.sh   # emscripten, raylib for WebGL 2
+#   make web && tools/build-apk.sh
+#
+# The suite runs first. A push that fails a test publishes nothing.
+#
+# The key is a debug key the build makes for itself, which is good
+# enough to sideload and to play, and not good enough to publish. Set
+# the four ANDROID_* secrets below to sign with a key of your own; see
+# tools/build-apk.sh.
+name: release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# One release at a time, and the newest push is the one worth building.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+
+    env:
+      # The web toolchain is half an hour of downloading and building,
+      # so it goes where the cache can reach it rather than under
+      # /usr/local, which needs root to restore.
+      EMSDK: ${{ github.workspace }}/.toolchain/emsdk
+      RAYLIB_SRC: ${{ github.workspace }}/.toolchain/raylib
+      RAYLIB_WEB: ${{ github.workspace }}/.toolchain/raylib-web
+      ANDROID_API: "34"
+      ANDROID_BUILD_TOOLS: 34.0.0
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The version this build is
+        id: version
+        run: |
+          echo "code=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "name=0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "tag=v0.1.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: The Odin compiler
+        run: sudo tools/install-toolchain.sh
+
+      # emscripten and the raylib built for WebGL 2. Both are named by
+      # tools/install-web-toolchain.sh, so the key is that file: a
+      # change to what it installs is a change to what is cached.
+      - name: The web toolchain, if it was cached
+        id: web-toolchain
+        uses: actions/cache@v4
+        with:
+          path: .toolchain
+          key: web-toolchain-${{ runner.os }}-${{ hashFiles('tools/install-web-toolchain.sh') }}
+
+      - name: The web toolchain, if it was not
+        if: steps.web-toolchain.outputs.cache-hit != 'true'
+        run: |
+          sudo EMSDK="$EMSDK" RAYLIB_SRC="$RAYLIB_SRC" RAYLIB_WEB="$RAYLIB_WEB" \
+            tools/install-web-toolchain.sh
+          # The cache restores as the runner, so the toolchain must be
+          # the runner's to begin with.
+          sudo chown -R "$(id -u):$(id -g)" .toolchain
+
+      - name: The suite
+        run: |
+          make check
+          make test
+
+      - name: The page
+        run: make web
+
+      - name: The version, in the manifest the APK is built from
+        run: |
+          sed -i \
+            -e 's/android:versionCode="[^"]*"/android:versionCode="${{ steps.version.outputs.code }}"/' \
+            -e 's/android:versionName="[^"]*"/android:versionName="${{ steps.version.outputs.name }}"/' \
+            android/AndroidManifest.xml
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: The Android build tools
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-$ANDROID_API" "build-tools;$ANDROID_BUILD_TOOLS" > /dev/null
+
+      # A key of your own if the secrets are set, and the debug key the
+      # script makes for itself if they are not.
+      - name: The APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export ANDROID_KEYSTORE="$RUNNER_TEMP/release.jks"
+          fi
+          tools/build-apk.sh
+
+      - name: The page, as one file
+        run: |
+          rm -f web/build/*.o
+          (cd web/build && zip -qr "$GITHUB_WORKSPACE/the-game-web.zip" .)
+
+      - name: The release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mv android/build/the-game.apk "the-game-${{ steps.version.outputs.name }}.apk"
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --title "The Game ${{ steps.version.outputs.name }}" \
+            --latest \
+            --notes "$(printf '%s\n\n%s\n\n%s\n' \
+              "$(git log -1 --pretty=%s)" \
+              "The APK is the page in a WebView, signed with a debug key: install it with \`adb install -r\`, or from the phone with unknown sources on." \
+              "Built from ${{ github.sha }}.")" \
+            "the-game-${{ steps.version.outputs.name }}.apk" \
+            "the-game-web.zip"
+
+      # The APK is on the release. This is for a run whose release was
+      # not made, and for a workflow_dispatch on a branch.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: the-game-apk
+          path: the-game-*.apk
+          if-no-files-found: ignore

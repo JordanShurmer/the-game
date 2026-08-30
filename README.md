@@ -55,7 +55,9 @@ tools/serve_web.py                    # http://127.0.0.1:8000
 
 The page is the same package the window is, drawing the same world
 through WebGL 2, with a thumb pad in place of the keys.
-`tools/build-apk.sh` wraps it in an APK. `docs/web.md` says what the
+`tools/build-apk.sh` wraps it in an APK, and every push to `main`
+builds one and publishes it: the newest is on the
+[releases page](../../releases/latest). `docs/web.md` says what the
 browser cannot have and what each of those costs.
 
 If `odin` is not on the PATH, `sudo tools/install-toolchain.sh`
