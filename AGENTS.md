@@ -222,9 +222,45 @@ of the whole world.
 | `data/shaders/materials/` | one shader a material, and the prelude they share |
 | `data/` | materials, biomes, the biome maps, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
+| `.github/workflows/` | the release: every push to `main` builds the APK and publishes it |
 | `web/` | the page, its manifest and its icons; `web/build` is what `make web` writes |
 | `android/` | the APK: a manifest, one WebView, and the page in its assets |
 | `tools/` | the toolchain installs, the APK build, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
+
+## The page, and the APK
+
+The same sources build twice: once for the desktop window, and once for
+WebAssembly, which is how the game reaches a phone. `docs/web.md` is
+the design note. Read it before changing `cmd/web/`, `web/`,
+`android/`, `src/file.odin`, `src/touch.odin`, `src/check/`, or either
+of the two files a target answers for itself -- `src/main_desktop.odin`
+and `src/noise_desktop.odin`, with `src/noise_web.odin` opposite.
+
+```sh
+sudo tools/install-web-toolchain.sh   # emscripten, and a raylib for the web
+make web                              # web/build/index.html
+tools/serve_web.py                    # http://127.0.0.1:8000
+node tools/play_web.mjs shots/web     # look at the page, headless
+tools/build-apk.sh                    # android/build/the-game.apk
+```
+
+Three rules there are easy to break, and each is a compile that fails
+on one target only:
+
+- **No `core:os`, anywhere in package `game`.** Every file goes through
+  `src/file.odin` and every line the toolset says goes through the
+  ladder in `src/noise.odin`. What needs the shell lives in a file
+  tagged `#+build !freestanding`.
+- **No `core:testing`, for the same reason.** The tests sit in the
+  files the game is made of, so they build in the browser too. They
+  import `testing "check"`, which is `core:testing` on the desktop and
+  four names doing nothing in the page.
+- **No `asm` template outside `#+build amd64`.** The wide weight pass
+  is amd64 assembly and `src/sandbox_step_wide_off.odin` answers for
+  every other machine with the plain path.
+
+Every push to `main` runs the suite, builds the page, wraps it in an
+APK and publishes it. See `docs/web.md`, "The release".
 
 ## The two worlds
 

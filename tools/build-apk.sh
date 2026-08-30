@@ -21,7 +21,14 @@
 # The APK is signed with a debug key, which the script makes if it is
 # not there. That key is good enough to sideload and to play. It is not
 # good enough to publish: a release needs a key of your own, and the
-# package name in AndroidManifest.xml is an example on purpose.
+# package name in AndroidManifest.xml is an example on purpose. Point
+# the script at a key of your own with four variables:
+#
+#   ANDROID_KEYSTORE=my.jks ANDROID_KEYSTORE_PASS=... \
+#   ANDROID_KEY_ALIAS=thegame ANDROID_KEY_PASS=... tools/build-apk.sh
+#
+# A keystore that is there is never overwritten, and only the one this
+# script makes for itself carries the password everybody knows.
 set -eu
 
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
@@ -73,16 +80,20 @@ javac -source 17 -target 17 -nowarn -classpath "$JAR" \
 
 say "sign"
 KEYSTORE="${ANDROID_KEYSTORE:-$OUT/debug.keystore}"
+ALIAS="${ANDROID_KEY_ALIAS:-thegame}"
+STOREPASS="${ANDROID_KEYSTORE_PASS:-android}"
+KEYPASS="${ANDROID_KEY_PASS:-$STOREPASS}"
 if [ ! -f "$KEYSTORE" ]; then
-	keytool -genkeypair -keystore "$KEYSTORE" -alias thegame \
-		-storepass android -keypass android \
+	keytool -genkeypair -keystore "$KEYSTORE" -alias "$ALIAS" \
+		-storepass "$STOREPASS" -keypass "$KEYPASS" \
 		-keyalg RSA -keysize 2048 -validity 10000 \
 		-dname "CN=The Game, OU=None, O=None, L=None, S=None, C=ZZ" >/dev/null
 fi
 
 "$BT/zipalign" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
 "$BT/apksigner" sign \
-	--ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
+	--ks "$KEYSTORE" --ks-key-alias "$ALIAS" \
+	--ks-pass "pass:$STOREPASS" --key-pass "pass:$KEYPASS" \
 	--out "$OUT/the-game.apk" "$OUT/aligned.apk"
 "$BT/apksigner" verify --print-certs "$OUT/the-game.apk" | head -2
 

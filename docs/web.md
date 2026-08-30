@@ -227,3 +227,39 @@ A Trusted Web Activity is the other way to wrap it, if the page is
 already deployed over HTTPS: `bubblewrap init` against the URL, and the
 APK is a manifest and an icon. `web/manifest.webmanifest` is what it
 reads.
+
+## The release
+
+Every push to `main` builds the APK and publishes it, in
+`.github/workflows/release.yml`. It is the three commands above in
+order -- the two toolchain installs, then `make web` and
+`tools/build-apk.sh` -- with the suite in front of them, so a push that
+fails a test publishes nothing.
+
+The release is tagged `v0.1.<run>` and carries two files: the APK, and
+the page as a zip for anyone who would rather serve it than install it.
+`<run>` is the workflow's own run number, which is also the APK's
+`versionCode`, because Android will not install a version it already
+has and the number must only ever climb.
+
+The web toolchain is half an hour of downloading and building, so it is
+cached under `.toolchain` against the hash of
+`tools/install-web-toolchain.sh`: a change to what that script installs
+is a change to what is cached, and nothing else rebuilds it.
+
+The key is the debug key `tools/build-apk.sh` makes for itself, which
+is good enough to sideload and not good enough to publish, so every
+release so far is a sideload. Four secrets change that, and the build
+uses them the moment they are there:
+
+| Secret | What it is |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | the keystore, `base64 -w0` |
+| `ANDROID_KEYSTORE_PASS` | its password |
+| `ANDROID_KEY_ALIAS` | the key inside it |
+| `ANDROID_KEY_PASS` | that key's password, if it differs |
+
+A published APK also needs a package name that is yours: the manifest
+says `com.example.thegame` on purpose, and the first release under a
+real name is the one that fixes it, because a package name cannot
+change afterwards.
