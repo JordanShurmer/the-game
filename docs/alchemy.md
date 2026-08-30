@@ -255,9 +255,12 @@ holds the stand-down correct for a table that truly does outgrow 64,
 because that behaviour is worth keeping even though the shipped table
 no longer needs it.
 
-The alchemy gallery itself, `bin/bench biome=Alchemy size=512
-ticks=900`, costs 0.13 ms a tick against the physics gallery's 0.30 at
-the same size: the alchemy rooms are quieter, not more expensive.
+The alchemy gallery itself, `bin/bench seed=0x1AB biome=Alchemy
+size=512 ticks=900`, costs 0.13 ms a tick against the physics gallery's
+0.30 at the same size: the alchemy rooms are quieter, not more
+expensive. The seed is the world the galleries are in; without it the
+bench says so and stops, rather than timing whatever is at world (0,0)
+of the ordinary map.
 
 The second alchemy added thirteen materials, which takes the shipped
 table from 35 to 48. That is still under `SANDBOX_WIDE_IDS` (64), so
@@ -276,6 +279,8 @@ not the absolute values:
 | `Coalmine` 2048, the shipped world | 0.88 ms | 0.91 ms |
 | `Gallery` 512, the physics rooms | 0.20 ms | 0.24 ms |
 | `Alchemy` 512, this gallery | 0.20 ms | 0.46 ms |
+
+The two gallery rows want `seed=0x1AB` to run again.
 
 The shipped world and the physics gallery hold their checksums exactly
 across the change, which is the number that matters: thirteen materials

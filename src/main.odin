@@ -282,7 +282,19 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 		case "seed":
 			// A seed is a world. Hexadecimal is a seed too, which is
 			// how seed=0x1AB opens the Laboratory.
-			if n, ok := strconv.parse_u64_maybe_prefixed(value); ok do shot.seed = n
+			//
+			// Every other argument here falls back to a sensible
+			// default when it cannot be read, and the picture still
+			// shows what was asked for. This one would open another
+			// world in silence -- `seed=1AB` is the natural slip, and
+			// it lands in the village -- so it is refused instead, the
+			// way bin/shot, bin/bench and the server refuse it.
+			n, seed_ok := strconv.parse_u64_maybe_prefixed(value)
+			if !seed_ok {
+				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				os.exit(1)
+			}
+			shot.seed = n
 		}
 	}
 	return shot

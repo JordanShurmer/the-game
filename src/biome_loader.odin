@@ -194,6 +194,10 @@ load_biomes :: proc(
 		if in_map_section {
 			switch key {
 			case "image":
+				// A second `image` line would orphan the first clone:
+				// nothing reaches it, so neither the failure path nor
+				// destroy_biome_table would ever free it.
+				delete(map_image_path, allocator)
 				map_image_path = strings.clone(value, allocator)
 			case "cells_per_pixel":
 				v, vok := strconv.parse_i64(value)
@@ -233,6 +237,7 @@ load_biomes :: proc(
 				if !vok || v == 0 do return {}, .Bad_Value, line_index
 				table.laboratory.seed = v
 			case "image":
+				delete(lab_image_path, allocator)
 				lab_image_path = strings.clone(value, allocator)
 			case "spawn_biome":
 				lab_spawn_name = value
