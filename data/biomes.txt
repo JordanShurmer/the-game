@@ -7,10 +7,12 @@
 #   - A biome starts with [Name]
 #   - Fields are key = value
 #   - [Map] is a reserved section that holds the world map settings
+#   - [Laboratory] is the other one, and it holds a second world
 #
 # Every key color must be unique. The loader reports a duplicate as a
-# hard error. Each key color must also appear in data/biome_map.png,
-# where one pixel is one region of the world.
+# hard error. Each key color must also appear on one of the two map
+# pictures, where one pixel is one region of the world. No biome may be
+# named Map or Laboratory, because those two names are already taken.
 
 [Map]
 image           = data/biome_map.png
@@ -20,6 +22,37 @@ seed            = 20260818    # lays out the tile lattice; change it for another
 biome_off_map   = Deep_Rock   # biome used outside the map image
 spawn_biome     = Homelands   # the wizard starts in this biome
 spawn_region    = 4           # the fourth of its regions, west to east
+
+# The seed above is the one the game starts on. `seed=N` on the command
+# line gives another, and every binary that opens the world takes it:
+#
+#   ./bin/the-game seed=7
+#   ./bin/shot seed=7 biome=Coalmine out=shots/other.png
+#   ./bin/bench seed=7 biome=Coalmine
+#   ./bin/game-mcp seed=7
+#
+# A seed lays this map out: which tile of a wang set each square of the
+# lattice draws, and which of an image biome's pictures each of its
+# regions draws. The map itself does not change, so every seed is the
+# same world drawn again.
+#
+# One seed is not that. See [Laboratory] below.
+
+# [Laboratory] is the second reserved section, and it is a second
+# world rather than a biome. One seed does not lay the map above out
+# again: it opens another map picture altogether, with its own spawn.
+# That world is the museum -- the two galleries and the roof between
+# their doors, and nothing else. See docs/laboratory.md.
+#
+#   ./bin/the-game seed=0x1AB
+#
+# 0x1AB is LAB, in the one alphabet a number has.
+
+[Laboratory]
+seed         = 0x1AB
+image        = data/biome_map_laboratory.png
+spawn_biome  = Gallery        # he lands on its roof, between the two doors
+spawn_region = 1
 
 # cells_per_pixel must be a whole number of tiles, or a biome border
 # would cut a tile in half. A tile is 512 cells, so that is a multiple
@@ -136,6 +169,10 @@ color     = 0xFF4A3B2A
 generator = image
 image     = data/rooms/cavemouth
 fill_0    = Dirt
+
+# The two galleries. Neither is painted on data/biome_map.png any
+# more: both are regions of the Laboratory, and the seed above is the
+# only way into them.
 
 [Gallery]
 color     = 0xFF9B59B6

@@ -53,12 +53,14 @@ load_biomes :: proc(
 	image_paths := make([dynamic]string, allocator)
 
 	map_image_path: string
+	lab_image_path: string
 	ok := false
 	defer if !ok {
 		for n in names do delete(n, allocator)
 		for p in prefixes do delete(p, allocator)
 		for p in image_paths do delete(p, allocator)
 		delete(map_image_path, allocator)
+		delete(lab_image_path, allocator)
 		delete(biomes)
 		delete(names)
 		delete(prefixes)
@@ -70,13 +72,16 @@ load_biomes :: proc(
 	table.off_map_biome   = BIOME_EMPTY
 	table.spawn_biome     = BIOME_EMPTY
 	table.spawn_region    = 1
+	table.laboratory      = Laboratory{spawn_biome = BIOME_EMPTY, spawn_region = 1}
 
 	off_map_name: string
 	spawn_name: string
+	lab_spawn_name: string
 
 	next_tile := 0
 
 	in_map_section := false
+	in_lab_section := false
 	has_current    := false
 	current:        Biome
 	current_name:   string
@@ -157,11 +162,15 @@ load_biomes :: proc(
 				}
 			}
 			section := trimmed[1:len(trimmed) - 1]
-			if section == "Map" {
-				in_map_section = true
+			// Two reserved sections, and neither is a biome: [Map] is
+			// the ordinary world and [Laboratory] is the other one.
+			if section == "Map" || section == "Laboratory" {
+				in_map_section = section == "Map"
+				in_lab_section = section == "Laboratory"
 				has_current    = false
 			} else {
 				in_map_section = false
+				in_lab_section = false
 				current        = Biome{tile_base = TILE_NONE, variants = 1}
 				current_name   = section
 				current_prefix = ""
@@ -217,6 +226,24 @@ load_biomes :: proc(
 			continue
 		}
 
+		if in_lab_section {
+			switch key {
+			case "seed":
+				v, vok := strconv.parse_u64_maybe_prefixed(value)
+				if !vok || v == 0 do return {}, .Bad_Value, line_index
+				table.laboratory.seed = v
+			case "image":
+				lab_image_path = strings.clone(value, allocator)
+			case "spawn_biome":
+				lab_spawn_name = value
+			case "spawn_region":
+				v, vok := strconv.parse_i64(value)
+				if !vok || v < 1 do return {}, .Bad_Value, line_index
+				table.laboratory.spawn_region = i32(v)
+			}
+			continue
+		}
+
 		if !has_current do continue
 
 		switch key {
@@ -265,6 +292,7 @@ load_biomes :: proc(
 	table.tile_prefixes  = prefixes[:]
 	table.image_paths    = image_paths[:]
 	table.map_image_path = map_image_path
+	table.laboratory.map_image_path = lab_image_path
 
 	if off_map_name != "" {
 		idx, found := find_biome_index(table, off_map_name)
@@ -284,6 +312,20 @@ load_biomes :: proc(
 		table.spawn_biome = Biome_Id(idx)
 	}
 
+	// A Laboratory with a seed and no picture would quietly open the
+	// ordinary map instead, which is the one way this can go wrong
+	// without anything saying so.
+	if table.laboratory.seed != 0 && table.laboratory.map_image_path == "" {
+		return {}, .Missing_Key, 0
+	}
+	if lab_spawn_name != "" {
+		idx, found := find_biome_index(table, lab_spawn_name)
+		if !found {
+			return {}, .Unknown_Biome, 0
+		}
+		table.laboratory.spawn_biome = Biome_Id(idx)
+	}
+
 	ok = true
 	return table, .None, 0
 }
@@ -293,6 +335,7 @@ destroy_biome_table :: proc(table: Biome_Table, allocator := context.allocator) 
 	for p in table.tile_prefixes do delete(p, allocator)
 	for p in table.image_paths do delete(p, allocator)
 	delete(table.map_image_path, allocator)
+	delete(table.laboratory.map_image_path, allocator)
 	delete(table.biomes, allocator)
 	delete(table.names, allocator)
 	delete(table.tile_prefixes, allocator)
@@ -339,6 +382,16 @@ test_load_biomes :: proc(t: ^testing.T) {
 	testing.expect(t, biomes.origin_pixel_y == 8)
 	testing.expect(t, biomes.map_image_path == "data/biome_map.png")
 	testing.expect(t, biomes.world_seed != 0, "the lattice needs a seed")
+
+	// [Laboratory] is the other reserved section, and it is a world
+	// rather than a biome. See src/laboratory.odin.
+	_, lab_is_a_biome := find_biome_index(biomes, "Laboratory")
+	testing.expect(t, !lab_is_a_biome, "[Laboratory] is reserved, so nothing may load it as a biome")
+	testing.expect(t, biomes.laboratory.seed != 0, "the file must name a seed that opens the Laboratory")
+	testing.expect(t, biomes.laboratory.seed != biomes.world_seed, "it must not be the seed the game starts on")
+	testing.expect(t, biomes.laboratory.map_image_path == "data/biome_map_laboratory.png")
+	testing.expect(t, biomes.laboratory.spawn_biome != BIOME_EMPTY, "the Laboratory must say where he starts")
+	testing.expect(t, biomes.laboratory.spawn_region >= 1)
 
 	idx, found := find_biome_index(biomes, "Coalmine")
 	testing.expect(t, found, "Coalmine must exist")

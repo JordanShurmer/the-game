@@ -51,7 +51,16 @@ Sim_Error :: enum u8 {
 	Bad_Size,
 }
 
-sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOMES_PATH) -> Sim_Error {
+// `seed` is the world to open. Nothing given is the seed data/biomes.txt
+// names, which is the world the game ships on; a seed given lays that
+// same map out another way, and one seed opens another map altogether.
+// See src/laboratory.odin.
+sim_load :: proc(
+	s: ^Sim,
+	materials_path := MATERIALS_PATH,
+	biomes_path := BIOMES_PATH,
+	seed: Maybe(u64) = nil,
+) -> Sim_Error {
 	materials, mat_ok := load_materials(materials_path)
 	if !mat_ok {
 		fmt.eprintfln("cannot read %s (run from the repo root)", materials_path)
@@ -87,7 +96,10 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		return .Images_Not_Loaded
 	}
 
-	bmap, map_ok := load_or_create_biome_map(biomes)
+	world_seed := seed.? or_else biomes.world_seed
+	layout := world_layout(biomes, world_seed)
+
+	bmap, map_ok := load_or_create_biome_map(biomes, layout.map_image_path)
 	if !map_ok {
 		destroy_image_set(images)
 		destroy_tile_set(tiles)
@@ -102,16 +114,24 @@ sim_load :: proc(s: ^Sim, materials_path := MATERIALS_PATH, biomes_path := BIOME
 		biome_map = bmap,
 		tiles     = tiles,
 		images    = images,
-		seed      = biomes.world_seed,
+		seed      = world_seed,
 	}
 
 	editor_init(s)
 
-	s.light = light_make(biomes.world_seed)
+	s.light = light_make(world_seed)
 	s.player = player_spawn(&s.world)
 
 	s.flies = firefly_gather(&s.world, i32(s.player.x), i32(s.player.y))
-	s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
+
+	// The museum keeps nobody. A drudge is placed on the first ground
+	// near where the wizard lands that has rock over it, and in the
+	// Laboratory that is a room of a gallery: a pot thrown in there
+	// would spill over the one thing the room is there to show. See
+	// docs/laboratory.md.
+	if !world_is_laboratory(biomes, world_seed) {
+		s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
+	}
 
 	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 	s.loaded = true
@@ -356,9 +376,7 @@ load_biome_images :: proc(biomes: Biome_Table, materials: Material_Table) -> (im
 	return loaded, true
 }
 
-load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool) {
-	path := biomes.map_image_path
-
+load_or_create_biome_map :: proc(biomes: Biome_Table, path: string) -> (m: Biome_Map, ok: bool) {
 	if os.exists(path) {
 		loaded, result := load_biome_map_png(path, biomes)
 		if result.err == .Unmatched_Color {
@@ -373,6 +391,15 @@ load_or_create_biome_map :: proc(biomes: Biome_Table) -> (m: Biome_Map, ok: bool
 			return {}, false
 		}
 		return loaded, true
+	}
+
+	// A missing map is a starter world for the ordinary one, and a
+	// missing file for any other: the Laboratory is authored data, and
+	// a starter map painted over it would be the wrong world under the
+	// right name.
+	if path != biomes.map_image_path {
+		fmt.eprintfln("cannot read %s; run tools/seed_laboratory.py to draw it", path)
+		return {}, false
 	}
 
 	m = make_starter_biome_map(biomes)

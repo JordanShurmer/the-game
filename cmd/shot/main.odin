@@ -36,6 +36,7 @@ Options :: struct {
 	ticks_set:  bool,
 	ignite:     Point_Command,
 	explode:    Point_Command,
+	seed:       Maybe(u64),
 }
 
 main :: proc() {
@@ -54,7 +55,7 @@ main :: proc() {
 	if !options.light_set do options.light = options.player
 
 	sim: game.Sim
-	if err := game.sim_load(&sim); err != .None {
+	if err := game.sim_load(&sim, seed = options.seed); err != .None {
 		fmt.eprintfln("the world could not load: %v", err)
 		os.exit(1)
 	}
@@ -115,7 +116,10 @@ main :: proc() {
 		}
 		x, y, aimed := game.shot_biome_origin(sim.world, game.Biome_Id(idx))
 		if !aimed {
-			fmt.eprintfln("%s is not painted on the biome map yet", options.biome)
+			fmt.eprintfln(
+				"%s is not painted on the map this seed opens; the galleries want seed=0x1AB (see [Laboratory] in %s)",
+				options.biome, game.BIOMES_PATH,
+			)
 			os.exit(1)
 		}
 		if !options.aimed {
@@ -282,6 +286,15 @@ read_options :: proc(options: ^Options) -> bool {
 			options.ignite, ok = point_command(key, value, 0, 0)
 		case "explode":
 			options.explode, ok = point_command(key, value, EXPLODE_DEFAULT_RADIUS, EXPLODE_DEFAULT_POWER)
+		case "seed":
+			// A seed is a world, and hexadecimal is a seed too:
+			// seed=0x1AB opens the Laboratory. See docs/laboratory.md.
+			v, seed_ok := strconv.parse_u64_maybe_prefixed(value)
+			if !seed_ok {
+				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				return false
+			}
+			options.seed = v
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false

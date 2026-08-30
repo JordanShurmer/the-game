@@ -487,6 +487,11 @@ one, and drawn by the same code: sixteen rooms in a four by four grid,
 each 128 cells square including its bedrock wall, doors between the
 rooms of a row, shafts down the ends.
 
+Both galleries now live in a world of their own, opened by
+`seed=0x1AB`. The coordinates above are unchanged, because the
+Laboratory map is drawn against the same origin; every shot command
+below wants the seed in front of it. See `docs/laboratory.md`.
+
 `tools/seed_gallery.py` and the new `tools/seed_alchemy.py` share
 `tools/museum.py`: the canvas, the room, the doors, the shafts, the
 PNG reader and writer, and the three rules `--check` holds. Each
@@ -497,7 +502,9 @@ regenerated and has to come back byte for byte the same file.
 Rooms 1 to 6 are the first alchemy and rooms 7 to 14 are the second.
 Room 10 and rooms 15 and 16 are halls with plinths, walled and doored
 and empty, because this gallery is meant to be filled as the alchemy
-grows, and it has been once already.
+grows, and it has been once already. The Laboratory is where they are
+filled from now on: another hall is another region of that map and
+another pixel beside these two.
 
 Room 10 is empty for a reason of its own: room 6 comes down into it,
 and room 6 is judged by what can be seen from it, so nothing in room 10
@@ -536,13 +543,14 @@ and the frame stays black.
 
 ```sh
 make shot
-./bin/shot biome=Alchemy out=shots/alchemy.png                       # as painted
-./bin/shot biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
-./bin/shot x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
-./bin/shot x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
-./bin/shot x=896 y=-2432 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
-./bin/shot x=896 y=-2304 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
-./bin/shot x=512 y=-2176 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
+S=seed=0x1AB   # the world the galleries are in; see docs/laboratory.md
+./bin/shot $S biome=Alchemy out=shots/alchemy.png                       # as painted
+./bin/shot $S biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
+./bin/shot $S x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
+./bin/shot $S x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
+./bin/shot $S x=896 y=-2432 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
+./bin/shot $S x=896 y=-2304 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
+./bin/shot $S x=512 y=-2176 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
 ```
 
 A room of the second alchemy sits at world x `512 + 128 * col`, y
@@ -554,8 +562,9 @@ Rooms 2 and 6 are lit by nothing but their own reaction, so there is no
 wizard to carry the light: `light=1` with no `player` follows the
 middle of the view instead of the origin, which is the only way a room
 this far from where he starts can be judged lit at all. `player=1`
-would light the shot from wherever he starts instead, nowhere near
-this gallery, and the room would read as dark for the wrong reason.
+would light the shot from where he lands instead, which is the roof of
+the gallery next door, and the room would read as dark for the wrong
+reason.
 
 The mix is a thing that flashes, so a still is a still of one tick.
 Judge it by a run of them, 30 ticks apart, and by the pool that is

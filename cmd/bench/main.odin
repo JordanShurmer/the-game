@@ -13,6 +13,7 @@ Options :: struct {
 	size:  i32,
 	ticks: int,
 	warm:  int,
+	seed:  Maybe(u64),
 }
 
 main :: proc() {
@@ -27,7 +28,7 @@ main :: proc() {
 	if !read_options(&options) do os.exit(1)
 
 	sim: game.Sim
-	if err := game.sim_load(&sim); err != .None {
+	if err := game.sim_load(&sim, seed = options.seed); err != .None {
 		fmt.eprintfln("the game could not start: %v", err)
 		os.exit(1)
 	}
@@ -98,6 +99,15 @@ read_options :: proc(options: ^Options) -> bool {
 		case "warm":
 			v, ok = number(key, value, 0)
 			options.warm = int(v)
+		case "seed":
+			// A seed is a world, and hexadecimal is a seed too:
+			// seed=0x1AB benches a room of the Laboratory.
+			seed, seed_ok := strconv.parse_u64_maybe_prefixed(value)
+			if !seed_ok {
+				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				return false
+			}
+			options.seed = seed
 		case:
 			fmt.eprintfln("there is no argument %q", key)
 			return false

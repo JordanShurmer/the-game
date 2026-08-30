@@ -54,6 +54,11 @@ Biome_Table :: struct {
 	// leaves the search to look for a cave mouth near the origin.
 	spawn_biome:     Biome_Id,
 	spawn_region:    i32,
+
+	// The other world, and the seed that opens it. See
+	// src/laboratory.odin: everything above is the map one seed lays
+	// out another way, and this is the map another seed opens instead.
+	laboratory:      Laboratory,
 }
 
 biome_tile_count :: proc(table: Biome_Table) -> int {

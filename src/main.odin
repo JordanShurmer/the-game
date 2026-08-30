@@ -74,6 +74,7 @@ Window_Shot :: struct {
 	look:    string,
 	script:  string,
 	record:  string,
+	seed:    Maybe(u64),
 	on:      bool,
 	profile: bool,
 }
@@ -87,7 +88,7 @@ main :: proc() {
 	shot := read_window_shot(os.args[1:])
 
 	app: App
-	if !app_load_data(&app) {
+	if !app_load_data(&app, shot.seed) {
 		os.exit(1)
 	}
 	defer app_unload_data(&app)
@@ -278,6 +279,10 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			shot.record = value
 		case "profile":
 			if n, ok := strconv.parse_int(value); ok do shot.profile = n != 0
+		case "seed":
+			// A seed is a world. Hexadecimal is a seed too, which is
+			// how seed=0x1AB opens the Laboratory.
+			if n, ok := strconv.parse_u64_maybe_prefixed(value); ok do shot.seed = n
 		}
 	}
 	return shot
@@ -323,8 +328,8 @@ app_throw :: proc(app: ^App, aim: u8, ticks: int) {
 	app.dirty = true
 }
 
-app_load_data :: proc(app: ^App) -> bool {
-	if err := sim_load(&app.sim); err != .None do return false
+app_load_data :: proc(app: ^App, seed: Maybe(u64) = nil) -> bool {
+	if err := sim_load(&app.sim, seed = seed); err != .None do return false
 
 	sim_play_begin(&app.sim)
 
@@ -1211,8 +1216,18 @@ draw_hud :: proc(app: ^App) {
 	id := world_biome_at(app.world, cx, cy)
 	b := app.world.biomes.biomes[id]
 
+	// Which world he is standing in, because a seed is a world and one
+	// seed is a different one. See src/laboratory.odin.
+	world := world_is_laboratory(app.world.biomes, app.world.seed) ? "Laboratory" : "world"
+
 	rl.DrawRectangle(0, 0, 460, 130, rl.Fade(rl.BLACK, 0.55))
-	rl.DrawText(fmt.ctprintf("centre %d, %d   %d cell/texel   %dx zoom", cx, cy, app.step, app.zoom), 12, 10, 18, rl.RAYWHITE)
+	rl.DrawText(
+		fmt.ctprintf(
+			"centre %d, %d   %d cell/texel   %dx zoom   %s seed %d",
+			cx, cy, app.step, app.zoom, world, app.world.seed,
+		),
+		12, 10, 18, rl.RAYWHITE,
+	)
 	rl.DrawText(
 		fmt.ctprintf("biome at centre: %s", app.world.biomes.names[id]),
 		12,

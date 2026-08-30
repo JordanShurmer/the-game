@@ -10,7 +10,7 @@ MCP_MAX_MAP_CELLS :: 20000
 
 MCP_TOOLS_JSON :: `{"tools":[
 {"name":"world_status",
- "description":"Report the whole state: the biome map, the open tile, the sandbox tick and checksum, the input queue counters, and how many cells hold each material.",
+ "description":"Report the whole state: which world is open and its seed, the biome map, the open tile, the sandbox tick and checksum, the input queue counters, and how many cells hold each material.",
  "inputSchema":{"type":"object","properties":{},"additionalProperties":false}},
 {"name":"list_materials",
  "description":"List every material with its index, map glyph, and physical properties. Use these names and glyphs when painting a tile or spawning into the sandbox.",
@@ -192,6 +192,14 @@ mcp_call_tool :: proc(s: ^Sim, out: ^strings.Builder, id: json.Value, request: j
 
 tool_world_status :: proc(s: ^Sim) -> string {
 	b := strings.builder_make(context.temp_allocator)
+
+	// Which world this is, because a seed is a world and one seed is a
+	// different one. See docs/laboratory.md.
+	fmt.sbprintf(
+		&b, "%s, world seed %d\n",
+		world_is_laboratory(s.world.biomes, s.world.seed) ? "the Laboratory" : "the ordinary world",
+		s.world.seed,
+	)
 
 	m := s.world.biome_map
 	fmt.sbprintf(
@@ -596,7 +604,10 @@ tool_sandbox_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		}
 		px, py, painted := biome_first_pixel(s, Biome_Id(idx))
 		if !painted {
-			return fmt.tprintf("%s is not painted on the biome map yet", name), true
+			return fmt.tprintf(
+				"%s is not painted on the map this seed opens; the galleries want seed=0x1AB (see [Laboratory] in %s)",
+				name, BIOMES_PATH,
+			), true
 		}
 		cpp := s.world.biomes.cells_per_pixel
 		origin_x = (px - s.world.biomes.origin_pixel_x) * cpp
@@ -1511,6 +1522,7 @@ test_status_reports_every_part :: proc(t: ^testing.T) {
 	defer sim_unload(&s)
 
 	text := tool_world_status(&s)
+	testing.expect(t, strings.contains(text, "the ordinary world, world seed"), "the status must name the world it opened")
 	testing.expect(t, strings.contains(text, "biome map"))
 	testing.expect(t, strings.contains(text, "no tile set is open"))
 	testing.expect(t, strings.contains(text, "sandbox 128x72"))

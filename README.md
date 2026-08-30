@@ -152,7 +152,8 @@ it: salt goes into water and heat brings it back, nitre and brimstone
 and coal make black powder in two steps, quicksilver takes gold up and
 fire gives it back, and a spell turns plain rock into a stone that
 answers water with light. `docs/alchemy.md` is the note, and the
-alchemy gallery is fourteen rooms of it running.
+alchemy gallery is fourteen rooms of it running, in the world
+`seed=0x1AB` opens.
 
 ![The alchemy gallery running, drawn flat: salt and water and the metals, a room to a reaction](docs/images/alchemy.gif)
 
@@ -260,8 +261,35 @@ agree, so two regions meet with no step, and the middle of every
 picture stays open, because that is where the wizard lands.
 `docs/homelands.md` is the note.
 
-The two galleries are painted regions too, of one picture each; see
-`docs/physics.md` and `docs/alchemy.md`.
+The two galleries are painted regions too, of one picture each, and
+they have a world to themselves.
+
+## Two worlds
+
+A seed is a world. `seed=N` on any of the binaries lays the map out
+another way — another lattice of tiles under the village, another six
+of the twelve homelands pictures over it — and the same seed always
+gives back the same world.
+
+```sh
+./bin/the-game seed=7
+./bin/shot seed=7 biome=Coalmine out=shots/other.png
+```
+
+One seed does not lay that map out at all. `seed=0x1AB` opens the
+**Laboratory**: the physics gallery and the alchemy gallery side by
+side under an open sky, with rock in every other direction. The wizard
+lands on the roof of the museum between its two doors, and there is
+nothing else in that world at all. A museum does not belong in the
+middle of a coal seam.
+
+```sh
+./bin/the-game seed=0x1AB
+./bin/shot seed=0x1AB biome=Alchemy ticks=600 out=shots/alchemy.png
+```
+
+`docs/laboratory.md` is the note; `docs/physics.md` and
+`docs/alchemy.md` are the two galleries themselves.
 
 ## The editors
 
@@ -331,9 +359,9 @@ src/       the game, package game, with the tests beside the code
 cmd/mcp/   the MCP server binary
 cmd/shot/  the world as a PNG
 cmd/bench/ what a tick of the sandbox costs
-data/      the materials, the biomes, the biome map, the tiles, the sprites, the shaders
+data/      the materials, the biomes, the two biome maps, the tiles, the sprites, the shaders
 docs/      the design notes and the toolchain
-tools/     the toolchain install, the tile and homelands seeders, and the wizard, drudge and gallery seeders
+tools/     the toolchain install, the tile, homelands and laboratory seeders, and the wizard, drudge and gallery seeders
 ```
 
 | File | What it holds |
@@ -344,6 +372,7 @@ tools/     the toolchain install, the tile and homelands seeders, and the wizard
 | `src/wang.odin` | The tile lattice, the edge colors, the seam rule |
 | `src/reel.odin` | The scripted runs the README's video is filmed from |
 | `src/homelands.odin` | The shape the world expects the village to have |
+| `src/laboratory.odin` | The other world: the seed that opens the museum, and the walk through it |
 | `src/editor.odin` | The world editor, model and window |
 | `src/tile_editor.odin` | The tile editor, model and window |
 | `src/player.odin` | The wizard: his body, his step, and where he starts |
