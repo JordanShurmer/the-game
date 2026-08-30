@@ -28,6 +28,10 @@ import struct
 import sys
 import zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import noise
+
 MATERIALS_PATH = "data/materials.txt"
 
 IMG      = 512  # the whole gallery, one region, cells_per_pixel in data/biomes.txt
@@ -383,21 +387,27 @@ def run_cli(description, out_path, paint, entrance_x0, entrance_x1):
     parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="hold the file on disk to the rules")
     parser.add_argument("--out", default=out_path)
+    noise.add_debug(parser)
     args = parser.parse_args()
+    noise.read_debug(args)
 
     if not os.path.exists(MATERIALS_PATH):
         sys.exit(f"cannot read {MATERIALS_PATH}; run this from the repository root")
 
     if args.check:
+        noise.say(noise.STEP, f"checking {args.out}")
         faults = check(args.out, entrance_x0, entrance_x1)
         for fault in faults:
-            print(fault, file=sys.stderr)
+            noise.fault(fault)
         if faults:
+            print(f"{noise.CROSS} {args.out}: {len(faults)} faults")
             sys.exit(1)
-        print(f"{args.out}: {IMG}x{IMG}, {GRID*GRID} rooms, every rule holds")
+        print(f"{noise.TICK} {args.out}")
         return
 
+    noise.say(noise.STEP, f"painting {GRID*GRID} rooms")
     materials = read_materials()
     cv = paint()
     write_png(args.out, render(cv, materials))
-    print(f"{args.out}: {IMG}x{IMG}, {GRID*GRID} rooms")
+    noise.say(noise.DETAIL, f"{args.out}: {IMG}x{IMG}, {GRID*GRID} rooms")
+    print(f"{noise.TICK} {args.out}")

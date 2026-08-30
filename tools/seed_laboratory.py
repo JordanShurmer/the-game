@@ -53,6 +53,10 @@ import argparse
 import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import noise
+
 from museum import read_sections, write_png, read_png
 
 BIOMES_PATH = "data/biomes.txt"
@@ -190,33 +194,40 @@ def main():
     )
     parser.add_argument("--check", action="store_true", help="hold the file on disk to the rules")
     parser.add_argument("--out", default=None)
+    noise.add_debug(parser)
     args = parser.parse_args()
+    noise.read_debug(args)
 
     if not os.path.exists(BIOMES_PATH):
         sys.exit(f"cannot read {BIOMES_PATH}; run this from the repository root")
 
     colors, laboratory = read_biomes()
     out = args.out or laboratory.get("image", "data/biome_map_laboratory.png")
+    halls = ", ".join(name for _, name in HALLS)
 
     if args.check:
+        noise.say(noise.STEP, f"checking {out}")
         faults = check(out)
         if args.out is None:
             faults += names_this_picture(out)
-        for fault in faults:
-            print(fault, file=sys.stderr)
+        for f in faults:
+            noise.fault(f)
         if faults:
+            print(f"{noise.CROSS} {out}: {len(faults)} faults")
             sys.exit(1)
-        halls = ", ".join(name for _, name in HALLS)
-        print(f"{out}: {MAP}x{MAP}, {halls} in a cutting under the open sky, every rule holds")
+        noise.say(noise.DETAIL, f"{out}: {halls} in a cutting under the open sky")
+        print(f"{noise.TICK} {out}")
         return
 
     for name in [SKY, GROUND] + [n for _, n in HALLS]:
         if name not in colors:
             sys.exit(f"{BIOMES_PATH} has no biome named {name}")
 
+    noise.say(noise.STEP, f"painting {halls} into a {MAP}x{MAP} map")
     cells = paint()
     write_png(out, [[rgba(colors[name]) for name in row] for row in cells])
-    print(f"{out}: {MAP}x{MAP}, " + ", ".join(name for _, name in HALLS))
+    noise.say(noise.DETAIL, f"{out}: {MAP}x{MAP}, {halls}")
+    print(f"{noise.TICK} {out}")
 
 
 if __name__ == "__main__":

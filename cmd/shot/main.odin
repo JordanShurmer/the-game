@@ -1,15 +1,42 @@
 package main
 
+// The world as a PNG, with no window.
+//
+//   ./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
+//
+// The result is one line: the file it wrote, and what is in it.
+// Everything else waits for a rung of the debug ladder; see
+// src/noise.odin.
+
 import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
-import rl "vendor:raylib"
 
 import game "../../src"
 
 EXPLODE_DEFAULT_POWER  :: 64
 EXPLODE_DEFAULT_RADIUS :: EXPLODE_DEFAULT_POWER / 4
+
+USAGE :: `usage: shot [key=value ...]
+
+  out      where to write the PNG          (shots/world.png)
+  biome    aim at a biome in data/biomes.txt
+  x= y=    aim at a world cell instead
+  w= h=    the rectangle, in cells         (384x256)
+  step     world cells per texel           (1)
+  scale    texels per pixel                (2)
+  grid     1 to draw the tile lattice
+  player   1 to put the wizard in the frame
+  light    1 or 0 to force the light on or off
+  walk     step the wizard this many ticks, left if negative
+  ticks    open a sandbox and run it this many ticks
+  ignite   x,y[,r]          needs ticks=N
+  explode  x,y[,r][,power]  needs ticks=N
+  seed     which world to open; seed=0x1AB is the Laboratory
+  debug    0 the result, 1 the steps, 2 the detail, 3 everything
+
+Run it from the repository root: the data paths are relative to it.`
 
 Point_Command :: struct {
 	x, y, r: i32,
@@ -40,7 +67,6 @@ Options :: struct {
 }
 
 main :: proc() {
-	rl.SetTraceLogLevel(.WARNING)
 
 	options := Options {
 		out   = "shots/world.png",
@@ -49,11 +75,15 @@ main :: proc() {
 		step  = 1,
 		scale = 2,
 	}
-	if !read_options(&options) do os.exit(1)
+	if !read_options(&options) {
+		fmt.eprintln(USAGE)
+		os.exit(1)
+	}
 
 	if options.walk != 0 do options.player = true
 	if !options.light_set do options.light = options.player
 
+	game.say(game.NOISE_STEP, "loading the world")
 	sim: game.Sim
 	if err := game.sim_load(&sim, seed = options.seed); err != .None {
 		fmt.eprintfln("the world could not load: %v", err)
@@ -90,6 +120,7 @@ main :: proc() {
 	}
 
 	if options.walk != 0 {
+		game.say(game.NOISE_STEP, "walking the wizard %d ticks", options.walk)
 		if options.ticks_set {
 			fmt.eprintfln("walk and ticks both drive the simulation, so use one or the other")
 			os.exit(1)
@@ -167,6 +198,7 @@ main :: proc() {
 			})
 		}
 
+		game.say(game.NOISE_STEP, "running the sandbox %d ticks", options.ticks)
 		game.sim_run(&sim, int(options.ticks))
 	}
 
@@ -249,6 +281,10 @@ read_options :: proc(options: ^Options) -> bool {
 
 		ok := true
 		switch key {
+		case "debug":
+			rung: i32
+			rung, ok = number(key, value)
+			game.noise_set(int(rung))
 		case "out":
 			options.out = value
 		case "biome":

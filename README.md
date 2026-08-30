@@ -36,9 +36,14 @@ relative to it.
 
 ```sh
 odin run src        # play
-odin test src       # the tests
+make test           # the tests: a mark for each one
 make                # bin/the-game, bin/game-mcp, bin/shot
 ```
+
+Each of these prints its result and nothing else. To see the work
+behind it, climb the debug ladder: `make V=1`, `tools/test.sh -v`,
+`./bin/shot ... debug=2`, or `GAME_DEBUG=3` in the environment for a
+whole shell. `AGENTS.md`, "How loud the toolset is", holds the rungs.
 
 If `odin` is not on the PATH, `sudo tools/install-toolchain.sh`
 downloads the Odin release archive, which holds the compiler and the

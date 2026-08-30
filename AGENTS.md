@@ -6,8 +6,8 @@ Run every command from the repository root, because the data paths are
 relative to it.
 
 ```sh
-odin check src -vet     # types, and the things vet catches
-odin test src           # the whole suite, under twenty seconds
+make check              # types, and the things vet catches
+make test               # the whole suite: a mark for each test
 make                    # bin/the-game, bin/game-mcp, bin/shot
 make bench              # bin/bench, which times a tick
 ```
@@ -17,13 +17,56 @@ If `odin` is not on the PATH, install it:
 the network. See `docs/toolchain.md` for what it does, and why the
 Odin repository must not be cloned to get raylib.
 
+### How loud the toolset is
+
+A run that goes right prints its result and nothing else: the files a
+build wrote, a mark for each test that passed, the PNG a shot drew.
+The talk behind it is on a ladder, and every part of the toolset reads
+the same rung:
+
+```
+0  the result, and nothing else            (the default)
+1  a line for each piece of work
+2  the detail behind each line
+3  everything, the graphics trace log included
+```
+
+```sh
+make V=2                   # the Makefile, and the compiler timing itself
+tools/test.sh -v           # the suite, with a name beside each mark
+./bin/shot biome=Lake debug=2 out=shots/lake.png
+tools/seed_tiles.py --check -vv
+sudo tools/install-toolchain.sh -v
+GAME_DEBUG=1 ./bin/bench    # the ladder in the environment, for a whole shell
+```
+
+Every one of these runs wrong with no argument at all, or with an
+argument it does not know, and prints its usage instead of guessing.
+
+When you add a message: if a run that goes right must print it, it is
+a result, and it goes to stdout with no rung. Everything else takes a
+rung and goes to stderr, so a shell can keep the result and drop the
+talk. `src/noise.odin` holds the ladder for the Odin side and
+`tools/noise.py` for the Python side.
+
 ## Measure before you optimize
 
 `src/prof.odin` times every phase of the tick and the frame, and counts
 what a tick worked: rows stepped, cells loaded, reacts, swaps. Three
 ways to read it, no tools to attach:
 
-- `./bin/bench biome=Lake ticks=300` prints the tick phases and counts.
+- `./bin/bench biome=Lake ticks=300` prints the cost of a tick and the
+  shape under it: which phases the tick went to, widest first, with
+  each one's share, and how much matter the tick worked.
+
+  ```
+  Lake 2048x2048: 9.901 ms a tick, over 50 ticks (checksum 0x8b9619ef8a45e51c)
+  tick    Step_Rows 9.815 ms 99%  Step_Wake 0.083 ms 1%  Step_Age 0.001 ms 0%
+  work    4799 rows  201122 cells  3511 hot  92753 reacts  3250 moving  48888 swaps  a tick
+  ```
+
+  The same numbers one phase to a line, for a reader who has found the
+  phase and wants it exact, are at `debug=2`.
 - **F3** in the game window overlays the same, averaged over the last
   second.
 - A headless shot prints the whole run on exit with `profile=1`:
@@ -122,7 +165,7 @@ the legs from where the world diverged.
 ## Iterate on the world
 
 1. Change the tiles or the code.
-2. `odin test src`.
+2. `make test`.
 3. `./bin/shot ...` and look at the picture.
 4. Repeat until it reads right, then commit.
 
@@ -181,9 +224,9 @@ Hexadecimal counts, so `seed=0x1AB` and `seed=427` are the same world.
 Every seed but one lays the ordinary map out another way: another
 lattice of tiles, another six of the twelve homelands pictures. One
 seed does not lay it out at all. `seed=0x1AB` opens the **Laboratory**,
-which is the physics gallery and the alchemy gallery side by side
-under an open sky and nothing else, and it is the only way into either
-of them. `docs/laboratory.md` is the design note. Read it before
+which is the physics gallery and the alchemy gallery side by side at
+the bottom of a cutting in the rock, and nothing else, and it is the
+only way into either of them. `docs/laboratory.md` is the design note. Read it before
 changing `src/laboratory.odin`, `tools/seed_laboratory.py`, or the
 `[Laboratory]` section of `data/biomes.txt`.
 
@@ -194,14 +237,18 @@ tools/seed_laboratory.py           # draws data/biome_map_laboratory.png
 tools/seed_laboratory.py --check   # holds the file to the rules
 ```
 
-Two rules there are easy to break and only visible in a shot of the
-whole world, and `--check` holds the map to both:
+Three rules there are easy to break and only visible in a shot of the
+whole world, and `--check` holds the map to all three:
 
 - **The two halls share a row.** Their bedrock roofs are the only
   floor of that world, and two regions on different rows have no
   joined roof at all.
 - **There is open sky the whole way up over both.** The roof is what
   the wizard walks on, and a roof with earth over it is a cellar.
+- **The sky stops where the museum stops.** The light is drawn a
+  square at a time and everything outside that square is black, so the
+  world is laid in the middle of one: rock in the dark reads as rock,
+  and sky in the dark reads as a hole in the world.
 
 `test_the_wizard_walks_the_laboratory_into_both_galleries` plays the
 world through `sim_step_player`: down one door, back out on the

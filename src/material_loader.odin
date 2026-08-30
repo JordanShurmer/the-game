@@ -1,7 +1,6 @@
 package game
 
 import "base:runtime"
-import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -163,12 +162,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 				n += 1
 			}
 			if n != 8 || fields[1] != "+" || fields[3] != "->" || fields[5] != "+" {
-				fmt.eprintfln("%s:%d: bad [Reactions] row: %q", path, line_index, trimmed)
+				fault("%s:%d: bad [Reactions] row: %q", path, line_index, trimmed)
 				return {}, false
 			}
 			chance, chance_ok := strconv.parse_uint(fields[7], 10)
 			if !chance_ok || chance > 255 {
-				fmt.eprintfln("%s:%d: [Reactions] chance must be 0..255: %q", path, line_index, trimmed)
+				fault("%s:%d: [Reactions] chance must be 0..255: %q", path, line_index, trimmed)
 				return {}, false
 			}
 			append(&reaction_rows, Raw_Reaction{a = fields[0], b = fields[2], c = fields[4], d = fields[6], chance = u8(chance), line = line_index})
@@ -266,7 +265,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		for product in products {
 			if int(product.to) == i do continue
 			if !material_is_phantom(table.materials[product.to]) do continue
-			fmt.eprintfln(
+			fault(
 				"%s: %s %s %s, which has no physical interaction and cannot be in a cell",
 				path, table.names[i], product.what, table.names[product.to],
 			)
@@ -318,12 +317,12 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 			if aok do bad = row.b
 			if aok && bok do bad = row.c
 			if aok && bok && cok do bad = row.d
-			fmt.eprintfln("%s:%d: [Reactions] names unknown material %q", path, row.line, bad)
+			fault("%s:%d: [Reactions] names unknown material %q", path, row.line, bad)
 			return {}, false
 		}
 
 		if material_is_phantom(table.materials[ci]) || material_is_phantom(table.materials[di]) {
-			fmt.eprintfln(
+			fault(
 				"%s:%d: [Reactions] makes %s, which has no physical interaction and cannot be in a cell",
 				path, row.line, table.names[material_is_phantom(table.materials[ci]) ? ci : di],
 			)
@@ -334,7 +333,7 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 		// never fire. See docs/alchemy.md, "A chain of rows".
 		tail_fwd, floor := reaction_chain_tail(reactions[:], reaction_at[ai*n+bi])
 		if floor >= 256 {
-			fmt.eprintfln(
+			fault(
 				"%s:%d: [Reactions] row can never fire: the chain from %s:%d already reaches %d of 255",
 				path, row.line, path, reaction_line[tail_fwd], floor,
 			)

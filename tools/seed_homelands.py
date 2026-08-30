@@ -86,6 +86,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import museum
+import noise
 
 IMG = museum.IMG  # 512: one region, cells_per_pixel in data/biomes.txt
 
@@ -1599,32 +1600,50 @@ def main():
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--check", action="store_true", help="hold the files on disk to the rules")
+    noise.add_debug(parser)
     args = parser.parse_args()
+    noise.read_debug(args)
 
     if not os.path.exists(museum.MATERIALS_PATH):
         sys.exit("cannot read data/materials.txt; run this from the repository root")
 
     materials = museum.read_materials()
 
+    # One mark for each file, in the order they are drawn or read, so
+    # the line is the shape of the run: the twelve homelands, then the
+    # cavemouth.
+    marks = []
+    faults = []
+
     if args.check:
-        faults = []
-        for name in HOME_PATHS:
-            faults += check_one(name, materials, is_mouth=False)
-        faults += check_one(MOUTH_PATH, materials, is_mouth=True)
+        for name in HOME_PATHS + [MOUTH_PATH]:
+            noise.say(noise.STEP, f"checking {name}")
+            found = check_one(name, materials, is_mouth=name == MOUTH_PATH)
+            marks.append(noise.TICK if not found else noise.CROSS)
+            faults += found
+        print("".join(marks))
         for fault in faults:
-            print(fault, file=sys.stderr)
+            noise.fault(fault)
         if faults:
+            print(f"{noise.CROSS} {len(faults)} faults over {len(marks)} rooms")
             sys.exit(1)
-        print(f"{len(HOME_PATHS)} homelands and the cavemouth: every rule holds")
+        print(f"{noise.TICK} {len(marks)} rooms")
         return
 
     for i, name in enumerate(HOME_PATHS):
+        noise.say(noise.STEP, f"painting {name}")
         land = paint_homeland(0x480E + i * 7919, i)
         museum.write_png(name, museum.render(land, materials))
-        print(f"{name}: {IMG}x{IMG}")
+        noise.say(noise.DETAIL, f"{name}: {IMG}x{IMG}")
+        marks.append(noise.TICK)
 
+    noise.say(noise.STEP, f"painting {MOUTH_PATH}")
     museum.write_png(MOUTH_PATH, museum.render(paint_cavemouth(), materials))
-    print(f"{MOUTH_PATH}: {IMG}x{IMG}")
+    noise.say(noise.DETAIL, f"{MOUTH_PATH}: {IMG}x{IMG}")
+    marks.append(noise.TICK)
+
+    print("".join(marks))
+    print(f"{noise.TICK} {len(marks)} rooms")
 
 
 if __name__ == "__main__":

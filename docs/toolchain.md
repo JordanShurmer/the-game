@@ -5,7 +5,8 @@ that Odin vendors. Nothing else. A machine that already has `odin` on
 the PATH needs none of this page.
 
 ```sh
-sudo tools/install-toolchain.sh   # about half a minute
+sudo tools/install-toolchain.sh      # about half a minute, one line of result
+sudo tools/install-toolchain.sh -v   # a line for each step
 odin version                      # odin version dev-2026-08-nightly:ec04cee
 ```
 
