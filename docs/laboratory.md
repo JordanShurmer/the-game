@@ -130,7 +130,15 @@ five rules, of which three are the shape of the place:
 ```sh
 tools/seed_laboratory.py           # draws data/biome_map_laboratory.png
 tools/seed_laboratory.py --check   # holds the file to the rules
+tools/seed_laboratory.py --check --out other.png   # holds a candidate to them
 ```
+
+The five are rules about a picture, so `--out` may hand `--check` any
+picture and get an answer about it. One more question is asked of the
+shipped map alone, and only when `--out` is not given: whether
+`[Laboratory]` points at it at all. That is a question about the data
+file rather than about the picture, and asking it of a copy in `/tmp`
+would fail every candidate for being a candidate.
 
 ## Why it sits where it sits
 

@@ -35,13 +35,13 @@ hole in the world.
 The two galleries share a row, so their bedrock roofs are one floor
 under the sky, and the wizard lands on it between their two doors.
 Every gallery cuts its entrance shaft down through the top edge of its
-own picture, 4 to 24 cells in from its west side, so on this map the
-physics door is at world x 4 and the alchemy door at x 516: he walks
-about 250 cells either way to reach one.
+own picture, 4 to 23 cells in from its west side, so on this map the
+physics door is at world x 516 to 535 and the alchemy door at x 1028 to
+1047: he lands at x 768 and walks about 250 cells either way to reach
+one.
 
 The map is the same 16 by 16 as data/biome_map.png, drawn against the
-same origin, so a room of a gallery keeps the world coordinates every
-note already gives for it.
+same origin, so a map pixel is a region of 512 world cells here too.
 
 This tool reads data/biomes.txt for the key colors and for the
 `[Laboratory]` section, so a biome that changes color is one run away
@@ -166,12 +166,22 @@ def check(path):
                 f"region(s) of {spawn}"
             )
 
-    # Rule 6: the picture is the one [Laboratory] names.
-    named = laboratory.get("image", "")
-    if named and os.path.normpath(named) != os.path.normpath(path):
-        faults.append(f"[Laboratory] image is {named}, and this is {path}")
-
     return faults
+
+
+def names_this_picture(path):
+    """Whether [Laboratory] points at the file on disk at all. This is a
+    question about the data file rather than about the picture, so it is
+    asked of the shipped map and not of a candidate handed to --out: a
+    byte-for-byte copy in /tmp is a good map, and holding it to the path
+    the section names would make --check and --out useless together."""
+    _, laboratory = read_biomes()
+    named = laboratory.get("image", "")
+    if not named:
+        return [f"[Laboratory] names no picture, so nothing opens that world"]
+    if os.path.normpath(named) != os.path.normpath(path):
+        return [f"[Laboratory] image is {named}, and this is {path}"]
+    return []
 
 
 def main():
@@ -190,6 +200,8 @@ def main():
 
     if args.check:
         faults = check(out)
+        if args.out is None:
+            faults += names_this_picture(out)
         for fault in faults:
             print(fault, file=sys.stderr)
         if faults:
