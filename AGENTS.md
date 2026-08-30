@@ -59,8 +59,14 @@ make game
 ```
 
 Its arguments are `shot` (the PNG to write), `frames` (how many frames
-to draw first, which is what moves the water) and `walk` (ticks of walk
-before the picture, negative for left, toward the pond).
+to draw first), `walk` (ticks of walk before the picture, negative for
+left, toward the mill) and `ticks` (ticks with him standing still,
+which is how to watch water go somewhere without putting him in the
+way of it).
+
+```sh
+./bin/the-game shot=shots/mill.png frames=2 ticks=90   # the millpond, part way through
+```
 
 Then open the PNG and look at it. `grid=1` draws the tile lattice and
 the region borders, which is how to tell a shape you drew from a seam
@@ -206,9 +212,17 @@ fireflies over the pond, for the bang an explosion gives off, and for
 the sparkle a poison throws off meeting water. Read it before changing
 `src/light.odin`, `src/firefly.odin`, `src/bang.odin` or
 `src/sparkle.odin`, and note the third rule below. `docs/water.md` is
-the note for the pond -- a tile in the caves now, with its fireflies
-painted in it -- and for the water shader; read it before changing
-`src/pond.odin`, `src/water.odin` or `data/shaders/water.fs`.
+the note for the two ponds -- the still one in the caves, a tile with
+its fireflies painted in it, and the millpond on the green that runs
+through its own dam the moment the world starts -- and for the water
+shader; read it before changing `src/pond.odin`, `src/water.odin`,
+`millpond()` in `tools/seed_homelands.py` or `data/shaders/water.fs`.
+`docs/physics.md` is the note for the sandbox: what a cell of matter
+does next, and in particular "The reach is the flatness", which is the
+fluid simulation -- how far a liquid or a gas looks along its own row
+for the way on, and why that one number is what makes a pond lie level.
+Read it before changing `src/sandbox_step.odin`, its vector twin
+`src/sandbox_step_simd.odin`, or a `spread` in `data/materials.txt`.
 `docs/alchemy.md` is the note for the whole alchemy: the poison, the
 water and the neutral liquid the two leave, and then the salts, the
 metals and the two magics that came after. Read it before changing

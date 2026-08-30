@@ -18,8 +18,9 @@ behaviour the game is known for.
 | What Noita does | What we do |
 | --- | --- |
 | Powder falls and piles | Already done |
-| Liquid falls, pools, and layers by density | Falling and pooling were done. Layering was not: see "The rise rule" below |
-| Gas climbs and gathers under a ceiling | Already done |
+| Liquid falls, pools, and layers by density | Falling and pooling were done. Layering was not: see "The rise rule". Pooling was not enough either: see "The reach is the flatness" |
+| Liquid finds its level | **New**: `sandbox_flow`, and the `spread` of a material |
+| Gas climbs and gathers under a ceiling | Climbing was done. Gathering was not: a gas heaped in the corner it came up in. `sandbox_flow` runs it along the roof |
 | Fire spreads along fuel and leaves smoke | Already done |
 | Wood burns for a time, then becomes ash | Data only: `burns_to` a burning material with a `lifetime` and a `decays_to` |
 | Water quenches fire and makes steam | **New**: the reaction table |
@@ -31,7 +32,7 @@ behaviour the game is known for.
 | Spells dig material the tool is strong enough for | **New**: `sandbox_dig` |
 | Hand painted rooms placed in the generated world | **New**: `generator = image` |
 
-Four things Noita does that we do **not** build in this phase. Each
+Five things Noita does that we do **not** build in this phase. Each
 one is named here with the rung that would add it, so that a later
 reader knows the gap is a decision and not an oversight.
 
@@ -47,18 +48,34 @@ reader knows the gap is a decision and not an oversight.
   flood fill from the anchored cells of a chunk, run only where a
   chunk was cut.
 - **No pressure, and no sideways exchange between liquids.** A pool
-  settles into one body and holds its shape, but it can keep a slope.
-  Noita does not equalise across a U bend either, so that part is a
-  match with the reference and not a debt. The second half is a real
-  limit: a liquid swaps with a lighter one below it and never with one
-  beside it, so two liquids poured into a wide tank settle with no
-  cell resting on anything lighter and still read as a diagonal smear
-  rather than as layers. The density room is a narrow column for that
-  reason. The rung that would lift it is a sideways swap gated on
-  density, which has to be written so that a settled pool of one
-  liquid does not jitter for ever.
+  finds its own level now -- see "The reach is the flatness" -- but it
+  does that by looking along the row it lies in, not by carrying a
+  head. Two things follow.
 
-  A pool does at least pack now. A liquid leaves a hole alone while a
+  **Water does not climb.** Fill one arm of a U bend and the other
+  stays empty: the water at the bottom has nowhere to step, and
+  nothing pushes it up the far side. Noita does not equalise across a
+  U bend either, so that part is a match with the reference and not a
+  debt. The rung that would lift it is a per-cell hydrostatic head,
+  and the hard part of writing it is that a still pond must not
+  fountain: a rule that lets pressed water rise into air will bubble a
+  settled pool through with holes unless the rise is paid for by an
+  inflow somewhere else.
+
+  **A liquid never swaps sideways with a lighter one.** It swaps with
+  a lighter one below it and steps aside only onto emptiness, so three
+  liquids poured into a wide tank side by side settle with no cell
+  resting on anything lighter and still read as a diagonal smear
+  rather than as layers. Measured: sludge, water and oil poured into
+  one tank in three columns hold their columns for 3000 ticks, with a
+  diagonal face between each pair. The density room is a narrow column
+  for that reason. The rung that would lift it is a sideways swap
+  gated on density, and it was tried: making `room` "the cell beside
+  me is lighter" rather than "the cell beside me is empty" barely
+  moved the smear and set a lone puddle cell wandering along its own
+  floor for ever, so it is not in the tree.
+
+  A pool does at least pack. A liquid leaves a hole alone while a
   fluid sits over it, because that fluid is about to fall in. Without
   that rule the scan reaches a row before the row above it, a cell
   takes the hole beside it and leaves a hole where it was, and the
@@ -66,10 +83,23 @@ reader knows the gap is a decision and not an oversight.
   holes then walk from side to side for ever and the pool keeps every
   one of them. A pool that packs also goes to sleep, where one that
   walks its holes keeps its chunk awake for the life of the world.
+  That rule is all that is left of `sandbox_spreads`, and a gas keeps
+  it too, mirrored: over a liquid, under a gas.
 
   What it costs is that a grain thrown clear of the body during a
   collapse stays clear. There is no cohesion, so nothing draws it
   back, and a fire in the body cannot cross the gap to it.
+
+- **No momentum.** A cell of water carries no velocity, so water
+  leaving a spout in the side of a cistern drops down the wall
+  rather than arcing away from it, and a wave does not slosh. What
+  coherence a stream has comes from the shape it runs through, not
+  from anything it remembers. The rung that would add it is a signed
+  byte a cell -- which way this fluid is going and how fast -- swapped
+  along with the cell, read by `sandbox_flow` in place of the side
+  hash, and gained and spent by the moves themselves. It costs one
+  byte a cell, which is four megabytes at `SANDBOX_PLAY_SIZE`, and it
+  has to be expressible in the vector intent pass.
 - **No temperature field.** A number per cell for heat would cost as
   much memory as the cells and buy behaviour that the reaction table
   already gives. Fire, melting, freezing and boiling are all pairs of
@@ -80,9 +110,10 @@ reader knows the gap is a decision and not an oversight.
 1. **A new material and a new reaction need no code.**
    `docs/mcp.md` already makes that promise. Everything below holds it.
    Reactions are rows in `data/materials.txt`, not a switch in Odin.
-2. **`Material` is 24 bytes and the `#assert` says so.** It had two
-   bytes of tail padding. One became `force`, the expulsive force, and
-   the other became `luminosity`, the light a material gives.
+2. **`Material` is 24 bytes and the `#assert` says so.** Its tail is
+   where a new number goes while there is room in the padding: `force`
+   went there, then `luminosity`, then `spread`. One byte is left. The
+   next field after that costs eight, so it had better be worth it.
 3. **Hot fields in the struct, cold fields in parallel tables.**
    `crumbles_to` is read only when a blast lands, so it is a cold
    table beside `decays_to` and `burns_to`.
@@ -269,6 +300,111 @@ Two things make the rule safe:
   goes back to sleep.
 - After the swap the pair is in the order it wanted, so it does not
   swap back.
+
+## The reach is the flatness
+
+The rise rule made two liquids layer. It did not make one liquid read
+as water, and for a long time nothing did. Measured, before this:
+
+| What was set up | What it did |
+| --- | --- |
+| a column of water 6 wide and 30 tall, on a flat floor 200 long | spread to x=21 and froze there by tick 50, holding a 45 degree wedge, unchanged at tick 12000 |
+| a tank with a wall across it and a hole at the foot of the wall | eight cells crossed, and then nothing |
+| a dam broken in a box 120 long | the front reached x=59 and stopped, holding water 26 deep where a level pool would have been 10 |
+| a room 58 wide and 38 tall, one puff of gas released in a corner | a heap 11 wide against that wall, unchanged from tick 100 |
+
+`sandbox_spreads` was the whole of it. A liquid could step aside only
+onto a cell that had a drop under it (`downhill`) or something
+pressing from above (`pressed`). Of a one-cell step down in its own
+surface, neither is true: the cell beside it is empty, but the cell
+under that one is the neighbour's own water, and the cell over it is
+air. So a one-cell step is a place a liquid will not step onto, and a
+staircase of one-cell steps is a shape it holds for ever. That is a
+powder's angle of repose, drawn by a liquid.
+
+Nothing read further than one cell, so nothing could see that two
+cells along the row there was a place to fall.
+
+**So a stopped fluid looks along its row.** `sandbox_flow`: a liquid
+looks for a cell it can sink from, a gas for one it can climb from, as
+far as the material's `spread` says, and goes to the first one it
+finds. The cells between are empty and all of one kind, so arriving at
+the far end is the same picture as walking there -- and walking there
+would leave a cell standing in the row for the water behind to trip
+over, which measurably stops the flow. `ahead` is +1 for a liquid and
+-1 for a gas, and that is the only difference between the two.
+
+The reach is the flatness. What settles is a surface that falls about
+one cell every `spread` cells, because a terrace shorter than the
+reach is one a cell can see across and step off. Measured, on the same
+column of water on the same 200-cell floor:
+
+| `spread` | Where the water reached | How far its surface fell |
+| --- | --- | --- |
+| 8 | x=48 | 1 cell in 8 |
+| 16 | x=63 | 1 in 16 |
+| 64 | x=199, the whole floor | 4 cells over 200 |
+
+So it is the one number that says how runny a fluid is, and it is a
+column in `data/materials.txt`: water 64 and level, oil 24, sludge 12,
+lava 3 and keeping the slope of a flow.
+
+**What it costs is nothing, because it is nearly free where it does
+not apply.** The look stops at the first cell it cannot enter, and
+inside a body of water that is the cell next door, so a submerged cell
+pays one comparison. Only a cell with open row beside it looks far,
+and a pool has those at its two ends. Both benchmarks came out faster
+than the step before: Lake 5.40 -> 5.12 ms a tick, Coalmine 2.56 ->
+2.29, because water settles sooner and sleeps.
+
+### Two things tried there that did not pay
+
+Read this before trying them again.
+
+- **A cap on how far a fluid may travel in a tick**, beside how far it
+  looks: a second per-material number, and the cell moves `min(k,
+  speed)` cells instead of the whole gap. The argument for it is that
+  a fluid which crosses its reach in one tick leaves an empty shelf
+  behind it, and a race with nothing in it does not read as a race.
+  Measured, with the floor at 8 cells a tick: the whole suite passes
+  and the mill is not distinguishable in a picture at tick 25, 90 or
+  1500, a long shelf fed by a spout holds a thinner sheet rather than
+  a steeper pile, and the tick costs 25% more on both benchmarks
+  (Lake 5.12 -> 6.53 ms, Coalmine 2.29 -> 2.87), because the water
+  takes more ticks to settle and every one of them is work. A quarter
+  of the tick for a difference nobody can point at is not a trade.
+- **The side a fluid looks first, remembered in a byte a cell.** The
+  obvious form of momentum, and it buys nothing, for a structural
+  reason worth writing down: `sandbox_flow` looks BOTH ways and takes
+  the first way on it finds, so which way it looks first is not
+  something the world can feel. Momentum has to change what a cell may
+  **do**, not the order in which it asks. See "No momentum" above for
+  the form that would.
+
+### Waking what a fluid can see
+
+A swap wakes the cells it touches and no more. That is enough while
+matter moves one cell at a time, and it is not enough for a fluid that
+reads a whole reach: a cell that moves changes the answer for water it
+never touched. Two rules keep the sleep honest, and neither costs a
+packed pool anything.
+
+- **A fluid that moves wakes the band it looked across.** If it saw
+  the way on `k` cells off, it was itself in view of any fluid up to
+  `k` cells the other way, along the same open run and in the row over
+  and the row under. The band is as wide as the look that earned it,
+  so it costs what the flow costs.
+- **A fluid with somewhere to step and nowhere to go keeps watch
+  itself.** What would let it on is further off than a swap wakes, so
+  it marks itself and looks again next tick. Only a fluid with an
+  empty cell beside it at its own level ever gets there, which a
+  packed pool has nowhere but at its two ends.
+
+Without the first, a pond drains and leaves a shelf of itself stranded
+up its own bank, because the water that could follow was asleep.
+Without the second, the same happens more slowly and in more places.
+With both, `test_a_settled_pond_goes_back_to_sleep` still finds every
+chunk of a settled pond asleep and not one of its cells moving.
 
 ## The sieve rule
 
@@ -842,7 +978,7 @@ and no pass carries an answer from one cell to the next.
 | LOAD | reads the row, and the rows above and below it, into weights and kinds |
 | HOT | the few cells with a lifetime, a reaction, or fire to spread |
 | INTENT | compares the three rows and writes the one step each cell wants |
-| APPLY | moves the cells that want to move |
+| APPLY | moves the cells that want to move, and for a fluid going sideways looks along the row for the way on first |
 
 **Weight is the whole move rule.** A cell carries one `u16`: air
 weighs nothing, a wall weighs everything, and everything between
@@ -950,6 +1086,9 @@ two builds rather than running one after the other.
 | `BLAST_CHIP_ODDS` | 96 | out of 255: how much of a chipped face goes |
 | `BLAST_FLING` | 2 | cells a scattered grain flies per unit of lift |
 | `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
+| `SPREAD_DEFAULT` | 16 | how far a fluid looks along its row when its row in `data/materials.txt` names no `spread` |
+| `spread` (Water) | 64 | and what water names, which is why a pond reads level |
+| `spread` (Lava) | 3 | and what lava names, which is why a flow keeps its slope |
 | `ROOM` (tools/museum.py) | 128 | cells along one edge of a room |
 | `WALL` (tools/museum.py) | 4 | cells of bedrock between two rooms |
 

@@ -1,18 +1,55 @@
 # The water
 
-There is a pond in the caves under the village, and the water in it is
-drawn by a shader: the surface ripples, the depths go dark and cold,
-and a net of caustics slides over the bottom. A swarm of fireflies
-hangs over the mouth of the pond and is the only light on it until he
-walks up with the orb.
+There are two ponds. One is in the caves under the village, still,
+sealed in its own rock, with a swarm of fireflies over it -- the
+Grotto. The other is on the green fifty cells west of where the wizard
+lands: a millpond over a stone dam, with a spillway cut through the
+dam and a pool under it, and it is not still at all. It is drawn full,
+over the head of the spillway, so the first tick of the world sends it
+through the dam and down into the dry pool.
 
-This note says where the pond is and how the fireflies find it, where
-the shader came from, what it draws, and what the phase leaves out.
+Both are the same water, drawn by the same shader: the surface
+ripples, the depths go dark and cold, and a net of caustics slides
+over the bottom.
+
+This note says where the two ponds are, how the fireflies find the
+first, where the shader came from, what it draws, and what the phase
+leaves out. `docs/physics.md`, "The reach is the flatness", says what
+makes the water move at all, and it is worth reading first: a pond
+that reads as a pond is a pond that has found its level.
 `docs/lighting.md` says how the fireflies light the place, because
 they are a light and belong to the same machinery as the orb and the
 crystals.
 
-## The pond is a tile
+## The millpond
+
+`tools/seed_homelands.py`, `millpond()`. West to east: a pond dug into
+the green with a shelving bank he can walk into, a stone dam across
+it, a spillway cut clean through the foot of the dam, a pool under the
+spillway drawn dry, and a slipway of stone and gravel out of the pool
+into the village, which is where the track through the green ends.
+
+The whole of it is lined in Rock, because Dirt, Loam, Gravel and Sand
+are all powders heavier than water and an unlined bank walks into the
+pond as soon as the sandbox reaches it: measured, an unlined pond moved
+298 cells in 300 ticks and the same pond lined moved a hundred, all of
+them grass at the rim.
+
+It is drawn into one homelands picture of the twelve -- one village of
+the twelve has a mill -- and the world seed decides which region draws
+that picture. On the shipped seed that is the region he starts in.
+`test_the_wizard_starts_within_sight_of_the_millpond` holds it there,
+so a change of seed says the mill has moved rather than quietly losing
+it, and
+`test_the_millpond_runs_through_the_dam_and_settles_over_the_pool`
+holds what it does: the pond goes through the dam, fills the pool, and
+the two come to rest, each of them level, the pond standing over the
+pool, and not one cell of water lost on the way.
+
+See `docs/homelands.md`, "The millpond", for where it may go in a
+village picture and the two rules that constrains.
+
+## The Grotto is a tile
 
 It used to be an overlay, dug beside the spawn after the spawn was
 found, because the spawn was beside a cave mouth and the pond was the
@@ -143,13 +180,16 @@ has to be judged. `bin/the-game` takes a shot of itself:
 ```sh
 make game
 ./bin/the-game shot=shots/water.png frames=140 walk=-40
+./bin/the-game shot=shots/mill.png frames=2 ticks=90    # the mill, part way
 ```
 
 `walk=N` holds a walk key for N ticks first (negative walks left, toward
-the pond), `frames=N` draws N frames before the picture is taken, which
-is what moves the water, and `shot=PATH` writes the PNG and closes the
-window. It needs a display. On a machine with none, an X server that
-draws into memory is enough:
+the mill), `ticks=N` stands him still and runs the world for N ticks
+instead, which is how to watch water that is going somewhere without
+putting him in the way of it, `frames=N` draws N frames before the
+picture is taken, and `shot=PATH` writes the PNG and closes the window.
+It needs a display. On a machine with none, an X server that draws into
+memory is enough:
 
 ```sh
 xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frames=140 walk=-40
@@ -186,3 +226,9 @@ small floods.
 - **Nothing else is shaded.** Lava, acid and oil are liquids too and are
   drawn flat. The depth map has one material in it; giving it more is
   the obvious next step.
+- **The shader does not know the water is moving.** It draws the same
+  ripple over a millrace as over a still pond, because all it is
+  given is how deep each texel is. What would change that is a second
+  channel beside the depth saying which way and how fast the water at
+  that texel went, which needs the momentum `docs/physics.md` lists
+  under what the physics leaves out.

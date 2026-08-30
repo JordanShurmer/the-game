@@ -40,6 +40,13 @@ a field or a homestead:
 Between the plots run a gravel path, fence lines, hay stooks, a stone
 well, and the odd tree. That is the whole vocabulary.
 
+One picture of the twelve also has a MILL: a pond dug into the green, a
+stone dam with a spillway cut through it, a pool under the spillway
+drawn dry, and a slipway out of the pool. The pond is drawn full, over
+the head of the spillway, so the world's first tick sends it through
+the dam and into the pool. It is the only water on the surface of the
+world. See millpond() below, and docs/water.md.
+
 THE TWO RULES IT MUST NOT BREAK
 
 **The side edges of every picture must agree.** Two homelands regions
@@ -54,7 +61,19 @@ wizard starts in the fourth homelands region, at the middle of it. So
 the band from GREEN_X0 to GREEN_X1 carries no building and no crop --
 pasture, a path, a fence -- and the yard in the middle of it holds
 nothing at all, so wherever the seed puts him down there is ground to
-stand on. `--check` holds the files to that too.
+stand on. `--check` holds the files to that too. The green forbids only
+what people built; the yard forbids everything but soil, grass and
+gravel. Water is legal on one and not the other, which is the room the
+mill goes in.
+
+WHAT --check WILL NOT CATCH
+
+check_walkable faults only on a step made of Grass, Dirt, Loam, Gravel
+or Sand, so a stone-faced dam or coping of any height passes it for
+free. It says nothing about whether a hollow holds its water, how deep
+a hole in a field is, or whether he can climb out of one. Judge the
+mill by the picture and by walking it; the gates that do hold it are
+the Odin tests in src/pond.odin.
 
 See docs/homelands.md for the whole design note.
 """
