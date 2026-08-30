@@ -31,7 +31,10 @@ ways to read it, no tools to attach:
 
 A time names the phase to look at; the counts say whether the work
 itself grew or the work got slower. The checksum bench prints must not
-change under an optimization: same seed, same world, same bits.
+change under an optimization: same seed, same world, same bits. It
+moves when the world moves, and then the commit has to say so and say
+which windows moved with it -- see "What this leaves out" at the end of
+`docs/laboratory.md` for the shape of that.
 
 ## Look at the world
 

@@ -267,6 +267,18 @@ to have one: they are two worlds, not two places. Map pixels (8,3) and
 (9,3) of `data/biome_map.png`, where the two galleries used to be, are
 plain coal again, which is what their neighbours were on every side.
 
+**One bench number moved with them, and it is meant to.** AGENTS.md
+says the checksum `bin/bench` prints must not change under an
+optimization; this was not one. `bin/bench biome=Coalmine` opens at the
+first Coalmine pixel, which is (7,3), world (-512,-2560), and 2048
+cells square from there reaches x 1535 — so the default window swallows
+both regions the galleries used to fill, and its checksum went from
+`0x487a28f8d3e428db` to `0x8a29bb41521ac65f`. `size=512` stops at x -1
+and is unchanged, `size=1024` reaches x 511 and is not, which is the
+whole of the difference. Lake, Sandcave, Oilfield and Magma are
+untouched, and so is the shipped reel: it runs its 34 segments to the
+same landing, `-685,-1756`, on either side of the change.
+
 There is one other world and the loader knows its name. A third would
 be the point at which `[Laboratory]` should stop being a section and
 start being a list, and not before.
