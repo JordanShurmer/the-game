@@ -2,7 +2,6 @@ package main
 
 import "core:fmt"
 import "core:os"
-import "core:strconv"
 import "core:strings"
 
 import game "../../src"
@@ -22,9 +21,9 @@ main :: proc() {
 	for argument in os.args[1:] {
 		if strings.has_prefix(argument, "seed=") {
 			value := argument[len("seed="):]
-			v, ok := strconv.parse_u64_maybe_prefixed(value)
+			v, ok := game.parse_seed(value)
 			if !ok {
-				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
 				os.exit(1)
 			}
 			seed = v

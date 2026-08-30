@@ -75,6 +75,16 @@ spawn_region = 1
 and `seed=427` opens the same world; the game says which world it
 opened, and its seed, on the first line of the heads up display.
 
+A seed that cannot be read is refused rather than defaulted, by all
+four binaries and by the loader reading `data/biomes.txt`, and
+`parse_seed` in `src/laboratory.odin` is the one procedure that reads
+one. It takes the grammar `core:strconv` takes and refuses one thing
+more: a number too big for a `u64`. The library parser wraps such a
+number, reports it good, and hands back the low 64 bits, so
+`seed=18446744073709552043` — which is 2^64 + 427 — used to open the
+Laboratory. A number that is LAB in no alphabet must not open the
+museum.
+
 Two things a seed can change, and the resolution of both is one
 procedure in `src/laboratory.odin`:
 

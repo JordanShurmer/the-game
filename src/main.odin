@@ -289,9 +289,9 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 			// world in silence -- `seed=1AB` is the natural slip, and
 			// it lands in the village -- so it is refused instead, the
 			// way bin/shot, bin/bench and the server refuse it.
-			n, seed_ok := strconv.parse_u64_maybe_prefixed(value)
+			n, seed_ok := parse_seed(value)
 			if !seed_ok {
-				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
 				os.exit(1)
 			}
 			shot.seed = n

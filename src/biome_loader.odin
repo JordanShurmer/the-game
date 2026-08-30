@@ -215,7 +215,7 @@ load_biomes :: proc(
 				table.origin_pixel_x = i32(x)
 				table.origin_pixel_y = i32(y)
 			case "seed":
-				v, vok := strconv.parse_u64_maybe_prefixed(value)
+				v, vok := parse_seed(value)
 				if !vok do return {}, .Bad_Value, line_index
 				table.world_seed = v
 			case "biome_off_map":
@@ -233,7 +233,7 @@ load_biomes :: proc(
 		if in_lab_section {
 			switch key {
 			case "seed":
-				v, vok := strconv.parse_u64_maybe_prefixed(value)
+				v, vok := parse_seed(value)
 				if !vok || v == 0 do return {}, .Bad_Value, line_index
 				table.laboratory.seed = v
 			case "image":

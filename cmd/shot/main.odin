@@ -286,9 +286,9 @@ read_options :: proc(options: ^Options) -> bool {
 		case "seed":
 			// A seed is a world, and hexadecimal is a seed too:
 			// seed=0x1AB opens the Laboratory. See docs/laboratory.md.
-			v, seed_ok := strconv.parse_u64_maybe_prefixed(value)
+			v, seed_ok := game.parse_seed(value)
 			if !seed_ok {
-				fmt.eprintfln("seed wants a whole number, and %q is not one", value)
+				fmt.eprintfln("seed wants a whole number that fits in 64 bits, and %q is not one", value)
 				return false
 			}
 			options.seed = v

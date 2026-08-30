@@ -67,6 +67,60 @@ world_is_laboratory :: proc(table: Biome_Table, seed: u64) -> bool {
 	return table.laboratory.seed != 0 && seed == table.laboratory.seed
 }
 
+// A seed off the command line.
+//
+// `strconv.parse_u64_maybe_prefixed` has no overflow guard: its digit
+// loop multiplies and adds its way along the string and hands back the
+// low 64 bits. So `seed=18446744073709552043`, which is 2^64 + 427,
+// reports itself as a good number and opens the Laboratory, and
+// `seed=99999999999999999999999` opens a world nobody asked for and
+// says nothing. A seed is a world, and every binary that takes one
+// refuses what it cannot read, so a number that does not fit is one of
+// the things it cannot read.
+//
+// The grammar is the one strconv takes, so nothing that worked stops
+// working: an optional `+`, an optional `0b`, `0o`, `0d`, `0z` or `0x`
+// prefix, and `_` anywhere among the digits.
+parse_seed :: proc(text: string) -> (seed: u64, ok: bool) {
+	s := text
+	if s == "" do return 0, false
+	if len(s) > 1 && s[0] == '+' do s = s[1:]
+
+	base := u64(10)
+	if len(s) > 2 && s[0] == '0' {
+		switch s[1] {
+		case 'b': base = 2;  s = s[2:]
+		case 'o': base = 8;  s = s[2:]
+		case 'd': base = 10; s = s[2:]
+		case 'z': base = 12; s = s[2:]
+		case 'x': base = 16; s = s[2:]
+		}
+	}
+
+	digits := 0
+	for r in s {
+		if r == '_' do continue
+		v := seed_digit(r)
+		if v >= base do return 0, false
+		if seed > (max(u64) - v) / base do return 0, false
+		seed = seed * base + v
+		digits += 1
+	}
+	return seed, digits > 0
+}
+
+// Anything that is not a digit of any base this takes answers with a
+// value no base will accept.
+@(private = "file")
+seed_digit :: proc(r: rune) -> u64 {
+	switch r {
+	case '0' ..= '9': return u64(r - '0')
+	case 'a' ..= 'z': return u64(r - 'a') + 10
+	case 'A' ..= 'Z': return u64(r - 'A') + 10
+	}
+	return 99
+}
+
 // What to say when a biome is painted nowhere on the map this seed
 // opens. There is more than one world now, so "not painted yet" is the
 // wrong answer: the galleries are painted, on the other map. Every tool
@@ -695,4 +749,58 @@ test_a_biome_off_this_map_is_said_so_and_not_guessed :: proc(t: ^testing.T) {
 		"from the Laboratory it must name the way back, and it says %q",
 		from_lab,
 	)
+}
+
+// A seed is a world, so a seed the reader did not type must not open
+// one. `strconv.parse_u64_maybe_prefixed` wraps instead of refusing,
+// and 2^64 + 427 wrapped to 427, which is the Laboratory: a number that
+// is LAB in no alphabet opened the museum, and nothing said so.
+@(test)
+test_a_seed_too_big_for_a_world_is_refused :: proc(t: ^testing.T) {
+	Case :: struct {
+		text: string,
+		want: u64,
+		ok:   bool,
+	}
+
+	cases := []Case {
+		// Everything the parser this replaces took, it still takes.
+		{"7", 7, true},
+		{"+7", 7, true},
+		{"007", 7, true},
+		{"427", 427, true},
+		{"0x1AB", 0x1AB, true},
+		{"0x1ab", 0x1AB, true},
+		{"1_0", 10, true},
+		{"0b101", 5, true},
+		{"0o17", 15, true},
+		{"0z10", 12, true},
+		{"0d99", 99, true},
+		{"20260818", 20260818, true},
+		{"0xFFFFFFFFFFFFFFFF", max(u64), true},
+		{"18446744073709551615", max(u64), true},
+
+		// And everything it refused.
+		{"", 0, false},
+		{"-1", 0, false},
+		{"1.5", 0, false},
+		{"7abc", 0, false},
+		{"0x", 0, false},
+		{"abc", 0, false},
+		{"1AB", 0, false},
+		{"_", 0, false},
+
+		// And what it did not: a number too big for the world it names.
+		{"18446744073709551616", 0, false},          // 2^64
+		{"18446744073709552043", 0, false},          // 2^64 + 427, which wrapped to the Laboratory
+		{"99999999999999999999999", 0, false},
+		{"0xFFFFFFFFFFFFFFFFFF", 0, false},
+		{"0b1" + "0000000000000000000000000000000000000000000000000000000000000000", 0, false},
+	}
+
+	for c in cases {
+		got, ok := parse_seed(c.text)
+		testing.expectf(t, ok == c.ok, "%q: want ok=%v, got %v", c.text, c.ok, ok)
+		if c.ok do testing.expectf(t, got == c.want, "%q: want %d, got %d", c.text, c.want, got)
+	}
 }
