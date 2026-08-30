@@ -4,10 +4,13 @@ package main
 //
 //   ./bin/bench biome=Lake ticks=300
 //
-// The result is one line: the cost of a tick and the checksum that
-// says the run was the same run. The phase table behind that number
-// is detail, so it waits for debug=2. See src/noise.odin for the
-// ladder.
+// The result is the cost of a tick, the checksum that says the run was
+// the same run, and the shape of the time under it: which phases the
+// tick went to, widest first, and how much matter it worked. That is
+// what a bench is for, so it prints with no argument.
+//
+// The same numbers at full width, one phase to a line, are the detail
+// behind it and wait for debug=2. See src/noise.odin for the ladder.
 
 import "core:fmt"
 import "core:os"
@@ -84,9 +87,14 @@ main :: proc() {
 		options.ticks,
 		game.sandbox_checksum(&sim.sandbox),
 	)
-	// The phase table is the detail behind that one number.
+	// The breakdown is part of the result: a total alone says which
+	// runs differ without saying where.
+	fmt.print(game.prof_brief(game.prof, context.temp_allocator))
+
+	// The same numbers at full width, for a reader who has found the
+	// phase and wants it exact.
 	if game.noise_level() >= game.NOISE_DETAIL {
-		fmt.eprint(game.prof_report(context.temp_allocator))
+		fmt.eprint(game.prof_report(game.prof, context.temp_allocator))
 	}
 }
 

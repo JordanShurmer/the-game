@@ -225,7 +225,7 @@ main :: proc() {
 				shot.path, WINDOW_W, WINDOW_H, frames,
 			)
 			if shot.profile {
-				fmt.eprintln(prof_report(context.temp_allocator))
+				fmt.eprintln(prof_report(prof, context.temp_allocator))
 			}
 			free_all(context.temp_allocator)
 			break
@@ -242,7 +242,7 @@ draw_prof :: proc(app: ^App) {
 
 	keep := prof
 	prof = app.prof_view
-	report := prof_report(context.temp_allocator)
+	report := prof_report(prof, context.temp_allocator)
 	prof = keep
 
 	lines := strings.split_lines(report, context.temp_allocator)
