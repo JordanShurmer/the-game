@@ -1,0 +1,2556 @@
+<title>Nine Waters</title>
+<meta name="description" content="Nine attempts at the water shader, each drawn in a different school of art, running live in the browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;1,6..96,500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* One committed visual world: a dark plate room. Every colour is painted
+   here, so the page holds on any host ground. */
+:root {
+  --ink:      #0a0d11;
+  --ink-2:    #0f141a;
+  --ink-3:    #161e26;
+  --line:     #232e39;
+  --line-2:   #33414f;
+  --chalk:    #e9edf0;
+  --slate:    #93a2ae;
+  --dim:      #6b7a86;
+  --parch:    #d9c39a;
+  --parch-dk: #8e7d5f;
+  --wet:      #4b8fc0;
+
+  --display: "Bodoni Moda", "Didot", Georgia, serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --pad: clamp(20px, 4vw, 56px);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background-color: var(--ink);
+  background-image: radial-gradient(120% 70% at 50% -10%, #101820 0%, var(--ink) 55%);
+  color: var(--chalk);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--parch); text-decoration-color: var(--parch-dk); text-underline-offset: 3px; }
+a:hover { text-decoration-color: var(--parch); }
+
+:focus-visible {
+  outline: 2px solid var(--parch);
+  outline-offset: 2px;
+}
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--parch);
+}
+
+/* ---------- the hero: the shader we ship, running ---------- */
+
+.hero {
+  position: relative;
+  height: clamp(420px, 68vh, 720px);
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+}
+.hero canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+}
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10,13,17,0.72) 0%, rgba(10,13,17,0.15) 34%, rgba(10,13,17,0.86) 88%);
+  pointer-events: none;
+}
+.hero-text {
+  position: absolute;
+  left: var(--pad);
+  right: var(--pad);
+  bottom: clamp(24px, 5vh, 56px);
+  max-width: 44rem;
+}
+.hero h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(46px, 9vw, 104px);
+  line-height: 0.92;
+  letter-spacing: -0.015em;
+  margin: 10px 0 14px;
+  text-wrap: balance;
+  text-shadow: 0 2px 30px rgba(0,0,0,0.55);
+}
+.hero h1 em {
+  font-style: italic;
+  font-weight: 500;
+  color: var(--parch);
+}
+.hero p {
+  margin: 0;
+  max-width: 34rem;
+  color: var(--chalk);
+  font-size: clamp(15px, 1.5vw, 18px);
+  text-shadow: 0 1px 14px rgba(0,0,0,0.75);
+}
+.hero-tag {
+  position: absolute;
+  right: var(--pad);
+  top: clamp(20px, 4vh, 40px);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--slate);
+  text-align: right;
+}
+
+/* ---------- the instrument bar ---------- */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 26px;
+  padding: 12px var(--pad);
+  background: rgba(10,13,17,0.86);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.bar .group { display: flex; align-items: center; gap: 10px; }
+.bar .label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.seg button {
+  appearance: none;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--slate);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.seg button:last-child { border-right: 0; }
+.seg button:hover { color: var(--chalk); background: var(--ink-3); }
+.seg button[aria-pressed="true"] {
+  background: var(--parch);
+  color: #14100a;
+}
+.bar .spacer { flex: 1 1 auto; }
+.bar .note { font-size: 12px; color: var(--dim); font-family: var(--mono); }
+
+/* ---------- the writing ---------- */
+
+.prose {
+  padding: clamp(44px, 7vw, 88px) var(--pad) 0;
+  max-width: 66ch;
+}
+.prose h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(28px, 3.6vw, 40px);
+  line-height: 1.1;
+  margin: 14px 0 18px;
+  text-wrap: balance;
+}
+.prose p { color: var(--slate); margin: 0 0 16px; }
+.prose p strong { color: var(--chalk); font-weight: 500; }
+
+/* ---------- the plates ---------- */
+
+.plates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  gap: 1px;
+  background: var(--line);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  margin-top: clamp(36px, 5vw, 64px);
+}
+@media (max-width: 700px) {
+  .plates { grid-template-columns: 1fr; }
+}
+
+.plate {
+  background: var(--ink-2);
+  display: flex;
+  flex-direction: column;
+}
+.plate-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #05070a;
+  cursor: zoom-in;
+  border: 0;
+  padding: 0;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+}
+.plate-frame canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.plate-frame .zoomhint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--chalk);
+  background: rgba(5,7,10,0.66);
+  border: 1px solid rgba(233,237,240,0.18);
+  padding: 3px 7px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.plate-frame:hover .zoomhint,
+.plate-frame:focus-visible .zoomhint { opacity: 1; }
+
+.plate-body { padding: 22px clamp(18px, 2.2vw, 28px) 24px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+.plate-head { display: flex; align-items: baseline; gap: 12px; }
+.plate-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--parch-dk);
+  white-space: nowrap;
+  padding-top: 4px;
+}
+.plate h3 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: 27px;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
+}
+.plate .school {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 5px 0 0;
+}
+.plate .note { margin: 0; color: var(--slate); font-size: 15px; }
+.plate ul.how {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 0;
+}
+.plate ul.how li {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--slate);
+}
+.plate ul.how b {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  font-weight: 400;
+  padding-top: 2px;
+}
+.plate details { margin-top: auto; }
+.plate summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--parch);
+  list-style: none;
+  padding: 6px 0;
+}
+.plate summary::-webkit-details-marker { display: none; }
+.plate summary::before { content: "+ "; color: var(--parch-dk); }
+.plate details[open] summary::before { content: "\2212 "; }
+.plate .src {
+  position: relative;
+  border: 1px solid var(--line);
+  background: #070a0e;
+  max-height: 420px;
+  overflow: auto;
+}
+.plate pre {
+  margin: 0;
+  padding: 14px 14px 16px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: #b7c6cf;
+  white-space: pre;
+}
+.plate .src-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  padding: 7px 8px;
+  background: #070a0e;
+  border-bottom: 1px solid var(--line);
+}
+.copy {
+  appearance: none;
+  border: 1px solid var(--line-2);
+  background: var(--ink-3);
+  color: var(--slate);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.copy:hover { color: var(--chalk); border-color: var(--parch-dk); }
+.err {
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #e8a0a0;
+  white-space: pre-wrap;
+  border-top: 1px solid var(--line);
+}
+
+/* ---------- the big look ---------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(4,6,8,0.95);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 3vh 3vw;
+}
+.lightbox[open-state="on"] { display: flex; }
+.lightbox canvas {
+  max-width: 100%;
+  max-height: 82vh;
+  width: auto;
+  border: 1px solid var(--line-2);
+  image-rendering: pixelated;
+}
+.lightbox .caption {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  color: var(--slate);
+}
+.lightbox .caption strong {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--chalk);
+}
+.lightbox .close {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  color: var(--slate);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+.lightbox .close:hover { color: var(--chalk); border-color: var(--parch-dk); }
+
+/* ---------- the close ---------- */
+
+.close-note {
+  padding: clamp(48px, 7vw, 96px) var(--pad) clamp(56px, 8vw, 110px);
+  max-width: 68ch;
+}
+.close-note h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(26px, 3.2vw, 36px);
+  margin: 14px 0 18px;
+}
+.close-note p { color: var(--slate); margin: 0 0 16px; }
+.close-note pre {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #b7c6cf;
+  background: #070a0e;
+  border: 1px solid var(--line);
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+.colophon {
+  border-top: 1px solid var(--line);
+  padding: 22px var(--pad) 40px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 28px;
+}
+
+/* ---------- what they cost ---------- */
+
+.costs { padding: clamp(44px, 7vw, 88px) var(--pad) 0; }
+.costs .head { max-width: 66ch; }
+.costs h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(28px, 3.6vw, 40px);
+  line-height: 1.1;
+  margin: 14px 0 18px;
+}
+.costs p { color: var(--slate); margin: 0 0 16px; max-width: 66ch; }
+.costs .actions { display: flex; align-items: center; gap: 14px; margin: 24px 0 8px; flex-wrap: wrap; }
+.measure {
+  appearance: none;
+  border: 1px solid var(--parch-dk);
+  background: transparent;
+  color: var(--parch);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+.measure:hover:not(:disabled) { background: var(--parch); color: #14100a; }
+.measure:disabled { opacity: 0.55; cursor: default; }
+.measure-note { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.cost-wrap { overflow-x: auto; margin-top: 10px; }
+table.cost { width: 100%; min-width: 700px; border-collapse: collapse; }
+table.cost th {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 400;
+  color: var(--dim);
+  text-align: left;
+  padding: 0 16px 10px 0;
+  border-bottom: 1px solid var(--line-2);
+  white-space: nowrap;
+}
+table.cost th.n, table.cost td.n { text-align: right; }
+table.cost td {
+  padding: 11px 16px 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--slate);
+  font-size: 14px;
+  vertical-align: middle;
+}
+table.cost td.name { color: var(--chalk); white-space: nowrap; }
+table.cost td.name small { color: var(--dim); font-size: 11.5px; display: block; font-family: var(--mono); letter-spacing: 0.06em; }
+table.cost td.work { font-size: 13px; color: var(--dim); }
+table.cost td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.cost tr.ref td { color: var(--dim); }
+table.cost tr.ref td.name { color: var(--slate); }
+.bar { position: relative; height: 8px; min-width: 110px; background: var(--ink-3); border-radius: 2px; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--parch); border-radius: 2px 3px 3px 2px; transition: width 320ms ease; }
+tr.ref .bar i { background: var(--parch-dk); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+
+<header class="hero">
+  <canvas id="hero-canvas" aria-label="The water shader the game ships, running over the Grotto"></canvas>
+  <div class="hero-scrim"></div>
+  <p class="hero-tag">The Game<br>water shader<br>nine attempts</p>
+  <div class="hero-text">
+    <p class="eyebrow">A lab, not a release</p>
+    <h1>Nine <em>Waters</em></h1>
+    <p>One pond, drawn nine ways. Every panel below is a real fragment shader
+      running on your machine against the same picture the game hands its
+      water pass &mdash; the lit cells, and a byte a texel saying how deep the
+      water is there. Only the first is in the game.</p>
+  </div>
+</header>
+
+<nav class="bar" aria-label="Controls">
+  <div class="group">
+    <span class="label">Pond</span>
+    <div class="seg" id="seg-scene" role="group" aria-label="Which pond">
+      <button type="button" data-scene="0" aria-pressed="true">Grotto, night</button>
+      <button type="button" data-scene="1" aria-pressed="false">Millpond, day</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="label">Zoom</span>
+    <div class="seg" id="seg-zoom" role="group" aria-label="Pixels a cell">
+      <button type="button" data-zoom="2" aria-pressed="false">2&times;</button>
+      <button type="button" data-zoom="4" aria-pressed="true">4&times;</button>
+      <button type="button" data-zoom="8" aria-pressed="false">8&times;</button>
+    </div>
+  </div>
+  <div class="group">
+    <span class="label">Motion</span>
+    <div class="seg" id="seg-run" role="group" aria-label="Motion">
+      <button type="button" data-run="1" aria-pressed="true">Run</button>
+      <button type="button" data-run="0" aria-pressed="false">Hold</button>
+    </div>
+  </div>
+  <span class="spacer"></span>
+  <span class="note" id="bar-note">WebGL 2</span>
+</nav>
+
+<section class="prose">
+  <p class="eyebrow">What you are looking at</p>
+  <h2>The same two things, given to nine shaders</h2>
+  <p>The world reaches the screen as one texture of cells, already shaded by
+    the light. Beside it the game builds a second texture, one byte a texel:
+    <strong>0 where there is no water</strong>, and otherwise how many cells
+    of water stand above that one, to a limit of 255. That byte is the mask
+    and the depth at once.</p>
+  <p>Every plate here gets those two textures and nothing else, under the
+    uniform names the game uses &mdash; <code>texture0</code>,
+    <code>mask</code>, <code>size</code>, <code>origin</code>,
+    <code>step_cells</code>, <code>seconds</code>. So each one is a whole
+    <code>data/shaders/water.fs</code>: copy it out, save it over the file,
+    and the game draws that water. The pond under them is drawn here in the
+    browser, from the colours in <code>data/materials.txt</code>, because a
+    shader can only be judged against a picture.</p>
+  <p><strong>Plate I is the shader in the game today.</strong> It is here as
+    the mark to beat. The eight after it are attempts at a new one, each
+    committed to a school of art rather than to realism, because the game is
+    a grid of coloured cells and has no third dimension to be real in.</p>
+</section>
+
+<main class="plates" id="plates"></main>
+
+<section class="costs">
+  <div class="head">
+    <p class="eyebrow">The other question</p>
+    <h2>What they cost</h2>
+    <p>They cost the same to <em>draw</em>. Every plate is one full-screen pass
+      over the same two textures, drawn with the one call
+      <code>app_draw_water</code> already makes, and every one of them throws
+      away the fragments where the mask reads zero. No plate adds a
+      framebuffer, a second pass, a mipmap or a buffer upload. So the draw
+      count is one, and it is one for all nine.</p>
+    <p>What differs is the work inside a water fragment. Two things say how
+      much: how many times the shader reads a texture, which is what a
+      memory-bound pass waits on, and how much arithmetic it does between
+      the reads, which is what the table below actually measures. The pass
+      is charged only for the water on screen, so a wide shallow pond costs
+      less than this bench and a screen full of pond costs more.</p>
+    <p>Two things the table says before you press anything. Plate I searches
+      a three by three block of drifting points, twice over, once for each
+      of the two nets it lays on the bottom; nothing else here searches a
+      neighbourhood more than once. Plate III makes the most reads &mdash;
+      twelve of them, two for every brush mark &mdash; and reads are what a
+      memory-bound pass waits on. Plates VI and IX read almost nothing and
+      run no noise at all, which is what a demake and a wireframe are.</p>
+  </div>
+  <div class="actions">
+    <button type="button" class="measure" id="measure">Measure on this machine</button>
+    <span class="measure-note" id="measure-note">Ten passes at 1280 &times; 720, the game's window. Takes a few seconds.</span>
+  </div>
+  <div class="cost-wrap">
+    <table class="cost">
+      <thead>
+        <tr>
+          <th scope="col">Plate</th>
+          <th scope="col" class="n">Texture reads</th>
+          <th scope="col" class="n">Lines</th>
+          <th scope="col">Where the work goes</th>
+          <th scope="col" class="n">Pass</th>
+          <th scope="col" class="n">Against Plate I</th>
+          <th scope="col"><span class="sr">Relative cost</span></th>
+        </tr>
+      </thead>
+      <tbody id="cost-rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section class="close-note">
+  <p class="eyebrow">Taking one into the game</p>
+  <h2>A plate is a file</h2>
+  <p>Open a plate, press <em>Copy</em>, and write it over
+    <code>data/shaders/water.fs</code>. Nothing else moves: the depth map,
+    the uniforms and the draw call are the same for all nine. The loader
+    puts the version line on, which is why no shader here has one.</p>
+  <pre>make game
+./bin/the-game shot=shots/water.png frames=140 walk=-40   # the millpond
+xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frames=140</pre>
+  <p>A shader that will not compile costs the ripples and not the game:
+    <code>water_load</code> returns <code>on = false</code>, says so once on
+    stderr, and the water draws flat. So a bad plate is a flat pond, not a
+    black window.</p>
+  <p>What the browser cannot tell you: the game samples the world texture
+    with point filtering at a zoom the player sets, and the light is cast by
+    <code>light_shade</code> over real terrain rather than by the eight lamps
+    in this page. Judge the school of art here. Judge the shader in the
+    window.</p>
+</section>
+
+<footer class="colophon">
+  <span>Nine Waters &mdash; a shader lab for The Game</span>
+  <span>WebGL 2 &middot; GLSL ES 300 &middot; no libraries</span>
+  <span>Plate I after raylib <code>wave.fs</code>, zlib</span>
+  <span>Bodoni Moda &middot; IBM Plex</span>
+</footer>
+
+<div class="lightbox" id="lightbox" open-state="off" role="dialog" aria-modal="true" aria-label="Plate, large">
+  <canvas id="lightbox-canvas"></canvas>
+  <div class="caption">
+    <span id="lightbox-num">Plate I</span>
+    <strong id="lightbox-title"></strong>
+    <span id="lightbox-school"></span>
+  </div>
+  <button type="button" class="close" id="lightbox-close">Close &nbsp;Esc</button>
+</div>
+
+<!-- ==================== the plumbing ==================== -->
+
+<script type="x-shader/x-vertex" id="vs-fbo">
+out vec2 fragTexCoord;
+out vec4 fragColor;
+void main() {
+    vec2 uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    fragTexCoord = uv;
+    fragColor = vec4(1.0);
+    gl_Position = vec4(uv*2.0 - 1.0, 0.0, 1.0);
+}
+</script>
+
+<!-- The screen pass flips y, so that fragTexCoord means what it means in
+     the game: v of 0 is the top of the view, and up is -v. Every water
+     shader is written against that, the mirror above all. -->
+<script type="x-shader/x-vertex" id="vs-screen">
+out vec2 fragTexCoord;
+out vec4 fragColor;
+void main() {
+    vec2 uv = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    fragTexCoord = uv;
+    fragColor = vec4(1.0);
+    gl_Position = vec4(uv.x*2.0 - 1.0, 1.0 - uv.y*2.0, 0.0, 1.0);
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-copy">
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform sampler2D texture0;
+out vec4 finalColor;
+void main() { finalColor = vec4(texture(texture0, fragTexCoord).rgb, 1.0); }
+</script>
+
+<!-- The pond itself: what the game's CPU would have drawn before the water
+     pass runs. One texel a cell, the colours out of data/materials.txt, and
+     the light of a few lamps. It writes the depth byte beside it, the same
+     byte water_depth_fill writes: 0 for no water, else the count of water
+     cells standing on this one. -->
+<script type="x-shader/x-fragment" id="fs-scene">
+in vec2 fragTexCoord;
+in vec4 fragColor;
+uniform vec2 cells;
+uniform vec2 origin;
+uniform float seconds;
+uniform float scene;
+layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outMask;
+
+const vec3 ROCK   = vec3(0.420, 0.420, 0.420);
+const vec3 GRAVEL = vec3(0.541, 0.514, 0.467);
+const vec3 SAND   = vec3(0.761, 0.698, 0.502);
+const vec3 DIRT   = vec3(0.361, 0.251, 0.200);
+const vec3 GRASS  = vec3(0.310, 0.478, 0.196);
+const vec3 LOAM   = vec3(0.247, 0.165, 0.102);
+const vec3 COAL   = vec3(0.169, 0.169, 0.169);
+const vec3 WATER  = vec3(0.227, 0.486, 0.647);
+const vec3 FLY    = vec3(0.690, 1.000, 0.455);
+const vec3 ORB    = vec3(1.000, 0.820, 0.560);
+
+float s_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float s_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(s_hash(i), s_hash(i + vec2(1, 0)), f.x),
+               mix(s_hash(i + vec2(0, 1)), s_hash(i + vec2(1, 1)), f.x), f.y);
+}
+
+float s_fbm(vec2 p)
+{
+    return 0.5*s_noise(p) + 0.25*s_noise(p*2.03 + 5.1) + 0.125*s_noise(p*4.11 + 9.7);
+}
+
+// A lamp dims by distance the way the game's flood does: it spreads and
+// it is spent. An inverse square is too gentle to make a pond read as a
+// bowl over thirty cells, so this falls away by e.
+vec3 lamp(vec2 c, vec2 at, vec3 col, float reach, float gain)
+{
+    return col*gain*exp(-length(c - at)/reach);
+}
+
+// The stone the pond sits in, and the stone over it.
+vec3 stone(vec2 c, float into)
+{
+    float v = s_fbm(c*0.09);
+    vec3 col = mix(ROCK, COAL, smoothstep(0.62, 0.78, v));
+    col = mix(col, GRAVEL, smoothstep(2.5, 0.0, into)*0.6);
+    col *= 0.82 + 0.36*s_hash(floor(c));
+    return col;
+}
+
+void main()
+{
+    vec2 c = origin + vec2(fragTexCoord.x*cells.x, fragTexCoord.y*cells.y);
+    float x = c.x, y = c.y;
+
+    vec3 mat = vec3(0.0);
+    float code = 0.0;
+    float into = 0.0;          // cells into the rock, for the light
+    vec3 sum = vec3(0.0);      // the light on this cell
+    vec3 emit = vec3(0.0);     // and what shines by itself: a fly, the orb
+
+    if (scene < 0.5) {
+        // The Grotto: a dome of cave over a rock bowl of still water,
+        // with a swarm of fireflies over it and the orb on the shore.
+        float roof = 40.0 - 21.0*exp(-pow((x - 118.0)/54.0, 2.0)) + 3.0*s_fbm(vec2(x*0.07, 1.3));
+        float bed  = 58.0 + 37.0*exp(-pow((x - 116.0)/64.0, 2.0)) + 2.0*s_fbm(vec2(x*0.13, 7.7));
+        float surf = 66.0;
+        bool  shut = abs(x - 118.0) > 168.0;
+
+        bool solid = shut || y < roof || y > bed;
+        bool wet = !solid && y >= surf;
+
+        if (solid) {
+            into = shut ? 8.0 : max(roof - y, y - bed);
+            mat = stone(c, into);
+        } else if (wet) {
+            mat = WATER;
+            code = min(floor(y - surf) + 1.0, 255.0);
+        } else {
+            mat = vec3(0.075, 0.085, 0.105);   // the haze a lamp lights in a cave
+        }
+
+        sum = vec3(0.048, 0.058, 0.078);
+        for (int i = 0; i < 6; ++i) {
+            float fi = float(i);
+            vec2 h = vec2(s_hash(vec2(fi, 3.0)), s_hash(vec2(fi, 9.0)));
+            vec2 at = vec2(46.0 + 142.0*h.x + 15.0*sin(seconds*0.47 + fi*1.7),
+                           47.0 + 14.0*h.y + 6.5*sin(seconds*0.71 + fi*2.3));
+            sum += lamp(c, at, FLY, 15.0, 1.15);
+            emit += FLY*exp(-dot(c - at, c - at)*0.55);   // the fly itself
+        }
+        sum += lamp(c, vec2(34.0, 58.0), ORB, 26.0, 1.35);
+        emit += ORB*exp(-dot(c - vec2(34.0, 58.0), c - vec2(34.0, 58.0))*0.09)*0.9;
+
+        // A crystal grown into the bed, which is the only light the deep
+        // end of the pond gets and the only reason it has a bottom.
+        vec2 gem = vec2(150.0, 88.0);
+        sum += lamp(c, gem, vec3(0.42, 0.78, 1.00), 15.0, 1.25);
+        emit += vec3(0.42, 0.78, 1.00)*exp(-dot(c - gem, c - gem)*0.30)*0.8;
+    } else {
+        // The millpond: a pond dug into the green over a stone dam, a
+        // spillway cut through its foot, and the pool under it.
+        // The bank shelves in from the west, the bed runs level to the
+        // dam, and east of the pool the slipway climbs into the village.
+        float bowl = mix(44.0, 100.0, smoothstep(14.0, 62.0, x)) + 1.6*s_fbm(vec2(x*0.12, 4.4));
+        float ground = x > 166.0 ? 104.0 : bowl;
+        if (x > 196.0) ground = mix(104.0, 50.0, smoothstep(196.0, 224.0, x));
+
+        bool dam = x > 148.0 && x <= 166.0 && y > 46.0;
+        bool spill = x > 148.0 && x <= 166.0 && y > 66.0 && y < 73.0;
+        bool solid = (y > ground || dam) && !spill;
+
+        float surf = 60.0;   // the head the pond stands at
+        bool pond = !solid && x <= 148.0 && y >= surf;
+        bool pool = !solid && x > 166.0 && y >= 84.0;
+
+        if (solid) {
+            into = min(y - ground, 60.0);
+            if (dam) into = min(min(x - 147.0, 167.0 - x), y - 45.0);
+            // The pond is lined in rock. An unlined bank of powder walks
+            // into the water on the first tick, which is why the game
+            // lines it too.
+            bool under = y > surf - 1.0 && x < 196.0;
+            if (!dam && under && into < 4.0) mat = mix(ROCK, GRAVEL, s_fbm(c*0.16))*(0.85 + 0.3*s_hash(floor(c)));
+            else if (!dam && into < 1.5) mat = GRASS*(0.80 + 0.45*s_hash(floor(c)));
+            else if (!dam && into < 6.0) mat = mix(DIRT, LOAM, s_fbm(c*0.13))*(0.85 + 0.3*s_hash(floor(c)));
+            else mat = stone(c, into);
+        } else if (pond) {
+            mat = WATER;
+            code = min(floor(y - surf) + 1.0, 255.0);
+        } else if (spill) {
+            mat = WATER;
+            code = min(floor(y - 66.0) + 1.0, 255.0);
+        } else if (pool) {
+            mat = WATER;
+            code = min(floor(y - 84.0) + 1.0, 255.0);
+        } else {
+            float t = clamp((y + 30.0)/110.0, 0.0, 1.0);
+            mat = mix(vec3(0.34, 0.53, 0.75), vec3(0.76, 0.85, 0.88), t);
+            mat *= 1.0 + 0.07*s_fbm(vec2(x*0.025 + seconds*0.012, y*0.045));
+        }
+
+        // Daylight falls from the open air, so a cell is lit by how
+        // little stands over it: cells of water, or cells of ground.
+        float over = code > 0.5 ? code - 1.0 : into;
+        float rate = code > 0.5 ? 0.050 : 0.135;
+        sum = (vec3(0.95, 0.93, 0.86)
+             + lamp(c, vec2(40.0, -40.0), vec3(1.0, 0.92, 0.72), 300.0, 0.40))*exp(-over*rate)
+            + vec3(0.045, 0.048, 0.058);
+    }
+
+    if (scene < 0.5) sum *= exp(-max(into - 0.5, 0.0)*0.30);
+
+    vec3 col = 1.0 - exp(-(mat*sum + emit)*1.7);
+    outColor = vec4(col, 1.0);
+    outMask = vec4(code/255.0, 0.0, 0.0, 1.0);
+}
+</script>
+
+<!-- ==================== the plates ==================== -->
+
+<script type="x-shader/x-fragment" id="fs-plate-1">
+// The wave that bends what lies under the water is the wave of the
+// raylib example shader examples/shaders/resources/shaders/glsl330/wave.fs,
+// contributed by Anata (@anatagawa) and reviewed by Ramon Santamaria
+// (@raysan5), which ships with raylib under the zlib licence. The rest of
+// this file is the game's own. docs/water.md says what was taken, what was
+// added, and which other shaders were read before this one was written.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float WAVE_FREQ_X = 0.21;
+const float WAVE_FREQ_Y = 0.17;
+const float WAVE_AMP_X = 1.7;
+const float WAVE_AMP_Y = 1.1;
+const float WAVE_SPEED_X = 1.4;
+const float WAVE_SPEED_Y = 1.1;
+
+const float SINK = 0.07;
+const vec3 DEEP = vec3(0.55, 0.78, 1.06);
+
+const vec3 GLINT = vec3(0.60, 0.86, 1.00);
+const float CAUSTIC_SCALE = 0.16;    // net cells about six world cells wide
+const float CAUSTIC_LIGHT = 0.55;
+const float CAUSTIC_SOFT = 0.32;     // how wide the bright bands blur
+const float CAUSTIC_FALL = 0.06;     // the net dims as the light spreads
+const float SURFACE_LIGHT = 0.36;
+const float SURFACE_FALL = 0.9;
+const float LIT_GAIN = 3.0;
+
+const float MIRROR = 0.34;           // how much of the world above shows
+const float MIRROR_FALL = 0.030;     // and how fast depth swallows it
+const float MIRROR_WOBBLE = 1.1;     // cells of sideways shimmer
+
+float w_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+// The net light leaves on the bottom of a pond is the boundary of a
+// pattern of cells: bright curved seams where neighbouring lenses of
+// surface meet, dark inside each lens. So it is drawn from a scatter of
+// points that drift, as the distance to the *seam* between the nearest
+// point and the next: zero on the seam, and the seam glows.
+float w_seam(vec2 p, float t)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float f1 = 8.0;
+    float f2 = 8.0;
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 o = vec2(float(x), float(y));
+            vec2 h = vec2(w_hash(i + o), w_hash(i + o + 19.19));
+            vec2 c = o + 0.5 + 0.38*sin(t + 6.2831*h) - f;
+            float d = dot(c, c);
+            if (d < f1) { f2 = f1; f1 = d; }
+            else if (d < f2) { f2 = d; }
+        }
+    }
+    return sqrt(f2) - sqrt(f1);
+}
+
+float caustic(vec2 cell, float t)
+{
+    vec2 p = cell*CAUSTIC_SCALE;
+    float a = w_seam(p, t*0.6);
+    float b = w_seam(p*1.83 + 7.7, -t*0.45);
+    float net = smoothstep(CAUSTIC_SOFT, 0.0, a)*0.75
+              + smoothstep(CAUSTIC_SOFT*1.4, 0.0, b)*0.45;
+    return net*net;
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec2 p = fragTexCoord;
+    p.x += cos(cell.y*WAVE_FREQ_X + seconds*WAVE_SPEED_X)*WAVE_AMP_X*texel.x;
+    p.y += sin(cell.x*WAVE_FREQ_Y + seconds*WAVE_SPEED_Y)*WAVE_AMP_Y*texel.y;
+
+    vec3 under = texture(texture0, p).rgb;
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*LIT_GAIN);
+    lit *= lit;
+
+    // The glint takes the colour of the light that made it: green under
+    // the fireflies, warm under the orb, and the blue of the water when
+    // neither is near.
+    vec3 glint = mix(GLINT, here/max(bright, 0.001), 0.45);
+    float sink = 1.0 - exp(-depth*SINK);
+    float top = exp(-depth*SURFACE_FALL);
+
+    vec3 col = under*mix(vec3(1.0), DEEP, sink);
+
+    // The world above the surface, mirrored into it. The sample is of the
+    // picture the light already drew, so a dark shore stays a dark shore;
+    // what this brings the pond is the firefly and the orb, upside down
+    // and wavering, which is what still water does at night.
+    float up = depth/step_cells;
+    float wob = sin(cell.y*0.9 + seconds*1.3)
+              + 0.6*sin(cell.x*0.23 - seconds*0.8);
+    vec2 above = fragTexCoord + vec2(
+        wob*MIRROR_WOBBLE/step_cells*texel.x,
+        -2.0*up*texel.y);
+    vec3 sky = texture(texture0, clamp(above, vec2(0.0), vec2(1.0))).rgb;
+    col += sky*MIRROR*exp(-depth*MIRROR_FALL);
+
+    // The caustic net on what lies under, and the shimmer at the surface.
+    // Both are scaled by the light the CPU already gave the texel, so the
+    // shader brightens no water the world left dark.
+    float ripple = 0.6 + 0.4*sin(cell.x*0.5 - seconds*2.6)
+                       *sin(cell.x*0.13 + seconds*0.7);
+
+    // A few points of the surface catch the light and let it go: each
+    // two-cell run has its own phase, and the pow keeps all but the
+    // crest of each pulse dark, so the line twinkles instead of glowing.
+    float wink = pow(0.5 + 0.5*sin(seconds*2.3 + 6.2831*w_hash(
+        vec2(floor(cell.x*0.5), 3.7))), 18.0);
+
+    col += glint*lit*(caustic(cell, seconds)*CAUSTIC_LIGHT
+                          *mix(0.22, 1.0, exp(-depth*CAUSTIC_FALL))
+                      + top*(ripple*SURFACE_LIGHT + wink*0.55));
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-2">
+// Plate II. Ukiyo-e. The pond as a woodblock print: indigo cut into
+// three plates and printed flat, foam left as bare paper, and a key
+// block for the line at the surface. Nothing here is blended that a
+// carver could not have cut, and the plates do not register quite true.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 AI_1 = vec3(0.60, 0.72, 0.78);   // aizuri, the pale plate
+const vec3 AI_2 = vec3(0.22, 0.40, 0.58);
+const vec3 AI_3 = vec3(0.07, 0.16, 0.31);
+const vec3 SUMI = vec3(0.04, 0.05, 0.08);   // the key block
+const vec3 KOZO = vec3(0.90, 0.87, 0.77);   // the paper
+
+const float REGISTER = 1.4;                 // how far off the key block sits
+
+float u_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float u_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(u_hash(i), u_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(u_hash(i + vec2(0.0, 1.0)), u_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float u_fbm(vec2 p)
+{
+    return 0.55*u_noise(p) + 0.28*u_noise(p*2.07 + 3.1) + 0.14*u_noise(p*4.13 + 8.9);
+}
+
+// The crest the carver would have cut: a slow swell, the same at any
+// depth, so the foam runs in long combs across the pond.
+float u_crest(vec2 cell, float depth, float t)
+{
+    float swell = u_fbm(cell*0.055 + vec2(-t*0.20, t*0.05));
+    return swell*0.78 + exp(-depth*0.42)*0.55;
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.2);
+
+    // Three plates of indigo. The boundary between them is not the depth
+    // itself but the depth bent by the swell, so the tones run in bands
+    // that follow the water rather than the bowl.
+    float bend = u_fbm(cell*0.03 + vec2(seconds*0.05, 0.0));
+    float d = depth + 14.0*bend - 5.0;
+    vec3 col = AI_1;
+    col = mix(col, AI_2, step(6.0, d));
+    col = mix(col, AI_3, step(19.0, d));
+
+    // Paper through the pale plate. A print is never solid ink.
+    float grain = u_noise(cell*vec2(0.7, 2.9));
+    col = mix(col, KOZO, 0.16*grain*exp(-depth*0.09));
+
+    // The foam is paper the carver cut away; the key block outlines it,
+    // printed a hair off register, which is the whole look of the thing.
+    float crest = u_crest(cell, depth, seconds);
+    float keyc = u_crest(cell + vec2(REGISTER, -REGISTER*0.7), depth, seconds);
+    float foam = step(0.76, crest);
+    float key = step(0.70, keyc) - step(0.78, keyc);
+
+    col = mix(col, KOZO, foam);
+    col = mix(col, SUMI, key*0.9);
+
+    // The line at the surface is drawn, not shaded: the top row of water
+    // is the key block, broken where the foam breaks it.
+    float line = 1.0 - step(1.0, depth);
+    col = mix(col, SUMI, line*0.75*(1.0 - foam));
+
+    // The print is lit by the room, not by the pond, so the ink keeps
+    // its colour in the dark instead of going black.
+    finalColor = vec4(col*mix(0.30, 1.0, lit), 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-3">
+// Plate III. Impressionism. No line and no local colour: the water is a
+// heap of short strokes, each one a whole hue laid beside its neighbour,
+// and the mixing is left to the eye. Violet in the deep, cadmium where
+// the light lands. Every stroke takes its colour from the picture under
+// it, so the pond still reads as a pond.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 VIOLET  = vec3(0.34, 0.28, 0.55);
+const vec3 COBALT  = vec3(0.20, 0.40, 0.72);
+const vec3 VIRID   = vec3(0.13, 0.50, 0.45);
+const vec3 CADMIUM = vec3(0.95, 0.71, 0.28);
+const vec3 ROSE    = vec3(0.87, 0.50, 0.53);
+const vec3 CREAM   = vec3(0.97, 0.93, 0.79);
+
+const vec2 STROKE = vec2(19.0, 7.4);        // the size of one brush mark
+const vec2 OFF[6] = vec2[6](
+    vec2(0.0, 0.0), vec2(0.5, 0.35), vec2(-0.5, 0.35),
+    vec2(0.5, -0.35), vec2(-0.5, -0.35), vec2(0.0, 0.7));
+
+float i_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float i_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(i_hash(i), i_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(i_hash(i + vec2(0.0, 1.0)), i_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// The hue a stroke is charged with, before it is broken with what lies
+// under it. Deep water takes the cold end of the palette.
+vec3 i_charge(float r, float depth)
+{
+    vec3 cold = mix(COBALT, VIOLET, smoothstep(4.0, 30.0, depth));
+    if (r < 0.46) return cold;
+    if (r < 0.70) return mix(cold, VIRID, 0.60);
+    if (r < 0.84) return mix(cold, ROSE, 0.42);
+    if (r < 0.96) return mix(cold, CADMIUM, 0.48);
+    return CREAM;
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    // The brush follows the water, so the strokes turn where it turns --
+    // but a hand does not turn continuously. The angle is cut into eight,
+    // which is what keeps this a heap of marks and not a marbled paper.
+    float ang = floor(i_noise(cell*0.009 + vec2(seconds*0.02, 0.0))*8.0)/8.0*1.6 + 0.25;
+    float ca = cos(ang), sa = sin(ang);
+    mat2 turn = mat2(ca, -sa, sa, ca);
+    vec2 q = (turn*cell)/STROKE;
+
+    vec3 col = vec3(0.0);
+    float wsum = 0.0;
+
+    for (int i = 0; i < 6; ++i) {
+        vec2 id = floor(q + OFF[i]);
+        float r = i_hash(id);
+        // Where the stroke was laid, and how it wandered while drying.
+        vec2 at = id + 0.5 + 0.30*vec2(i_hash(id + 1.7) - 0.5, i_hash(id + 9.3) - 0.5)
+                + 0.10*vec2(sin(seconds*0.5 + r*6.28), cos(seconds*0.43 + r*6.28));
+        vec2 rel = (q - at)*vec2(1.0, 2.1);
+        float w = exp(-3.2*dot(rel, rel))*(0.55 + r);
+        if (w < 0.001) continue;
+
+        // What the picture holds where that stroke sits.
+        vec2 back = mat2(ca, sa, -sa, ca)*(at*STROKE);   // the stroke, in cells
+        vec2 uv = clamp((back - origin)/(size*step_cells), vec2(0.0), vec2(1.0));
+        vec3 under = texture(texture0, uv).rgb;
+        float dth = max(texture(mask, uv).r*255.0 - 1.0, 0.0);
+
+        // The hue is the palette's; the value is the picture's. That is
+        // the whole trick: break the colour, keep the light.
+        vec3 charge = i_charge(i_hash(id + 21.1), dth);
+        float value = dot(under, vec3(0.30, 0.59, 0.11));
+        col += charge*(0.04 + 2.4*value)*w;
+        wsum += w;
+    }
+    col /= max(wsum, 0.0001);
+
+    // The light on the water is scumbled cream over the top of it all.
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.4);
+    float sparkle = i_noise(cell*0.32 + vec2(0.0, seconds*0.9));
+    col = mix(col, CREAM, lit*exp(-depth*0.30)*smoothstep(0.62, 0.96, sparkle)*0.75);
+    col *= mix(0.42, 1.0, lit);
+
+    // The weave of the canvas, which no varnish ever quite fills.
+    col *= 1.0 + 0.05*(sin(cell.x*2.9) + sin(cell.y*2.9))*0.5;
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-4">
+// Plate IV. Sumi-e. One ink, one brush, and the paper doing half the
+// work. Depth is how much ink the brush left standing; light is paper
+// the brush went round. The only line in it is the wet edge, where a
+// wash dries darker at its rim than in its middle.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 PAPER = vec3(0.90, 0.88, 0.82);
+const vec3 INK   = vec3(0.055, 0.065, 0.085);
+
+float k_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float k_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(k_hash(i), k_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(k_hash(i + vec2(0.0, 1.0)), k_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float k_fbm(vec2 p)
+{
+    return 0.53*k_noise(p) + 0.27*k_noise(p*2.11 + 4.3)
+         + 0.13*k_noise(p*4.07 + 1.9) + 0.07*k_noise(p*8.3 + 7.1);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // The wash: how much ink stands here. Depth loads the brush, and a
+    // slow drift in the paper decides where it pooled.
+    float drift = k_fbm(cell*0.022 + vec2(seconds*0.05, -seconds*0.025));
+    float wash = 1.0 - exp(-(depth*0.105 + drift*0.45));
+
+    // The wet edge. A wash that dries leaves its rim dark, and doing it
+    // at three thresholds gives the pond the terraces of a mountain.
+    float rim = 0.0;
+    for (int i = 1; i <= 3; ++i) {
+        float at = float(i)*0.24;
+        rim += smoothstep(0.055, 0.0, abs(wash - at));
+    }
+
+    // The brush is dry in places and skips the tooth of the paper. It
+    // skips in long runs along the stroke, never cell by cell: a dry
+    // brush leaves streaks, and a noisy one leaves dirt.
+    float tooth = k_noise(cell*vec2(0.055, 0.50) + vec2(seconds*0.015, 0.0));
+    float spread = smoothstep(0.40, 0.74, k_noise(cell*0.032 + 11.0));
+    float skip = smoothstep(0.50, 0.80, tooth)*spread;
+
+    // Two or three strokes for the ripple, laid across the surface with
+    // the pressure the wrist gave them.
+    float ripple = smoothstep(0.05, 0.0, abs(fract(depth*0.09 + drift*1.6 + seconds*0.04) - 0.5) - 0.42);
+    ripple *= exp(-depth*0.06)*smoothstep(0.3, 0.8, k_noise(cell*vec2(0.05, 0.4)));
+
+    // Ink is not grey. The wash is pushed to its ends, so the pond holds
+    // paper and black and little between them.
+    float ink = clamp(wash*0.90 + rim*0.34 + ripple*0.55, 0.0, 1.0);
+    ink = smoothstep(0.12, 0.74, ink);
+
+    // Paper the brush went round: the light is the one thing the ink is
+    // not allowed to cover.
+    ink *= mix(1.0, 0.22, lit*exp(-depth*0.10));
+    ink *= 1.0 - skip*0.55;
+
+    vec3 col = mix(PAPER, INK, ink);
+    col *= 1.0 - 0.045*k_noise(cell*1.3);         // the tooth of the paper
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-5">
+// Plate V. Stained glass. The pond is glazed: panes of jewel colour cut
+// to a cartoon, held in lead came, and lit from behind by whatever light
+// the world already put there. The came is drawn where two panes meet,
+// which is the same seam the caustics of Plate I are drawn from.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 CAME    = vec3(0.055, 0.050, 0.045);
+const vec3 AQUA    = vec3(0.36, 0.80, 0.76);
+const vec3 COBALT  = vec3(0.13, 0.32, 0.72);
+const vec3 EMERALD = vec3(0.13, 0.55, 0.36);
+const vec3 AMETHYST= vec3(0.44, 0.29, 0.62);
+const vec3 AMBER   = vec3(0.85, 0.62, 0.22);
+const vec3 OPAL    = vec3(0.80, 0.90, 0.93);
+
+const float PANE = 0.055;            // one pane, about four cells across
+const float LEAD = 0.13;             // how wide the came is drawn
+
+float g_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+// Where the glazier set the point of a pane. They drift, slowly, which
+// is the one liberty this plate takes with a window.
+vec2 g_point(vec2 i, float t)
+{
+    vec2 h = vec2(g_hash(i), g_hash(i + 19.19));
+    return i + 0.5 + 0.36*sin(t*0.35 + 6.2831*h);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // The cartoon: nearest point, the one after it, and the seam between.
+    vec2 p = cell*PANE + vec2(0.0, -seconds*0.03);
+    vec2 ip = floor(p);
+    vec2 fp = fract(p);
+    float d1 = 8.0, d2 = 8.0;
+    vec2 win = vec2(0.0);
+    for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+            vec2 o = vec2(float(x), float(y));
+            vec2 c = g_point(ip + o, seconds) - p;
+            float d = dot(c, c);
+            if (d < d1) { d2 = d1; d1 = d; win = ip + o; }
+            else if (d < d2) { d2 = d; }
+        }
+    }
+    float seam = sqrt(d2) - sqrt(d1);
+
+    // The glass in the pane. Depth chooses the cold end of the tray, the
+    // surface the warm, and the hash decides between the two nearest.
+    float r = g_hash(win + 5.5);
+    float cold = smoothstep(3.0, 26.0, depth);
+    vec3 warm = r < 0.45 ? AQUA : (r < 0.75 ? AMBER : OPAL);
+    vec3 dark = r < 0.40 ? COBALT : (r < 0.72 ? AMETHYST : EMERALD);
+    vec3 glass = mix(warm, dark, cold);
+
+    // No pane is flat: it is thicker at one edge, and it bends what is
+    // behind it. The bend is small, because glass this old is not clear.
+    vec2 lean = normalize(g_point(win, seconds) - p + 0.0001);
+    vec3 behind = texture(texture0, clamp(fragTexCoord + lean*2.4/size, vec2(0.0), vec2(1.0))).rgb;
+    glass *= 0.72 + 0.9*dot(behind, vec3(0.33));
+    glass *= 0.86 + 0.30*g_hash(win*3.1 + floor(cell*0.5));
+
+    // The sheen of a window seen off the square, sweeping slowly across.
+    float sheen = pow(max(0.0, sin(cell.x*0.014 - cell.y*0.010 + seconds*0.45)), 10.0);
+    glass += OPAL*sheen*0.35*exp(-depth*0.05);
+
+    // The lead. It is flat black against the light, with a bright top
+    // edge where the solder catches it.
+    float lead = smoothstep(LEAD, LEAD*0.35, seam);
+    float solder = smoothstep(LEAD*1.5, LEAD, seam) - lead;
+
+    vec3 col = mix(glass*(0.30 + 1.15*lit), CAME, lead);
+    col += vec3(0.55, 0.53, 0.48)*solder*lit*0.45;
+
+    // The came runs along the waterline too: a window has a frame.
+    float line = 1.0 - step(1.5, depth);
+    col = mix(col, CAME, line*0.8);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-6">
+// Plate VI. The demake. Water as a machine with eight colours and no
+// blending would have drawn it: one ramp, a four by four ordered dither
+// between its steps, pixels two cells to a side, and six frames a
+// second. The game is a grid of coloured cells already, so this plate is
+// the one that argues it should look like one.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+// The ramp. The middle of it is the Water row of data/materials.txt.
+const vec3 RAMP[8] = vec3[8](
+    vec3(0.024, 0.063, 0.110),
+    vec3(0.051, 0.133, 0.200),
+    vec3(0.086, 0.224, 0.310),
+    vec3(0.141, 0.345, 0.431),
+    vec3(0.227, 0.486, 0.647),
+    vec3(0.435, 0.702, 0.808),
+    vec3(0.749, 0.914, 0.949),
+    vec3(0.949, 0.984, 1.000));
+
+const float PIX = 8.0;               // one drawn pixel: two cells a side
+const float FPS = 6.0;               // and it animates on sixes
+
+const float BAYER[16] = float[16](
+    0.0000, 0.5000, 0.1250, 0.6250,
+    0.7500, 0.2500, 0.8750, 0.3750,
+    0.1875, 0.6875, 0.0625, 0.5625,
+    0.9375, 0.4375, 0.8125, 0.3125);
+
+float d_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    vec2 pix = floor(cell/PIX);          // the pixel this fragment is in
+    float t = floor(seconds*FPS)/FPS;    // and the frame it is drawn on
+
+    // The bands that scroll: the whole of a sprite sheet's water in one
+    // line. Two of them, at odds, so the pattern does not repeat soon.
+    float band = 0.55*sin(pix.y*0.55 - t*3.1 + pix.x*0.11)
+               + 0.45*sin(pix.x*0.21 + t*1.7);
+
+    // Depth walks down the ramp; the light walks it back up.
+    float level = 6.4 - depth*0.115 + band*0.85 - (1.0 - lit)*3.2;
+
+    // The dither: the fraction between two steps of the ramp is spent on
+    // a threshold pattern instead of a blend.
+    int bx = int(mod(pix.x, 4.0));
+    int by = int(mod(pix.y, 4.0));
+    float thr = BAYER[by*4 + bx];
+    int idx = int(clamp(floor(level + thr), 0.0, 7.0));
+
+    vec3 col = RAMP[idx];
+
+    // The surface is one bright pixel wide, broken into runs that shift
+    // on every frame, which is how a sprite sheet says "water".
+    if (depth < 2.0) {
+        float run = d_hash(vec2(floor(pix.x*0.5), floor(t*FPS)*0.13));
+        col = run > 0.42 ? RAMP[6] : RAMP[5];
+        if (run > 0.93) col = RAMP[7];
+        col *= mix(0.35, 1.0, lit);
+    }
+
+    // A sparkle: one pixel, one frame, and gone.
+    float spark = d_hash(pix + floor(t*FPS)*7.31);
+    if (spark > 0.9975 && lit > 0.25 && depth < 26.0) col = RAMP[7];
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-7">
+// Plate VII. The photograph. The one plate that argues against the rest:
+// absorption by Beer's law with a coefficient for each channel, a normal
+// built from two crossed swells, refraction that splits the colours a
+// little, a Fresnel term for the sky, and a hard specular for the sun.
+// It is the most water and the least game.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+// How fast each channel is spent, a cell at a time. Red goes first,
+// which is the whole reason deep water is blue.
+const vec3 EXTINCT = vec3(0.115, 0.038, 0.021);
+const vec3 SCATTER = vec3(0.055, 0.230, 0.265);
+const vec3 SUN = vec3(1.00, 0.96, 0.88);
+const float REFRACT = 3.2;           // cells the surface displaces
+const float DISPERSE = 0.28;         // and how far the channels disagree
+
+float p_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float p_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(p_hash(i), p_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(p_hash(i + vec2(0.0, 1.0)), p_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// The height of the surface over a point, as three crossed swells and a
+// little chop. The normal is the slope of this, taken by difference.
+float p_height(vec2 c, float t)
+{
+    float h = sin(c.x*0.055 + t*1.30)*0.55
+            + sin(c.y*0.083 - t*0.95)*0.38
+            + sin((c.x + c.y)*0.037 + t*0.61)*0.30;
+    return h + 0.45*p_noise(c*0.16 + vec2(-t*0.35, t*0.20));
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    float h0 = p_height(cell, seconds);
+    vec2 slope = vec2(p_height(cell + vec2(1.2, 0.0), seconds) - h0,
+                      p_height(cell + vec2(0.0, 1.2), seconds) - h0);
+    vec3 n = normalize(vec3(-slope*2.6, 1.0));
+
+    // Refraction, and the colours part company on the way through.
+    vec2 bend = slope*REFRACT*(0.4 + min(depth, 24.0)*0.06);
+    vec3 under;
+    under.r = texture(texture0, clamp(fragTexCoord + bend*(1.0 + DISPERSE)*texel, vec2(0.0), vec2(1.0))).r;
+    under.g = texture(texture0, clamp(fragTexCoord + bend*texel, vec2(0.0), vec2(1.0))).g;
+    under.b = texture(texture0, clamp(fragTexCoord + bend*(1.0 - DISPERSE)*texel, vec2(0.0), vec2(1.0))).b;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // Beer's law over the path down and back up again.
+    vec3 through = exp(-EXTINCT*(depth*1.8 + 1.0));
+    vec3 col = under*through;
+
+    // What the water gives back instead of what it swallowed.
+    col += SCATTER*(1.0 - through)*lit*0.85;
+
+    // The sky, by Fresnel. Near the surface the eye grazes the water and
+    // sees almost nothing but sky; deeper it looks straight down.
+    float graze = exp(-depth*0.055);
+    float fres = 0.02 + 0.98*pow(graze, 4.0);
+    float up = depth/step_cells;
+    vec2 above = fragTexCoord + vec2(slope.x*4.0*texel.x, -2.2*up*texel.y);
+    vec3 sky = texture(texture0, clamp(above, vec2(0.0), vec2(1.0))).rgb;
+    col = mix(col, col*0.55 + sky*0.95, fres*0.34);
+
+    // The sun on the chop. Two lobes: the broad sheen, and the points.
+    vec3 lightdir = normalize(vec3(-0.42, -0.30, 0.86));
+    float spec = pow(max(dot(n, lightdir), 0.0), 26.0);
+    float glint = pow(max(dot(n, lightdir), 0.0), 260.0);
+    col += SUN*lit*(spec*0.20 + glint*1.25)*graze;
+
+    // Light that got through the surface and drew on what is under it.
+    float shaft = p_noise(cell*0.09 + vec2(seconds*0.10, -seconds*0.05));
+    col += SUN*lit*pow(smoothstep(0.55, 0.95, shaft), 2.0)*0.30*exp(-depth*0.05);
+
+    // A filmic shoulder, so the glints roll off instead of clipping.
+    col = (col*(2.51*col + 0.03))/(col*(2.43*col + 0.59) + 0.14);
+
+    finalColor = vec4(clamp(col, 0.0, 1.0), 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-8">
+// Plate VIII. The cel. Painted water, from a studio that shot it a frame
+// at a time: three flat tones with a hard edge between them, white
+// highlights cut as shapes rather than shaded, and a drawn line where
+// the water meets the air. The shapes move; the tones never gradate.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 SHALLOW = vec3(0.44, 0.75, 0.86);
+const vec3 MID     = vec3(0.19, 0.47, 0.72);
+const vec3 DEEP    = vec3(0.09, 0.24, 0.47);
+const vec3 SHINE   = vec3(1.00, 1.00, 1.00);
+const vec3 RIM     = vec3(0.74, 0.92, 0.97);
+const vec3 LINE    = vec3(0.05, 0.13, 0.28);
+
+float c_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float c_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(c_hash(i), c_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(c_hash(i + vec2(0.0, 1.0)), c_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float c_fbm(vec2 p)
+{
+    return 0.6*c_noise(p) + 0.3*c_noise(p*2.09 + 4.1) + 0.1*c_noise(p*4.3 + 9.2);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // The tone boundary is a drawn shape, not a gradient: the depth is
+    // pushed about by a slow swell and then cut with a step.
+    float swell = c_fbm(cell*0.030 + vec2(-seconds*0.12, seconds*0.05));
+    float d = depth + 18.0*swell - 7.0;
+    vec3 col = SHALLOW;
+    col = mix(col, MID, step(5.0, d));
+    col = mix(col, DEEP, step(21.0, d));
+
+    // Highlights: long flat shapes lying along the surface, with a pale
+    // rim inside the white. They stretch and snap rather than fade.
+    float band = c_fbm(cell*vec2(0.045, 0.20) + vec2(-seconds*0.34, seconds*0.02));
+    float near = exp(-depth*0.16);
+    float shape = band*0.86 + near*0.52;
+    float core = step(0.74, shape);
+    float rim = step(0.685, shape) - core;
+    col = mix(col, RIM, rim);
+    col = mix(col, SHINE, core);
+
+    // A four-point star, one to a stretch of surface, blinking on and
+    // off the way an animator would have inked it.
+    vec2 tile = vec2(26.0, 13.0);
+    vec2 id = floor(cell/tile);
+    vec2 at = (fract(cell/tile) - 0.5 - 0.28*vec2(c_hash(id) - 0.5, c_hash(id + 3.3) - 0.5))*tile;
+    float beat = step(0.72, c_hash(id + floor(seconds*1.7 + c_hash(id)*9.0)));
+    float star = max(smoothstep(5.0, 0.0, abs(at.x))*smoothstep(1.1, 0.0, abs(at.y)),
+                     smoothstep(2.6, 0.0, abs(at.y))*smoothstep(0.9, 0.0, abs(at.x)));
+    col = mix(col, SHINE, step(0.55, star)*beat*near);
+
+    // The drawn line where the water ends. It thins where a highlight
+    // runs over it, because a cel line is under the paint, not over it.
+    float line = 1.0 - step(1.0, depth);
+    col = mix(col, LINE, line*0.85*(1.0 - core));
+
+    // The paint is flat, so the light dims the whole cel rather than
+    // shading inside it. Three steps of dimming, to stay in the medium.
+    float dim = floor(clamp(lit, 0.0, 0.999)*3.0)/3.0;
+    col *= mix(0.34, 1.0, dim);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-9">
+// Plate IX. The arcade cabinet. The waterline is a horizon: a grid runs
+// away into it, a slatted sun sits in it, and the deep is the black a
+// cathode ray tube leaves between the phosphors. The one plate that
+// treats depth as distance instead of as thickness.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const vec3 VOID    = vec3(0.035, 0.012, 0.075);
+const vec3 GRID    = vec3(0.98, 0.18, 0.72);
+const vec3 HORIZON = vec3(0.20, 0.96, 0.88);
+const vec3 SUN_HI  = vec3(1.00, 0.86, 0.30);
+const vec3 SUN_LO  = vec3(0.98, 0.16, 0.55);
+
+float v_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 cell = origin + fragTexCoord*size*step_cells;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // Depth read as distance. Near the surface the ground rushes past;
+    // far down it crawls, which is what makes the grid a horizon.
+    float run = 1.0/(depth*0.030 + 0.09);
+    float across = (cell.x - origin.x - size.x*step_cells*0.5)*0.010;
+
+    float rows = abs(fract(run*0.55 + seconds*0.85) - 0.5);
+    float cols = abs(fract(across*run*0.42) - 0.5);
+    float grid = smoothstep(0.085, 0.0, rows)*0.9
+               + smoothstep(0.055, 0.0, cols)*0.75/(1.0 + depth*0.05);
+
+    // The sun, sitting on the waterline, cut by its slats.
+    vec2 s = vec2(across*26.0, depth - 4.0);
+    float disc = 1.0 - smoothstep(16.0, 19.0, length(s*vec2(1.0, 1.35)));
+    float slat = step(0.42, fract(depth*0.30 + 0.15));
+    float sun = disc*max(slat, smoothstep(9.0, 0.0, depth));
+
+    // The plate, built up in the dark.
+    vec3 col = VOID*(0.6 + 0.9*exp(-depth*0.02));
+    col += mix(SUN_LO, SUN_HI, smoothstep(14.0, -6.0, depth))*sun*0.62;
+    col += GRID*grid*exp(-depth*0.012)*0.85;
+
+    // The waterline itself, and the glow that bleeds off it.
+    float line = exp(-depth*0.55);
+    col += HORIZON*line*0.62;
+    col += HORIZON*exp(-depth*0.10)*0.10;
+
+    // What is under the water, put through the tube: the channels are
+    // pulled apart, and the whole of it is dim.
+    vec3 under;
+    under.r = texture(texture0, clamp(fragTexCoord + vec2(2.4, 0.0)*texel, vec2(0.0), vec2(1.0))).r;
+    under.g = texture(texture0, fragTexCoord).g;
+    under.b = texture(texture0, clamp(fragTexCoord - vec2(2.4, 0.0)*texel, vec2(0.0), vec2(1.0))).b;
+    col += under*0.55;
+
+    // The tube. Scanlines in the screen, not in the world, and a grille
+    // that dims every third column of phosphors.
+    float scan = 0.86 + 0.14*sin(fragTexCoord.y*size.y*3.1416);
+    float grille = 0.92 + 0.08*sin(fragTexCoord.x*size.x*2.0944);
+    col *= scan*grille;
+
+    // Even a cabinet obeys the rule: no light the world did not give.
+    col *= mix(0.28, 1.0, lit);
+    col += vec3(0.05, 0.01, 0.09)*v_hash(cell + floor(seconds*24.0));
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script>
+// ---------------------------------------------------------------------
+// Nine Waters. One WebGL 2 context draws every panel on the page: the
+// pond goes into a framebuffer of cells, and each plate is a second pass
+// over it, under the uniform names the game uses. The result is copied
+// out to the panel's own 2D canvas, so nine live shaders cost one
+// context instead of nine.
+// ---------------------------------------------------------------------
+
+// The header the game puts on every shader for the browser, which is why
+// no shader file in the repository names a version.
+const HEADER = "#version 300 es\nprecision highp float;\nprecision highp int;\n";
+
+const PLATES = [
+  {
+    id: 1, num: "Plate I", title: "Ripple and net",
+    work: "two 3×3 seam searches, run twice",
+    school: "The one in the game",
+    note: "The wave from the raylib example bends what lies under the surface; depth pulls the colour toward blue by a multiply, so water in the gloom stays in the gloom; a net of caustics is drawn from the seams of a drifting cell pattern; and the world above is mirrored faintly in. It adds no light the world did not already put there.",
+    how: [
+      ["Surface", "A cosine on one axis, a sine on the other"],
+      ["Depth", "A multiply toward blue, never an add"],
+      ["Caustic", "The seam between the two nearest drifting points"],
+      ["Mirror", "The picture above, upside down and wavering"]
+    ]
+  },
+  {
+    id: 2, num: "Plate II", title: "Three plates of indigo",
+    work: "three noise fields, one only for the register",
+    school: "Ukiyo-e woodblock",
+    note: "Indigo cut into three blocks and printed flat, with the foam left as bare paper and a key block for the line at the surface. Depth does not shade the water, it chooses which block printed here. The key block is laid a hair off register, which is most of what makes a print look printed.",
+    how: [
+      ["Tone", "Three flat blocks, chosen by a swell-bent depth"],
+      ["Foam", "Paper the carver cut away, hard-edged"],
+      ["Line", "A key block at the waterline, broken by foam"],
+      ["Flaw", "The key block prints 1.4 cells off register"]
+    ]
+  },
+  {
+    id: 3, num: "Plate III", title: "Broken colour",
+    work: "six strokes, each with two reads",
+    school: "Impressionism",
+    note: "No line and no local colour. Six brush marks are gathered for every fragment, each charged with a whole hue and each taking its value from the picture where the mark sits, so the pond still reads as a pond while no two neighbouring marks agree about its colour. Violet in the deep, cadmium and cream where the light lands.",
+    how: [
+      ["Mark", "Six rotated strokes, gathered and weighted"],
+      ["Hue", "One of six charges a hash gives the stroke"],
+      ["Turn", "The brush follows a slow noise field"],
+      ["Ground", "The weave of the canvas, never quite filled"]
+    ]
+  },
+  {
+    id: 4, num: "Plate IV", title: "One brush of ink",
+    work: "one four-octave noise, and three wet rims",
+    school: "Sumi-e",
+    note: "One ink and one brush, with the paper doing half the work. Depth is how much ink the brush left standing, light is paper the brush went round, and the only line in it is the wet edge where a wash dries darker at its rim than in its middle. Under the fireflies the pond is nearly white; away from them it is nearly black.",
+    how: [
+      ["Wash", "Depth loads the brush; noise says where it pooled"],
+      ["Edge", "Three thresholds, each drying to a dark rim"],
+      ["Dry", "The brush skips the tooth of the paper"],
+      ["Reserve", "The light is the one thing ink may not cover"]
+    ]
+  },
+  {
+    id: 5, num: "Plate V", title: "Panes and came",
+    work: "one 3×3 pane search, two hashes a pane",
+    school: "Stained glass",
+    note: "The pond is glazed. Panes of jewel colour are cut to a cartoon and held in lead, and the light behind them is whatever light the world already had. The cartoon is the same cell pattern the shipped shader draws its caustics from, read for its seams rather than for its glow, which is the cheapest good idea on this page.",
+    how: [
+      ["Cartoon", "A drifting cell pattern, read at its seams"],
+      ["Glass", "Warm at the surface, cold in the deep"],
+      ["Came", "Flat black, with solder catching the light"],
+      ["Sheen", "One slow sweep, as of a window seen off square"]
+    ]
+  },
+  {
+    id: 6, num: "Plate VI", title: "Eight colours",
+    work: "a dither lookup and two hashes; no noise",
+    school: "Pixel art",
+    note: "What a machine with eight colours and no blending would have drawn: one ramp, a four by four ordered dither between its steps, pixels two cells to a side, and six frames a second. The middle of the ramp is the Water row of data/materials.txt. The game is a grid of coloured cells already, and this is the plate that argues it should look like one.",
+    how: [
+      ["Ramp", "Eight colours, no blend between them"],
+      ["Dither", "A 4x4 Bayer threshold instead of a gradient"],
+      ["Pixel", "Two cells a side, snapped"],
+      ["Frame", "Six a second, sparkles and all"]
+    ]
+  },
+  {
+    id: 7, num: "Plate VII", title: "Beer's law",
+    work: "three height evaluations, for the normal",
+    school: "Photoreal",
+    note: "The plate that argues against the rest. Absorption with a coefficient for each channel, which is the real reason deep water is blue; a normal built from three crossed swells; refraction that lets the channels disagree a little; a Fresnel term for the sky; and two specular lobes for the sun. The most water here, and the least game.",
+    how: [
+      ["Absorb", "Beer's law, red spent five times faster than blue"],
+      ["Refract", "The slope displaces, and disperses by a quarter"],
+      ["Sky", "Fresnel: grazing at the surface, down in the deep"],
+      ["Sun", "A broad sheen, and points at the 260th power"]
+    ]
+  },
+  {
+    id: 8, num: "Plate VIII", title: "Painted cel",
+    work: "two noise fields, and a lattice of stars",
+    school: "Cel animation",
+    note: "Painted water, from a studio that shot it a frame at a time. Three flat tones with a hard edge between them, white highlights cut as shapes rather than shaded, a drawn line where the water meets the air, and the shapes moving while the tones never gradate. The light dims the whole cel in three steps, because paint does not know about falloff.",
+    how: [
+      ["Tone", "Three flats; the boundary is a drawn shape"],
+      ["Shine", "Hard white cores with a pale rim inside"],
+      ["Star", "One four-point blink to a stretch of surface"],
+      ["Line", "Under the paint, so a highlight covers it"]
+    ]
+  },
+  {
+    id: 9, num: "Plate IX", title: "The horizon",
+    work: "one hash; the rest is plain arithmetic",
+    school: "Arcade neon",
+    note: "The waterline read as a horizon: a grid runs away into it, a slatted sun sits in it, and the deep is the black between phosphors. The one plate that treats depth as distance rather than as thickness, which is a lie about water and a good look on a cabinet. Scanlines and the grille are in the screen, not in the world.",
+    how: [
+      ["Depth", "Read as distance: 1/d, so the grid converges"],
+      ["Sun", "A disc on the waterline, cut by its slats"],
+      ["Tube", "Channels pulled apart, scanlines, a grille"],
+      ["Rule", "Still no light the world did not give"]
+    ]
+  }
+];
+
+const SCENES = [
+  { name: "Grotto", centre: [118, 62] },
+  { name: "Millpond", centre: [104, 66] }
+];
+
+const GL_W = 1280, GL_H = 720;
+const CARD_W = 720, CARD_H = 405;
+
+const state = {
+  scene: 0,
+  zoom: 4,
+  running: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  clock: 6.0,
+  last: 0
+};
+
+const glCanvas = document.createElement("canvas");
+glCanvas.width = GL_W;
+glCanvas.height = GL_H;
+const gl = glCanvas.getContext("webgl2", {
+  alpha: false, antialias: false, depth: false, preserveDrawingBuffer: true
+});
+
+const note = document.getElementById("bar-note");
+
+function src(id) { return document.getElementById(id).textContent.trim(); }
+
+function compile(kind, text) {
+  const sh = gl.createShader(kind);
+  gl.shaderSource(sh, HEADER + text + "\n");
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    const log = gl.getShaderInfoLog(sh);
+    gl.deleteShader(sh);
+    throw new Error(log || "the shader would not compile");
+  }
+  return sh;
+}
+
+function program(vsText, fsText) {
+  const vs = compile(gl.VERTEX_SHADER, vsText);
+  const fs = compile(gl.FRAGMENT_SHADER, fsText);
+  const p = gl.createProgram();
+  gl.attachShader(p, vs);
+  gl.attachShader(p, fs);
+  gl.linkProgram(p);
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(p);
+    gl.deleteProgram(p);
+    throw new Error(log || "the program would not link");
+  }
+  return p;
+}
+
+// One framebuffer for each size of view in use: the colour of the cells,
+// and the depth byte beside it, exactly the two the game hands its
+// water pass.
+const boards = new Map();
+
+function board(cw, ch) {
+  const key = cw + "x" + ch;
+  let b = boards.get(key);
+  if (b) return b;
+  const colour = gl.createTexture();
+  const depth = gl.createTexture();
+  for (const t of [colour, depth]) {
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, cw, ch, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, colour, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, depth, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  b = { fb, colour, depth, cw, ch };
+  boards.set(key, b);
+  return b;
+}
+</script>
+
+<script>
+// --------------------------- the panels ------------------------------
+
+const platesEl = document.getElementById("plates");
+const targets = [];
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+const lightbox = document.getElementById("lightbox");
+const lbCanvas = document.getElementById("lightbox-canvas");
+const lbNum = document.getElementById("lightbox-num");
+const lbTitle = document.getElementById("lightbox-title");
+const lbSchool = document.getElementById("lightbox-school");
+
+function buildCards() {
+  for (const p of PLATES) {
+    const card = el("article", "plate");
+
+    const frame = el("button", "plate-frame");
+    frame.type = "button";
+    frame.setAttribute("aria-label", p.num + ", " + p.title + ". Open large.");
+    const canvas = el("canvas");
+    canvas.width = CARD_W;
+    canvas.height = CARD_H;
+    frame.appendChild(canvas);
+    frame.appendChild(el("span", "zoomhint", "Look closer"));
+    frame.addEventListener("click", () => openLightbox(p));
+    card.appendChild(frame);
+
+    const body = el("div", "plate-body");
+    const head = el("div", "plate-head");
+    head.appendChild(el("span", "plate-num", p.num));
+    const names = el("div");
+    names.appendChild(el("h3", null, p.title));
+    names.appendChild(el("p", "school", p.school));
+    head.appendChild(names);
+    body.appendChild(head);
+    body.appendChild(el("p", "note", p.note));
+
+    const how = el("ul", "how");
+    for (const [k, v] of p.how) {
+      const li = el("li");
+      li.appendChild(el("b", null, k));
+      li.appendChild(el("span", null, v));
+      how.appendChild(li);
+    }
+    body.appendChild(how);
+
+    const text = src("fs-plate-" + p.id);
+    const details = el("details");
+    details.appendChild(el("summary", null, "The shader, whole"));
+    const box = el("div", "src");
+    const copy = el("button", "copy", "Copy");
+    copy.type = "button";
+    copy.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      try {
+        await navigator.clipboard.writeText(text + "\n");
+        copy.textContent = "Copied";
+      } catch (e) {
+        const r = document.createRange();
+        r.selectNodeContents(box.querySelector("pre"));
+        const s = window.getSelection();
+        s.removeAllRanges();
+        s.addRange(r);
+        copy.textContent = "Selected";
+      }
+      setTimeout(() => { copy.textContent = "Copy"; }, 1600);
+    });
+    const bar = el("div", "src-bar");
+    bar.appendChild(copy);
+    box.appendChild(bar);
+    box.appendChild(el("pre", null, text));
+    details.appendChild(box);
+    body.appendChild(details);
+
+    card.appendChild(body);
+    platesEl.appendChild(card);
+
+    p.card = card;
+    targets.push({
+      plate: p, canvas, ctx: canvas.getContext("2d"),
+      w: CARD_W, h: CARD_H, visible: false, kind: "card"
+    });
+  }
+}
+
+function fail(message) {
+  note.textContent = message;
+  const box = el("p", "note", message);
+  box.style.padding = "28px";
+  platesEl.appendChild(box);
+}
+
+buildCards();
+
+// --------------------------- what a plate holds ----------------------
+// Read off the source itself, so the numbers cannot drift from the code
+// on the page: every texture read a fragment makes, with the ones inside
+// a loop counted once for each turn of it, and the lines that are not
+// blank and not comment.
+
+function bare(text) {
+  return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+}
+
+function lineCount(text) {
+  return bare(text).split("\n").filter(l => l.trim().length > 0).length;
+}
+
+function readCount(text) {
+  const t = bare(text);
+  const stack = [];
+  let mult = 1, pending = 0, n = 0;
+  for (let i = 0; i < t.length; i++) {
+    if (t.startsWith("texture(", i)) { n += mult; i += 6; continue; }
+    if (t.startsWith("for", i) && /^for\s*\(/.test(t.slice(i, i + 6))) {
+      const end = t.indexOf(")", i);
+      const head = end < 0 ? "" : t.slice(i, end);
+      const m = head.match(/=\s*(-?\d+)\s*;[^;]*?(<=?)\s*(-?\d+)/);
+      pending = m ? (Number(m[3]) - Number(m[1]) + (m[2] === "<=" ? 1 : 0)) : 1;
+      if (pending < 0) pending = 0;
+      continue;
+    }
+    if (t[i] === "{") { stack.push(mult); if (pending) { mult *= pending; pending = 0; } }
+    else if (t[i] === "}") { mult = stack.length ? stack.pop() : 1; }
+  }
+  return n;
+}
+
+const costRows = document.getElementById("cost-rows");
+
+function costRow(name, school, reads, lines, work, isRef) {
+  const tr = document.createElement("tr");
+  if (isRef) tr.className = "ref";
+  const td0 = el("td", "name");
+  td0.appendChild(document.createTextNode(name));
+  td0.appendChild(el("small", null, school));
+  tr.appendChild(td0);
+  tr.appendChild(el("td", "n", reads === null ? "\u2014" : String(reads)));
+  tr.appendChild(el("td", "n", lines === null ? "\u2014" : String(lines)));
+  tr.appendChild(el("td", "work", work));
+  const ms = el("td", "n", "\u2014"); tr.appendChild(ms);
+  const rel = el("td", "n", "\u2014"); tr.appendChild(rel);
+  const bcell = el("td");
+  const bar = el("div", "bar");
+  const fill = el("i");
+  bar.appendChild(fill);
+  bcell.appendChild(bar);
+  tr.appendChild(bcell);
+  costRows.appendChild(tr);
+  return { ms, rel, fill };
+}
+
+const refRow = costRow("The world alone", "no water pass", 1, null,
+                       "one read, and a write; the floor every plate stands on", true);
+for (const p of PLATES) {
+  const text = src("fs-plate-" + p.id);
+  p.cells = costRow(p.num + " \u2014 " + p.title, p.school, readCount(text), lineCount(text), p.work, false);
+}
+
+if (!gl) {
+  fail("This browser has no WebGL 2, so the plates cannot run. The shader sources are still readable in the repository, under data/shaders.");
+} else {
+  start();
+}
+
+// --------------------------- the drawing -----------------------------
+
+function start() {
+  let progScene, progCopy;
+  try {
+    progScene = program(src("vs-fbo"), src("fs-scene"));
+    progCopy = program(src("vs-screen"), src("fs-copy"));
+  } catch (e) {
+    fail("The pond would not compile: " + e.message);
+    return;
+  }
+
+  let broken = 0;
+  for (const p of PLATES) {
+    try {
+      p.prog = program(src("vs-screen"), src("fs-plate-" + p.id));
+    } catch (e) {
+      p.prog = null;
+      broken += 1;
+      const err = el("div", "err", p.num + " would not compile.\n" + e.message);
+      p.card.querySelector(".plate-body").appendChild(err);
+    }
+  }
+  note.textContent = broken === 0
+    ? "WebGL 2 · nine plates live"
+    : "WebGL 2 · " + broken + " plate(s) would not compile";
+
+  const locs = new WeakMap();
+  function loc(prog, name) {
+    let m = locs.get(prog);
+    if (!m) { m = new Map(); locs.set(prog, m); }
+    if (!m.has(name)) m.set(name, gl.getUniformLocation(prog, name));
+    return m.get(name);
+  }
+  const u1 = (p, n, a) => gl.uniform1f(loc(p, n), a);
+  const u2 = (p, n, a, b) => gl.uniform2f(loc(p, n), a, b);
+  const u4 = (p, n, a, b, c, d) => gl.uniform4f(loc(p, n), a, b, c, d);
+  function tex(p, n, unit, t) {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.uniform1i(loc(p, n), unit);
+  }
+
+  // Where the view sits, in cells. The camera holds still; the zoom says
+  // how many cells reach across the panel, the same as in the game.
+  function view(w, h, bias) {
+    const zoom = state.zoom*(bias || 1);
+    const cw = Math.max(8, Math.round(w/zoom));
+    const ch = Math.max(8, Math.round(h/zoom));
+    const c = SCENES[state.scene].centre;
+    return { cw, ch, ox: c[0] - cw/2, oy: c[1] - ch/2 };
+  }
+
+  function drawScene(b, v) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
+    gl.viewport(0, 0, b.cw, b.ch);
+    gl.useProgram(progScene);
+    u2(progScene, "cells", b.cw, b.ch);
+    u2(progScene, "origin", v.ox, v.oy);
+    u1(progScene, "seconds", state.clock);
+    u1(progScene, "scene", state.scene);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  function drawTarget(t, b, v) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, GL_H - t.h, t.w, t.h);
+
+    gl.useProgram(progCopy);
+    tex(progCopy, "texture0", 0, b.colour);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    const p = t.plate;
+    if (p.prog) {
+      gl.useProgram(p.prog);
+      tex(p.prog, "texture0", 0, b.colour);
+      tex(p.prog, "mask", 1, b.depth);
+      u2(p.prog, "size", t.w, t.h);
+      u2(p.prog, "origin", v.ox, v.oy);
+      u1(p.prog, "step_cells", 1.0);
+      u1(p.prog, "seconds", state.clock);
+      u4(p.prog, "colDiffuse", 1, 1, 1, 1);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    t.ctx.drawImage(glCanvas, 0, 0, t.w, t.h, 0, 0, t.canvas.width, t.canvas.height);
+  }
+
+  // ------------------- what a pass costs, measured -------------------
+  // The plates are timed one at a time against the same pond, with the
+  // page's own drawing held still so nothing else is on the queue. Ten
+  // passes, the best of two runs, and a read of one pixel to make the
+  // driver finish before the clock is read.
+
+  let benching = false;
+  const measureBtn = document.getElementById("measure");
+  const measureNote = document.getElementById("measure-note");
+  const pixel = new Uint8Array(4);
+  const raf = () => new Promise(r => requestAnimationFrame(r));
+
+  function timePass(runs, n) {
+    let best = Infinity;
+    for (let r = 0; r < runs; r++) {
+      for (let i = 0; i < 4; i++) gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+      best = Math.min(best, (performance.now() - t0)/n);
+    }
+    return best;
+  }
+
+  // How much of the view the water actually covers, read off the depth
+  // byte itself. The pass is charged for that share and not for the rest.
+  function waterShare(b) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, b.fb);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1);
+    const buf = new Uint8Array(b.cw*b.ch*4);
+    gl.readPixels(0, 0, b.cw, b.ch, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    let wet = 0;
+    for (let i = 0; i < buf.length; i += 4) if (buf[i] > 0) wet += 1;
+    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return wet/(b.cw*b.ch);
+  }
+
+  async function bench() {
+    benching = true;
+    measureBtn.disabled = true;
+    // The bench frames the water rather than the room it sits in: a
+    // pass is charged for the fragments it keeps, so timing a view that
+    // is mostly rock would time the discard and call it a shader.
+    const w = GL_W, h = GL_H;
+    const cw = Math.round(w/8), ch = Math.round(h/8);
+    const c = SCENES[state.scene].centre;
+    const v = { cw, ch, ox: c[0] - cw/2, oy: 78.0 - ch/2 };
+    const b = board(v.cw, v.ch);
+    drawScene(b, v);
+    const share = waterShare(b);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, GL_H - h, w, h);
+
+    measureNote.textContent = "Timing the world alone\u2026";
+    await raf();
+    gl.useProgram(progCopy);
+    tex(progCopy, "texture0", 0, b.colour);
+    const base = timePass(2, 10);
+
+    const done = [];
+    for (const p of PLATES) {
+      if (!p.prog) continue;
+      measureNote.textContent = "Timing " + p.num + "\u2026";
+      await raf();
+      gl.useProgram(p.prog);
+      tex(p.prog, "texture0", 0, b.colour);
+      tex(p.prog, "mask", 1, b.depth);
+      u2(p.prog, "size", w, h);
+      u2(p.prog, "origin", v.ox, v.oy);
+      u1(p.prog, "step_cells", 1.0);
+      u1(p.prog, "seconds", state.clock);
+      u4(p.prog, "colDiffuse", 1, 1, 1, 1);
+      const ms = timePass(2, 10);
+      p.cells.ms.textContent = ms.toFixed(2) + " ms";
+      done.push({ p, ms });
+    }
+
+    const one = done.find(r => r.p.id === 1);
+    const most = Math.max(base, ...done.map(r => r.ms));
+    refRow.ms.textContent = base.toFixed(2) + " ms";
+    refRow.rel.textContent = one ? (base/one.ms).toFixed(2) + "\u00d7" : "\u2014";
+    refRow.fill.style.width = (100*base/most).toFixed(1) + "%";
+    for (const r of done) {
+      r.p.cells.rel.textContent = one ? (r.ms/one.ms).toFixed(2) + "\u00d7" : "\u2014";
+      r.p.cells.fill.style.width = (100*r.ms/most).toFixed(1) + "%";
+    }
+
+    measureNote.textContent = "Measured here, at 1280 \u00d7 720, framed on the water, "
+      + "which covers " + Math.round(share*100) + "% of the view. Another machine gives other numbers; "
+      + "read the order, not the milliseconds.";
+    measureBtn.textContent = "Measure again";
+    measureBtn.disabled = false;
+    benching = false;
+  }
+
+  measureBtn.addEventListener("click", () => { bench().catch(e => {
+    measureNote.textContent = "The bench stopped: " + e.message;
+    measureBtn.disabled = false;
+    benching = false;
+  }); });
+
+  function frame(now) {
+    const dt = state.last ? Math.min((now - state.last)/1000, 0.05) : 0;
+    state.last = now;
+    if (state.running) state.clock += dt;
+
+    if (!document.hidden && !benching) {
+      // One pond a size, then every panel that wants that size.
+      const live = targets.filter(t => t.visible && t.w > 0);
+      const bySize = new Map();
+      for (const t of live) {
+        const key = t.w + "x" + t.h + "@" + (t.bias || 1);
+        if (!bySize.has(key)) bySize.set(key, []);
+        bySize.get(key).push(t);
+      }
+      for (const group of bySize.values()) {
+        const v = view(group[0].w, group[0].h, group[0].bias);
+        const b = board(v.cw, v.ch);
+        drawScene(b, v);
+        for (const t of group) drawTarget(t, b, v);
+      }
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+
+// --------------------------- what is on screen -----------------------
+
+const watcher = new IntersectionObserver((entries) => {
+  for (const e of entries) {
+    const t = targets.find(t => t.canvas === e.target.querySelector("canvas") || t.canvas === e.target);
+    if (t) t.visible = e.isIntersecting;
+  }
+}, { rootMargin: "220px 0px" });
+
+for (const t of targets) if (t.kind === "card") watcher.observe(t.canvas);
+
+// --------------------------- the hero --------------------------------
+
+const heroCanvas = document.getElementById("hero-canvas");
+// The hero stands twice as close as the panels, so the pond fills it
+// rather than the room the pond is in.
+const heroTarget = {
+  plate: PLATES[0], canvas: heroCanvas, ctx: heroCanvas.getContext("2d"),
+  w: 0, h: 0, visible: true, kind: "hero", bias: 2
+};
+targets.push(heroTarget);
+watcher.observe(heroCanvas);
+
+function sizeHero() {
+  const r = heroCanvas.getBoundingClientRect();
+  if (r.width < 4 || r.height < 4) return;
+  const k = Math.min(GL_W/r.width, GL_H/r.height, 1);
+  heroTarget.w = Math.max(8, Math.round(r.width*k));
+  heroTarget.h = Math.max(8, Math.round(r.height*k));
+  heroCanvas.width = heroTarget.w;
+  heroCanvas.height = heroTarget.h;
+}
+sizeHero();
+
+let sizing = 0;
+window.addEventListener("resize", () => {
+  clearTimeout(sizing);
+  sizing = setTimeout(sizeHero, 160);
+});
+
+// --------------------------- the big look ----------------------------
+
+const lbTarget = {
+  plate: PLATES[0], canvas: lbCanvas, ctx: lbCanvas.getContext("2d"),
+  w: GL_W, h: GL_H, visible: false, kind: "lightbox"
+};
+lbCanvas.width = GL_W;
+lbCanvas.height = GL_H;
+targets.push(lbTarget);
+
+let lastFocus = null;
+
+function openLightbox(p) {
+  lbTarget.plate = p;
+  lbTarget.visible = true;
+  lbNum.textContent = p.num;
+  lbTitle.textContent = p.title;
+  lbSchool.textContent = p.school;
+  lightbox.setAttribute("open-state", "on");
+  lastFocus = document.activeElement;
+  document.getElementById("lightbox-close").focus();
+}
+
+function closeLightbox() {
+  lbTarget.visible = false;
+  lightbox.setAttribute("open-state", "off");
+  if (lastFocus) lastFocus.focus();
+}
+
+document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+lightbox.addEventListener("click", (e) => { if (e.target === lightbox) closeLightbox(); });
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && lbTarget.visible) closeLightbox();
+});
+
+// --------------------------- the instruments -------------------------
+
+function segment(id, attr, apply) {
+  const bar = document.getElementById(id);
+  bar.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    for (const other of bar.querySelectorAll("button")) {
+      other.setAttribute("aria-pressed", String(other === b));
+    }
+    apply(Number(b.dataset[attr]));
+  });
+}
+
+segment("seg-scene", "scene", (v) => { state.scene = v; });
+segment("seg-zoom", "zoom", (v) => { state.zoom = v; });
+segment("seg-run", "run", (v) => { state.running = v === 1; });
+
+if (!state.running) {
+  for (const b of document.querySelectorAll("#seg-run button")) {
+    b.setAttribute("aria-pressed", String(b.dataset.run === "0"));
+  }
+}
+</script>

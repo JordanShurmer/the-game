@@ -223,7 +223,7 @@ of the whole world.
 | `data/` | materials, biomes, the biome maps, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
 | `.github/workflows/` | the release: every push to `main` builds the APK and publishes it |
-| `web/` | the page, its manifest and its icons; `web/build` is what `make web` writes |
+| `web/` | the page, its manifest and its icons; `web/build` is what `make web` writes; `web/water-lab` is the water shader lab |
 | `android/` | the APK: a manifest, one WebView, and the page in its assets |
 | `tools/` | the toolchain installs, the APK build, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
 
@@ -352,6 +352,10 @@ its fireflies painted in it, and the millpond on the green that runs
 through its own dam the moment the world starts -- and for the water
 shader; read it before changing `src/pond.odin`, `src/water.odin`,
 `millpond()` in `tools/seed_homelands.py` or `data/shaders/water.fs`.
+`docs/water_lab.md` is the note for `web/water-lab/`, one page that runs
+nine water shaders side by side in a browser -- the shipped one and
+eight attempts at a new one -- and times them; read it before drawing a
+new design for the water.
 `docs/physics.md` is the note for the sandbox: what a cell of matter
 does next, and in particular the two sections that are the fluid
 simulation. "The reach is the flatness" is how far a liquid or a gas
