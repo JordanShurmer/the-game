@@ -4,6 +4,14 @@
 #
 #   sudo tools/install-toolchain.sh        # takes about half a minute
 #
+# It says one line when it is done: the compiler it installed. The
+# debug ladder is the same one the rest of the toolset reads, and it
+# is set here with -v:
+#
+#   sudo tools/install-toolchain.sh -v     # a line for each step
+#   sudo tools/install-toolchain.sh -vv    # apt and curl speak too
+#   sudo tools/install-toolchain.sh -vvv   # every command, traced
+#
 # The game needs no toolchain of its own. This script exists because a
 # fresh container has none.
 #
@@ -31,6 +39,48 @@
 # then fails with missing symbols. Both archives hold the real library.
 set -eu
 
+USAGE="usage: install-toolchain.sh [-v|-vv|-vvv]
+
+Installs the Odin compiler the game builds with, and the packages it
+links against. Needs root, and the network.
+
+  ODIN_NIGHTLY=latest      take the newest nightly
+  ODIN_RELEASE=dev-2026-09 take a release archive instead
+  PREFIX=/usr/local/bin    where the odin symlink goes"
+
+DEBUG="${GAME_DEBUG:-0}"
+for arg in "$@"; do
+	case "$arg" in
+		-h | --help) echo "$USAGE"; exit 0 ;;
+		-v)   DEBUG=1 ;;
+		-vv)  DEBUG=2 ;;
+		-vvv) DEBUG=3 ;;
+		-d[0-3]) DEBUG=${arg#-d} ;;
+		*) echo "there is no option $arg" >&2; echo "$USAGE" >&2; exit 1 ;;
+	esac
+done
+export GAME_DEBUG="$DEBUG"
+
+# Under `set -e` a bare test that comes out false would end the run.
+if [ "$DEBUG" -ge 3 ]; then
+	set -x
+fi
+
+# Below the second rung the tools that fetch and unpack keep their
+# progress to themselves: a run that goes right has nothing to report
+# but the compiler it installed.
+if [ "$DEBUG" -ge 2 ]; then
+	APT_QUIET=""
+	APT_SINK="/dev/stdout"
+	CURL_QUIET=""
+	TAR_QUIET="-v"
+else
+	APT_QUIET="-qq"
+	APT_SINK="/dev/null"
+	CURL_QUIET="-sS"
+	TAR_QUIET=""
+fi
+
 # The nightly the game is tested against. Read docs/toolchain.md before
 # moving it: `asm` templates are young, and the compiler that parses
 # them is still changing under them.
@@ -52,16 +102,17 @@ case "$(uname -m)" in
 	*) echo "no Odin build for $(uname -m)" >&2; exit 1 ;;
 esac
 
-say() { printf '\n== %s\n' "$1"; }
+# A step is talk, so it takes the first rung and goes to stderr.
+say() { [ "$DEBUG" -ge 1 ] && printf '== %s\n' "$1" >&2 || true; }
 
 say "packages"
-apt-get update -qq
+apt-get update $APT_QUIET
 # clang is the linker Odin calls. libx11-dev is what the static raylib
 # links against; raylib loads OpenGL at run time, so no GL package is
 # needed to build. make is for the Makefile targets. python3 reads the
 # nightly index, which is JSON.
-apt-get install -y --no-install-recommends \
-	clang make curl ca-certificates libx11-dev python3
+apt-get install -y $APT_QUIET --no-install-recommends \
+	clang make curl ca-certificates libx11-dev python3 > "$APT_SINK"
 
 # Say which archive to fetch, as "name<tab>url". A release is named by
 # its tag and a nightly by its date, and a name is what the directory
@@ -110,8 +161,8 @@ if [ ! -x "$DEST/odin" ]; then
 	# does not leave a half tree that the next run takes for a whole one.
 	rm -rf "$DEST.part"
 	mkdir -p "$DEST.part"
-	curl -fL --retry 3 -o "$DEST.part/odin.tar.gz" "$URL"
-	tar xzf "$DEST.part/odin.tar.gz" -C "$DEST.part" --strip-components=1
+	curl -fL --retry 3 $CURL_QUIET -o "$DEST.part/odin.tar.gz" "$URL"
+	tar xzf $TAR_QUIET "$DEST.part/odin.tar.gz" -C "$DEST.part" --strip-components=1
 	rm -f "$DEST.part/odin.tar.gz"
 	mv "$DEST.part" "$DEST"
 fi
@@ -127,7 +178,6 @@ head -c 8 "$RAYLIB" | grep -q '^!<arch>' || {
 
 say "install"
 ln -sf "$DEST/odin" "$PREFIX/odin"
-odin version
 
 # The game uses `asm` templates. A compiler that cannot parse one fails
 # every file that holds one, so say it here rather than in a wall of
@@ -147,4 +197,6 @@ if ! odin build "$WORK/.odin-asm-probe.odin" -file -out:"$WORK/.odin-asm-probe.b
 fi
 rm -f "$WORK/.odin-asm-probe.odin" "$WORK/.odin-asm-probe.bin"
 
-printf '\nRun the tests from the repository root: odin test src\n'
+# The result: what is now on the PATH, and where the tests are run.
+printf '%s  %s\n' "✓" "$(odin version)"
+say "run the tests from the repository root: tools/test.sh"

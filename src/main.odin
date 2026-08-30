@@ -84,7 +84,11 @@ BEAM_GLOW :: rl.Color{110, 210, 255, 255}
 BEAM_CORE :: rl.Color{236, 250, 255, 255}
 
 main :: proc() {
-	shot := read_window_shot(os.args[1:])
+	shot, args_ok := read_window_shot(os.args[1:])
+	if !args_ok {
+		fmt.eprintln(GAME_USAGE)
+		os.exit(1)
+	}
 
 	app: App
 	if !app_load_data(&app) {
@@ -92,7 +96,6 @@ main :: proc() {
 	}
 	defer app_unload_data(&app)
 
-	rl.SetTraceLogLevel(.WARNING)
 	rl.InitWindow(WINDOW_W, WINDOW_H, "The Game - biome generation")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
@@ -215,6 +218,12 @@ main :: proc() {
 
 		if shot.on && frames >= shot.frames {
 			rl.TakeScreenshot(strings.clone_to_cstring(shot.path, context.temp_allocator))
+			// The file is the result of the run, so it is named the
+			// same way bin/shot names the one it draws.
+			fmt.printfln(
+				"%s: %dx%d pixels, after %d frames",
+				shot.path, WINDOW_W, WINDOW_H, frames,
+			)
 			if shot.profile {
 				fmt.eprintln(prof_report(context.temp_allocator))
 			}
@@ -246,30 +255,70 @@ draw_prof :: proc(app: ^App) {
 	}
 }
 
-read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
+GAME_USAGE :: `usage: the-game [key=value ...]
+
+Played with no arguments. The keys below drive it from a script
+instead, which is how the shots and the reel are made.
+
+  shot=PATH     write a PNG of the window and stop
+  frames=N      how many frames to draw first
+  walk=N        walk the wizard N ticks, left if negative
+  throw=DEG     throw at this bearing
+  ticks=N       settle the sandbox N ticks
+  look=NAME     open the material viewer on a material
+  script=PATH   play a reel script
+  record=DIR    write every reel frame into DIR
+  profile=1     print the phase table on exit
+  debug=0..3    0 the result, 1 the steps, 2 the detail, 3 everything
+
+Run it from the repository root: the data paths are relative to it.`
+
+read_window_shot :: proc(args: []string) -> (shot: Window_Shot, ok: bool) {
 	shot.frames = WINDOW_SHOT_FRAMES
+
+	// Every value that should be a number is read the same way, so a
+	// word where a number belongs stops the run whichever key it was
+	// given to, rather than leaving a default standing and drawing
+	// something nobody asked for.
+	number :: proc(key, value: string) -> (int, bool) {
+		n, parsed := strconv.parse_int(value)
+		if !parsed {
+			fmt.eprintfln("%s wants a whole number, and %q is not one", key, value)
+			return 0, false
+		}
+		return n, true
+	}
 
 	for arg in args {
 		split := strings.index_byte(arg, '=')
-		if split < 0 do continue
+		if split < 0 {
+			fmt.eprintfln("arguments are key=value, and %q is not", arg)
+			return shot, false
+		}
 		key := arg[:split]
 		value := arg[split + 1:]
 
+		n: int
+		read := true
 		switch key {
+		case "debug":
+			n, read = number(key, value)
+			if read do noise_set(n)
 		case "shot":
 			shot.path = value
 			shot.on = true
 		case "frames":
-			if n, ok := strconv.parse_int(value); ok do shot.frames = max(n, 1)
+			n, read = number(key, value)
+			shot.frames = max(n, 1)
 		case "walk":
-			if n, ok := strconv.parse_int(value); ok do shot.walk = n
+			shot.walk, read = number(key, value)
 		case "throw":
-			if n, ok := strconv.parse_int(value); ok {
-				shot.throw = true
-				shot.aim = u8(i32(math.round(f32(n) / 360 * 256)) & 255)
-			}
+			n, read = number(key, value)
+			shot.throw = read
+			shot.aim = u8(i32(math.round(f32(n) / 360 * 256)) & 255)
 		case "ticks":
-			if n, ok := strconv.parse_int(value); ok do shot.ticks = max(n, 0)
+			n, read = number(key, value)
+			shot.ticks = max(n, 0)
 		case "look":
 			shot.look = value
 		case "script":
@@ -277,10 +326,15 @@ read_window_shot :: proc(args: []string) -> (shot: Window_Shot) {
 		case "record":
 			shot.record = value
 		case "profile":
-			if n, ok := strconv.parse_int(value); ok do shot.profile = n != 0
+			n, read = number(key, value)
+			shot.profile = n != 0
+		case:
+			fmt.eprintfln("there is no argument %q", key)
+			return shot, false
 		}
+		if !read do return shot, false
 	}
-	return shot
+	return shot, true
 }
 
 @(private = "file")
@@ -1381,36 +1435,42 @@ test_the_sandbox_copy_matches_the_plain_loop :: proc(t: ^testing.T) {
 
 @(test)
 test_the_window_takes_a_shot_of_itself_only_when_it_is_asked_to :: proc(t: ^testing.T) {
-	idle := read_window_shot([]string{})
+	idle, _ := read_window_shot([]string{})
 	testing.expect(t, !idle.on, "with no arguments the window must open and stay open")
 
-	asked := read_window_shot([]string{"shot=shots/water.png", "frames=140", "walk=-40"})
+	asked, _ := read_window_shot([]string{"shot=shots/water.png", "frames=140", "walk=-40"})
 	testing.expect(t, asked.on, "shot= must turn the window shot on")
 	testing.expectf(t, asked.path == "shots/water.png", "the path must be read whole, got %q", asked.path)
 	testing.expectf(t, asked.frames == 140, "frames must be read, got %d", asked.frames)
 	testing.expectf(t, asked.walk == -40, "a negative walk must walk him left, got %d", asked.walk)
 
-	plain := read_window_shot([]string{"shot=shots/window.png"})
+	plain, _ := read_window_shot([]string{"shot=shots/window.png"})
 	testing.expectf(
 		t, plain.frames == WINDOW_SHOT_FRAMES,
 		"a shot with no frame count must draw WINDOW_SHOT_FRAMES first, got %d", plain.frames,
 	)
 	testing.expect(t, plain.walk == 0, "and must leave him where he spawned")
 
-	junk := read_window_shot([]string{"shot=a.png", "frames=soon", "walk=", "nonsense"})
-	testing.expectf(
-		t, junk.frames == WINDOW_SHOT_FRAMES && junk.walk == 0,
-		"a value that is not a number must leave the default standing, got frames=%d walk=%d",
-		junk.frames, junk.walk,
-	)
+	// A wrong argument stops the run and shows the usage, rather than
+	// drawing something nobody asked for. Each of these is one way to
+	// get an argument wrong.
+	wrong := [][]string{
+		[]string{"shot=a.png", "frames=soon"},  // a value that is not a number
+		[]string{"shot=a.png", "nonsense"},     // no key=value at all
+		[]string{"shot=a.png", "verbose=1"},    // a key that does not exist
+	}
+	for junk in wrong {
+		_, junk_ok := read_window_shot(junk)
+		testing.expectf(t, !junk_ok, "%v must be refused, and the usage shown", junk)
+	}
 }
 
 @(test)
 test_a_throw_argument_holds_the_button_for_one_tick_then_runs_the_ticks_it_names :: proc(t: ^testing.T) {
-	plain := read_window_shot([]string{"shot=shots/throw.png"})
+	plain, _ := read_window_shot([]string{"shot=shots/throw.png"})
 	testing.expect(t, !plain.throw, "with no throw argument the window must not throw")
 
-	asked := read_window_shot([]string{"shot=shots/throw.png", "throw=90", "ticks=10"})
+	asked, _ := read_window_shot([]string{"shot=shots/throw.png", "throw=90", "ticks=10"})
 	testing.expect(t, asked.throw, "throw= must turn the throw on")
 	testing.expectf(t, asked.aim == PLAYER_AIM_DOWN, "throw=90 must read as aim down, got %d", asked.aim)
 	testing.expectf(t, asked.ticks == 10, "ticks must be read, got %d", asked.ticks)
