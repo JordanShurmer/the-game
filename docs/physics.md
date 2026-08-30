@@ -18,7 +18,7 @@ behaviour the game is known for.
 | What Noita does | What we do |
 | --- | --- |
 | Powder falls and piles | Already done |
-| Liquid falls, pools, and layers by density | Falling and pooling were done. Layering was not: see "The rise rule". Pooling was not enough either: see "The reach is the flatness" |
+| Liquid falls, pools, and layers by density | Falling and pooling were done. Layering up and down came with "The rise rule"; layering side by side came with "Displacement". Pooling was not enough either: see "The reach is the flatness" |
 | Liquid finds its level | **New**: `sandbox_flow`, and the `spread` of a material |
 | Liquid carries a head, so a submerged opening levels both sides | **New**: `sb.head` and `sandbox_press`. Noita does not do this one |
 | Gas climbs and gathers under a ceiling | Climbing was done. Gathering was not: a gas heaped in the corner it came up in. `sandbox_flow` runs it along the roof |
@@ -62,33 +62,19 @@ reader knows the gap is a decision and not an oversight.
   each other, and not otherwise. That is the honest shape of
   communicating vessels here.
 
-  **A liquid never swaps sideways with a lighter one.** It swaps with
-  a lighter one below it and steps aside only onto emptiness, so three
-  liquids poured into a wide tank side by side settle with no cell
-  resting on anything lighter and still read as a diagonal smear
-  rather than as layers. Measured: sludge, water and oil poured into
-  one tank in three columns hold their columns for 3000 ticks, with a
-  diagonal face between each pair. The density room is a narrow column
-  for that reason. The rung that would lift it is a sideways swap
-  gated on density, and it was tried: making `room` "the cell beside
-  me is lighter" rather than "the cell beside me is empty" barely
-  moved the smear and set a lone puddle cell wandering along its own
-  floor for ever, so it is not in the tree.
+  **A liquid never goes through a powder.** It displaces its own kind
+  and it steps into emptiness, and that is all: a pool of quicksilver
+  standing against a bank of sand stops at the face of it, even though
+  sand is the lighter of the two. Without that guard it tunnels
+  straight through the bank -- measured, from a span of 21 cells to 78
+  in two hundred ticks, and the chunk never sleeps. What a liquid soaks
+  into is a question about porosity, which nothing here has; brush is
+  the one material that answers it, and it answers with the sieve rule.
 
-  A pool does at least pack. A liquid leaves a hole alone while a
-  fluid sits over it, because that fluid is about to fall in. Without
-  that rule the scan reaches a row before the row above it, a cell
-  takes the hole beside it and leaves a hole where it was, and the
-  cell that was going to drop into the first hole is refused: the
-  holes then walk from side to side for ever and the pool keeps every
-  one of them. A pool that packs also goes to sleep, where one that
-  walks its holes keeps its chunk awake for the life of the world.
-  That rule is all that is left of `sandbox_spreads`, and a gas keeps
-  it too, mirrored: over a liquid, under a gas.
-
-  What it costs is that a grain thrown clear of the body during a
-  collapse stays clear. There is no cohesion, so nothing draws it
-  back, and a fire in the body cannot cross the gap to it.
+  **No cohesion, and no surface tension.** A grain thrown clear of the
+  body during a collapse stays clear, a single cell of water on a wide
+  dry floor sits as a bead for ever, and nothing draws either back. A
+  fire in the body cannot cross the gap to it.
 
 - **No momentum.** A cell of water carries no velocity, so water
   leaving a spout in the side of a cistern drops down the wall
@@ -325,6 +311,17 @@ powder's angle of repose, drawn by a liquid.
 Nothing read further than one cell, so nothing could see that two
 cells along the row there was a place to fall.
 
+**The packing rule survives, and only that.** A liquid leaves an empty
+cell alone while fluid sits over it, because that fluid is about to
+fall in. Without it the scan reaches a row before the row above it, a
+cell takes the hole beside it and leaves a hole where it was, and the
+cell that was going to drop into the first hole is refused: the holes
+then walk from side to side for ever and the pool keeps every one of
+them. A pool that packs also goes to sleep, where one that walks its
+holes keeps its chunk awake for the life of the world. A gas keeps the
+same rule, mirrored: the row a fluid came from is over a liquid and
+under a gas.
+
 **So a stopped fluid looks along its row.** `sandbox_flow`: a liquid
 looks for a cell it can sink from, a gas for one it can climb from, as
 far as the material's `spread` says, and goes to the first one it
@@ -512,6 +509,63 @@ wrong physics for a gas. What fills a room is volume pressure, and a
 gas that has reached the ceiling as a one-cell sheet has no column to
 redistribute. `sandbox_flow` already gives a gas the ceiling run, and
 it does it better.
+
+### Displacement: what a fluid moves through
+
+The look levels a free surface and the press carries a head. Neither
+does anything for two liquids standing side by side, and for a long
+time nothing did: `room` asked whether the cell beside this one was
+**empty**, so a liquid stepped aside onto air and onto nothing else.
+
+Measured, before this: sludge, water and oil poured into one tank in
+three columns settle into a perfect diagonal smear -- every row holding
+all three, the counts shifting by one a row -- with not one cell
+resting on anything lighter, bit-identical and fully asleep from tick
+100 to tick 8000. It satisfies the rise rule exactly. It is a local
+minimum, and no move of one cell escapes it.
+
+So `room` is deleted, and what is left is the question a weight can
+answer: **may this fluid move through that cell?**
+
+    sandbox_shifts(self, side, behind, side_kind) =
+        sinks(self, side) && (unclaimed(side, behind) || side_kind == .Liquid)
+
+A liquid passes through anything lighter that is also a liquid, and
+steps into an empty cell that nothing is about to fall into. A gas is
+the mirror. Three things about that shape are load bearing:
+
+- **The packing rule is asked only of an empty cell.** Displacing
+  another liquid does not leave a hole to walk -- the two exchange --
+  so there is nothing there to guard.
+- **Only the arrival licenses the move.** `sandbox_flow` asks two
+  questions now: may I pass through this cell, and is this cell a way
+  on. The first opens the road; the second is still `sinks`. That is
+  why this does not wander the way the naive version does: a liquid
+  does not swap with its neighbour because the neighbour is lighter,
+  it travels to a place it can sink from and exchanges what it passes.
+- **Never through a powder.** Sand is lighter than quicksilver, and
+  without a test of the neighbour's kind a pool of quicksilver tunnels
+  through a sand bank, from a span of 21 cells to 78 in two hundred
+  ticks, and never sleeps.
+
+The same tank now settles into three flat bands inside a thousand
+ticks -- oil, water, sludge, top to bottom -- and wakes no chunk. The
+density room in the gallery is a narrow column because layering used
+to need one; it could be a wide tank now.
+
+**And the self-watch had to be narrowed with it.** Many more cells now
+answer yes to "have you somewhere to step", and every one of them used
+to reach the mark-and-look-again at the foot of `sandbox_flow`:
+measured, a settled three-liquid tank cost 10 rows and 520 cells a tick
+with 0 swaps, for ever. So a fluid keeps watch only if it looked across
+open row. The argument for the watch is that what would let it on lies
+further off than a swap can wake, and that is true along open row and
+false through another fluid, where anything that changes is a
+neighbour and a neighbour wakes it.
+
+It costs no memory at all, and it is a deletion in the predicate: one
+extra kind read in the plain path, one `wide_sides` pair in the vector
+path.
 
 ### Waking what a fluid can see
 

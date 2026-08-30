@@ -15,19 +15,41 @@ sandbox_rises :: #force_inline proc "contextless" (src, dst: u16) -> bool {
 	return dst == CELL_AIR || sandbox_heavier(src, dst)
 }
 
-// A fluid may step aside onto an empty cell, if nothing is about to drop
-// into that cell first. "Behind" is the row the fluid came from: over a
+// Stepping aside onto an empty cell, where nothing is about to drop into
+// that cell first. "Behind" is the row the fluid came from: over a
 // liquid, under a gas. Fluid behind the target is about to take it, so
 // stepping aside there would only walk the hole along the row and the
 // pool would never pack. See docs/physics.md, "The packing rule".
+sandbox_unclaimed :: #force_inline proc "contextless" (side, behind_side: u16) -> bool {
+	return side == CELL_AIR && (behind_side == CELL_AIR || behind_side == CELL_WALL)
+}
+
+// What a fluid may move through, sideways. It displaces anything lighter
+// than itself that is the same sort of fluid, and it steps into an empty
+// cell that nothing is about to fall into. It never goes through a
+// powder: a pool of quicksilver beside a sand bank tunnels straight
+// through the bank without that, because sand is lighter than it.
+//
+// The packing rule is only asked of an empty cell. Displacing another
+// liquid does not leave a hole to walk -- the two exchange -- so there
+// is nothing there for it to guard.
 //
 // Whether the step is worth taking is not asked here. That is the whole
 // question a fluid has, and sandbox_flow answers it by looking along the
 // row.
-sandbox_spreads :: #force_inline proc "contextless" (side, behind_side: u16) -> bool {
-	room      := side == CELL_AIR
-	unclaimed := behind_side == CELL_AIR || behind_side == CELL_WALL
-	return room && unclaimed
+sandbox_shifts :: #force_inline proc "contextless" (self, side, behind_side: u16, side_kind: Cell_Kind) -> bool {
+	return sandbox_sinks(self, side) && (sandbox_unclaimed(side, behind_side) || side_kind == .Liquid)
+}
+
+sandbox_lifts :: #force_inline proc "contextless" (self, side, behind_side: u16, side_kind: Cell_Kind) -> bool {
+	return sandbox_rises(self, side) && (sandbox_unclaimed(side, behind_side) || side_kind == .Riser)
+}
+
+sandbox_kind_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> Cell_Kind {
+	if !sandbox_in_bounds(sb, x, y) do return .Still
+	i := sandbox_index(sb, x, y)
+	if sb.moved[i] do return .Still
+	return table.kind[sb.cells[i]]
 }
 
 sandbox_weight_at :: #force_inline proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> u16 {
@@ -302,14 +324,14 @@ sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 	case climbs && sandbox_rises(w, r.above[far]):
 		return i16(-side), -1
 
-	case floats && sandbox_spreads(r.here[near], r.above[near]):
+	case floats && sandbox_shifts(w, r.here[near], r.above[near], r.kind[near]):
 		return i16(side), 0
-	case floats && sandbox_spreads(r.here[far], r.above[far]):
+	case floats && sandbox_shifts(w, r.here[far], r.above[far], r.kind[far]):
 		return i16(-side), 0
 
-	case climbs && sandbox_spreads(r.here[near], r.below[near]):
+	case climbs && sandbox_lifts(w, r.here[near], r.below[near], r.kind[near]):
 		return i16(side), 0
-	case climbs && sandbox_spreads(r.here[far], r.below[far]):
+	case climbs && sandbox_lifts(w, r.here[far], r.below[far], r.kind[far]):
 		return i16(-side), 0
 
 	case floats && sandbox_presses(r.head[i], w, r.below[i]):
@@ -372,13 +394,20 @@ sandbox_flow :: proc(sb: ^Sandbox, table: Material_Table, x, y, side, ahead: i32
 	w := table.weight[m]
 	reach := i32(table.materials[m].spread)
 
+	open_row := false
 	for s in ([2]i32{side, -side}) {
 		for k in i32(1) ..= reach {
 			nx := x + s * k
 			if !sandbox_in_bounds(sb, nx, y) do break
+			at       := sandbox_weight_at(sb, table, nx, y)
+			at_kind  := sandbox_kind_at(sb, table, nx, y)
 			ahead_of := sandbox_weight_at(sb, table, nx, y + ahead)
 			behind   := sandbox_weight_at(sb, table, nx, y - ahead)
-			if !sandbox_spreads(sandbox_weight_at(sb, table, nx, y), behind) do break
+			// May it pass through this cell? Which is not the same
+			// question as whether this cell is the way on.
+			open := ahead > 0 ? sandbox_shifts(w, at, behind, at_kind) : sandbox_lifts(w, at, behind, at_kind)
+			if !open do break
+			open_row ||= at == CELL_AIR
 
 			if !(ahead > 0 ? sandbox_sinks(w, ahead_of) : sandbox_rises(w, ahead_of)) do continue
 
@@ -395,19 +424,20 @@ sandbox_flow :: proc(sb: ^Sandbox, table: Material_Table, x, y, side, ahead: i32
 		}
 	}
 
-	// It found nothing this tick and stays awake to look again. What
-	// would let it on is further off than a swap wakes, and the far end
-	// of its reach can be changed by water it cannot see -- so a fluid
-	// with somewhere to step and nowhere to go keeps watch itself.
+	// It found nothing this tick, and whether it keeps watch depends on
+	// what it was looking across. Along open row, what would let it on
+	// lies further off than a swap wakes, and the far end of its reach
+	// can be changed by water it never touched -- so it marks itself and
+	// looks again. Looking only through its own kind, what would let it
+	// on is a neighbour, and a neighbour that moves wakes it: the news
+	// walks a cell a tick and costs nothing to wait for.
 	//
-	// This is only ever reached by a fluid with an empty cell beside it
-	// at its own level, which a packed pool has nowhere but at its two
-	// ends: the cells inside one are stopped by their own kind and never
-	// get here, so a settled pond still wakes no chunk at all. What it
-	// costs is a handful of cells at the open edge of a body of water,
-	// and what it buys is that a pond finds its level rather than
-	// leaving a shelf of it stranded up the bank.
-	sandbox_mark(sb, x, y)
+	// A packed pool has open row nowhere but at its two ends, so a
+	// settled pond still wakes no chunk at all. What this costs is a
+	// handful of cells at the open edge of a body of water, and what it
+	// buys is that a pond finds its level rather than leaving a shelf of
+	// it stranded up the bank.
+	if open_row do sandbox_mark(sb, x, y)
 	return false
 }
 

@@ -379,3 +379,71 @@ test_a_pond_under_a_lid_holds_no_bubble :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, worst == 0, "not one cell of air may open inside the body, and %d did", worst)
 }
+
+// Density, side by side. A liquid displaces its own kind, so three
+// poured into one tank in three columns settle into three flat bands
+// rather than the diagonal smear they used to hold for ever. See
+// docs/physics.md, "Displacement: what a fluid moves through".
+@(test)
+test_three_liquids_poured_side_by_side_settle_into_layers :: proc(t: ^testing.T) {
+	sb, table := fluid_sandbox(t, 60, 40)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	fluid_fill(&sb, table, 0, 0, 59, 39, "Rock")
+	fluid_fill(&sb, table, 1, 1, 58, 38, "Air")
+	fluid_fill(&sb, table, 1, 20, 19, 38, "Toxic_Sludge")
+	fluid_fill(&sb, table, 20, 20, 39, 38, "Water")
+	fluid_fill(&sb, table, 40, 20, 58, 38, "Oil")
+
+	for _ in 0 ..< 3000 do sandbox_step(&sb, table)
+
+	// Before this the smear held every one of the three in every row.
+	// Now each lies in a band, and only the rows where two bands meet
+	// hold more than one of them.
+	all_three := 0
+	for y in i32(20) ..< 39 {
+		seen := 0
+		for name, bit in ([3]string{"Toxic_Sludge", "Water", "Oil"}) {
+			c, _ := find_material_index(table, name)
+			for x in i32(1) ..< 59 {
+				if sandbox_cell(&sb, x, y) == Cell(c) {
+					seen |= 1 << uint(bit)
+					break
+				}
+			}
+		}
+		if seen == 0b111 do all_three += 1
+	}
+	testing.expectf(
+		t, all_three == 0,
+		"no row may hold all three at once, and %d of 19 do", all_three,
+	)
+
+	// And they lie in the order their densities say, with the bands
+	// clear of each other rather than shading through one another.
+	middle :: proc(sb: ^Sandbox, table: Material_Table, name: string) -> f32 {
+		c, _ := find_material_index(table, name)
+		sum, n := f32(0), f32(0)
+		for y in i32(0) ..< sb.height {
+			for x in i32(0) ..< sb.width {
+				if sandbox_cell(sb, x, y) != Cell(c) do continue
+				sum += f32(y)
+				n += 1
+			}
+		}
+		return n > 0 ? sum / n : -1
+	}
+	oil := middle(&sb, table, "Oil")
+	water := middle(&sb, table, "Water")
+	sludge := middle(&sb, table, "Toxic_Sludge")
+	testing.expectf(
+		t, oil + 4 < water && water + 4 < sludge,
+		"oil must lie over water and water over sludge: their middles are at rows %.1f, %.1f and %.1f",
+		oil, water, sludge,
+	)
+
+	awake := 0
+	for r in sb.dirty do if r.min_x <= r.max_x do awake += 1
+	testing.expectf(t, awake == 0, "and the tank must sleep, and %d chunks are awake", awake)
+}
