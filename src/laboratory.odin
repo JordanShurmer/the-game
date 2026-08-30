@@ -1,5 +1,7 @@
 package game
 
+import "core:fmt"
+import "core:strings"
 import "core:testing"
 
 // The Laboratory: the world one seed opens instead of laying the
@@ -63,6 +65,28 @@ world_layout :: proc(table: Biome_Table, seed: u64) -> World_Layout {
 
 world_is_laboratory :: proc(table: Biome_Table, seed: u64) -> bool {
 	return table.laboratory.seed != 0 && seed == table.laboratory.seed
+}
+
+// What to say when a biome is painted nowhere on the map this seed
+// opens. There is more than one world now, so "not painted yet" is the
+// wrong answer: the galleries are painted, on the other map. Every tool
+// that looks a biome up by name says this, so all three say the same
+// thing, and the seed comes off the file rather than out of here, so
+// the message cannot name a world the file no longer holds.
+biome_not_on_this_map :: proc(table: Biome_Table, seed: u64, name: string) -> string {
+	if world_is_laboratory(table, seed) {
+		return fmt.tprintf(
+			"%s is not painted on the Laboratory map; the ordinary world is the one with no seed argument",
+			name,
+		)
+	}
+	if table.laboratory.seed != 0 {
+		return fmt.tprintf(
+			"%s is not painted on the map this seed opens; try seed=0x%X (see [Laboratory] in %s)",
+			name, table.laboratory.seed, BIOMES_PATH,
+		)
+	}
+	return fmt.tprintf("%s is not painted on the map this seed opens", name)
 }
 
 LABORATORY_HALLS :: 2  // the physics gallery and the alchemy gallery
@@ -620,5 +644,55 @@ test_the_whole_laboratory_is_one_light_square :: proc(t: ^testing.T) {
 		t, (square_y + SANDBOX_PLAY_SIZE - 1) - floor >= LABORATORY_LIGHT_MARGIN,
 		"and of the bottom edge, and it is %d cells from it",
 		(square_y + SANDBOX_PLAY_SIZE - 1) - floor,
+	)
+}
+
+// A biome the map in hand does not paint has no origin, and every tool
+// that looks one up by name has to say so rather than reach for world
+// (0,0) under the name it was asked for. `bin/bench` did reach for it:
+// it discarded the flag, and `bench biome=Gallery` timed a coal seam
+// and labelled it the physics gallery. There was only one map when that
+// code was written, and the galleries were always on it.
+@(test)
+test_a_biome_off_this_map_is_said_so_and_not_guessed :: proc(t: ^testing.T) {
+	seed, seed_ok := laboratory_seed(t)
+	if !seed_ok do return
+
+	ordinary: Sim
+	if !testing.expect(t, sim_load(&ordinary) == .None, "the ordinary world must load") do return
+	defer sim_unload(&ordinary)
+
+	lab: Sim
+	if !testing.expect(t, sim_load(&lab, seed = seed) == .None, "the Laboratory must load") do return
+	defer sim_unload(&lab)
+
+	gallery, g_found := find_biome_index(ordinary.world.biomes, GALLERY_NAME)
+	home, h_found := find_biome_index(ordinary.world.biomes, HOMELANDS_NAME)
+	if !testing.expect(t, g_found && h_found) do return
+
+	// Each world paints one of the two and not the other, and the
+	// lookup says which rather than answering 0,0.
+	_, _, gallery_here := shot_biome_origin(ordinary.world, Biome_Id(gallery))
+	_, _, home_here := shot_biome_origin(ordinary.world, Biome_Id(home))
+	testing.expect(t, !gallery_here, "the ordinary map must not paint the physics gallery")
+	testing.expect(t, home_here, "and it must paint the homelands")
+
+	_, _, gallery_there := shot_biome_origin(lab.world, Biome_Id(gallery))
+	_, _, home_there := shot_biome_origin(lab.world, Biome_Id(home))
+	testing.expect(t, gallery_there, "the Laboratory map must paint the physics gallery")
+	testing.expect(t, !home_there, "and it must not paint the homelands")
+
+	// And the one message all three tools give names the way across.
+	from_ordinary := biome_not_on_this_map(ordinary.world.biomes, ordinary.world.seed, GALLERY_NAME)
+	testing.expectf(
+		t, strings.contains(from_ordinary, "seed=0x1AB"),
+		"from the ordinary world the message must name the seed that opens it, and it says %q",
+		from_ordinary,
+	)
+	from_lab := biome_not_on_this_map(lab.world.biomes, lab.world.seed, HOMELANDS_NAME)
+	testing.expectf(
+		t, strings.contains(from_lab, "no seed argument"),
+		"from the Laboratory it must name the way back, and it says %q",
+		from_lab,
 	)
 }

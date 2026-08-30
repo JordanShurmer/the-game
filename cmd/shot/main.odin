@@ -116,17 +116,7 @@ main :: proc() {
 		}
 		x, y, aimed := game.shot_biome_origin(sim.world, game.Biome_Id(idx))
 		if !aimed {
-			// The seed that would find it comes from the file rather
-			// than from here, so the message cannot go stale.
-			other := sim.world.biomes.laboratory.seed
-			if other != 0 && other != sim.world.seed {
-				fmt.eprintfln(
-					"%s is not painted on the map this seed opens; try seed=0x%X (see [Laboratory] in %s)",
-					options.biome, other, game.BIOMES_PATH,
-				)
-			} else {
-				fmt.eprintfln("%s is not painted on the map this seed opens", options.biome)
-			}
+			fmt.eprintfln("%s", game.biome_not_on_this_map(sim.world.biomes, sim.world.seed, options.biome))
 			os.exit(1)
 		}
 		if !options.aimed {

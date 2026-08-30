@@ -236,7 +236,11 @@ Gallery is not painted on the map this seed opens; try seed=0x1AB (see
 ```
 
 The seed in that line is read off `[Laboratory]`, not written into the
-message, so it cannot name a world the file no longer holds.
+message, so it cannot name a world the file no longer holds. From
+inside the Laboratory the same message names the way back instead, and
+`bin/shot`, `bin/bench` and the MCP server all give it: a biome the map
+in hand does not paint has no origin, and a tool that reaches for world
+(0,0) under the name it was asked for is worse than one that stops.
 
 ## What this leaves out
 

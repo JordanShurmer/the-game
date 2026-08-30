@@ -39,7 +39,13 @@ main :: proc() {
 		fmt.eprintfln("there is no biome named %q", options.biome)
 		os.exit(1)
 	}
-	x, y, _ := game.shot_biome_origin(sim.world, game.Biome_Id(index))
+	// A biome the map this seed opens does not paint has no origin, and
+	// benching world (0,0) under its name would read as a timing of it.
+	x, y, painted := game.shot_biome_origin(sim.world, game.Biome_Id(index))
+	if !painted {
+		fmt.eprintfln("%s", game.biome_not_on_this_map(sim.world.biomes, sim.world.seed, options.biome))
+		os.exit(1)
+	}
 
 	if err := game.sim_open_sandbox(&sim, options.size, options.size, x, y, 7, 0); err != .None {
 		fmt.eprintfln("a %dx%d sandbox could not be opened: %v", options.size, options.size, err)
