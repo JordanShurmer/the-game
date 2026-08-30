@@ -218,11 +218,15 @@ through its own dam the moment the world starts -- and for the water
 shader; read it before changing `src/pond.odin`, `src/water.odin`,
 `millpond()` in `tools/seed_homelands.py` or `data/shaders/water.fs`.
 `docs/physics.md` is the note for the sandbox: what a cell of matter
-does next, and in particular "The reach is the flatness", which is the
-fluid simulation -- how far a liquid or a gas looks along its own row
-for the way on, and why that one number is what makes a pond lie level.
-Read it before changing `src/sandbox_step.odin`, its vector twin
-`src/sandbox_step_simd.odin`, or a `spread` in `data/materials.txt`.
+does next, and in particular the two sections that are the fluid
+simulation. "The reach is the flatness" is how far a liquid or a gas
+looks along its own row for the way on, and why that one number is what
+makes a pond lie level. "The head and the press" is the field a body of
+liquid carries and the move that spends it, which is what levels the
+two sides of an opening under the waterline and fills a standpipe off
+the cistern beside it. Read both before changing
+`src/sandbox_step.odin`, its vector twin `src/sandbox_step_simd.odin`,
+or a `spread` in `data/materials.txt`.
 `docs/alchemy.md` is the note for the whole alchemy: the poison, the
 water and the neutral liquid the two leave, and then the salts, the
 metals and the two magics that came after. Read it before changing
