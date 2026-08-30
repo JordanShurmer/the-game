@@ -604,9 +604,15 @@ tool_sandbox_open :: proc(s: ^Sim, arguments: json.Object) -> (string, bool) {
 		}
 		px, py, painted := biome_first_pixel(s, Biome_Id(idx))
 		if !painted {
+			// The seed that would find it comes from the file rather
+			// than from here, so the message cannot go stale.
+			other := s.world.biomes.laboratory.seed
+			if other == 0 || other == s.world.seed {
+				return fmt.tprintf("%s is not painted on the map this seed opens", name), true
+			}
 			return fmt.tprintf(
-				"%s is not painted on the map this seed opens; the galleries want seed=0x1AB (see [Laboratory] in %s)",
-				name, BIOMES_PATH,
+				"%s is not painted on the map this seed opens; try seed=0x%X (see [Laboratory] in %s)",
+				name, other, BIOMES_PATH,
 			), true
 		}
 		cpp := s.world.biomes.cells_per_pixel

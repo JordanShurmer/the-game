@@ -14,16 +14,17 @@ import "core:testing"
 //
 // One seed is not that. `[Laboratory]` in data/biomes.txt names it, and
 // it opens another map picture altogether. That map is the museum: the
-// physics gallery and the alchemy gallery side by side under an open
-// sky, and rock everywhere else. Their two bedrock roofs are one floor
-// under the day, and the wizard lands on it halfway between the two
-// doors, which are the entrance shafts cut down through the top edge of
-// each gallery's own picture.
+// physics gallery at world x 512 to 1023 and the alchemy gallery at
+// x 1024 to 1535, both y -3072 to -2561, at the bottom of a cutting of
+// open sky with rock on every other side. Their two bedrock roofs are
+// one floor under the day, and the wizard lands on it halfway between
+// the two doors, which are the entrance shafts cut down through the top
+// edge of each gallery's own picture.
 //
-// The galleries keep the world coordinates every note already gives
-// them, because the Laboratory map is drawn at the same size against
-// the same origin: the physics gallery is world x 0 to 511 and the
-// alchemy gallery x 512 to 1023, both y -2560 to -2049.
+// Why there and not somewhere rounder: the whole world has to fit one
+// square of the light with room to spare on three sides, or the wizard
+// walks to the edge of the light and finds the black beyond it. See
+// test_the_whole_laboratory_is_one_light_square below.
 //
 // See docs/laboratory.md. tools/seed_laboratory.py draws the map and
 // holds it to its rules.
