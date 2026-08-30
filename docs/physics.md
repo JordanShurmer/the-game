@@ -53,14 +53,17 @@ reader knows the gap is a decision and not an oversight.
   head. Two things follow.
 
   **Water does not climb.** Fill one arm of a U bend and the other
-  stays empty: the water at the bottom has nowhere to step, and
-  nothing pushes it up the far side. Noita does not equalise across a
-  U bend either, so that part is a match with the reference and not a
-  debt. The rung that would lift it is a per-cell hydrostatic head,
-  and the hard part of writing it is that a still pond must not
-  fountain: a rule that lets pressed water rise into air will bubble a
-  settled pool through with holes unless the rise is paid for by an
-  inflow somewhere else.
+  stays empty, and two chambers joined by a gap under the waterline
+  only level up to the top of the gap: measured, a tank with a wall
+  across it and an opening at the foot of the wall settles with 719
+  cells on one side and 108 on the other, their surfaces 22 rows
+  apart. Noita does not equalise across a U bend either, so that part
+  is a match with the reference; the gap under the waterline is a real
+  limit.
+
+  The rung that would lift it was **built and measured**, and it is
+  written up here rather than shipped. See "The head and the press"
+  below.
 
   **A liquid never swaps sideways with a lighter one.** It swaps with
   a lighter one below it and steps aside only onto emptiness, so three
@@ -380,6 +383,90 @@ Read this before trying them again.
   something the world can feel. Momentum has to change what a cell may
   **do**, not the order in which it asks. See "No momentum" above for
   the form that would.
+
+### The head and the press: built, measured, and not shipped
+
+A hydrostatic head, and a move that spends it. This is the rung that
+gives communicating vessels, and it works. It is not in the tree
+because of what it costs, and it is written down in full so that the
+next person to want it starts from the measurements rather than from
+the beginning.
+
+**The field.** One `u8` a cell, `sb.head`. The low seven bits are how
+many cells of the same liquid stand over this one; bit 7 says the row
+term won.
+
+    column  = (the cell over this one is the same liquid) ? min(127, head[above] + 1) : 0
+    carried = (the cell over this one is the same liquid) ? head[above] & 0x80 : 0
+    head    = max(column, head[left] and head[right] where they are the same liquid)
+    out     = head | (head > column ? 0x80 : carried)
+
+The row term is what carries a head along a passage and out of the far
+end of it. Bit 7 has to be inherited down a column (`carried`), because
+at the foot of a short shaft the column term is one greater a row and
+would otherwise swallow the very difference it is carrying.
+
+**The pass marks nothing, ever.** A head is one number for a whole
+body of water, so a cell that moves anywhere in a lake changes it
+everywhere. A first version woke what it changed and took Lake from
+7.3 ms a tick to **39.6**. The field must travel only where matter is
+already awake, which is the only place anything can act on it.
+
+**The press.** One intent arm, the lowest priority of all: a liquid
+with bit 7 set, standing on something that is not its own kind, asks
+to go up. The move is not a climb. The cell that presses does not move
+at all: it looks along its own row, through its own liquid, for a
+column standing **two** clear cells over the top of its own, and moves
+the top cell of that column onto the top of this one. Every cell
+between is the same liquid, so that is the same picture as shifting
+the whole run one cell along, and it leaves no hole. A cell climbing
+into the air over its own head instead **foams**: it rises, the cell
+under it falls back into the hole, and the pair swap for ever. Two
+cells and not one is the anti-jitter rule, the same shape as the rise
+rule's strict test; with one, a pool locks into a permanent 2,3,2,3
+and never sleeps.
+
+**What it buys**, measured against the tree as it stands:
+
+| Shape | Without | With |
+| --- | --- | --- |
+| a standpipe beside a reservoir | pipe holds 8 cells, surfaces 12 and 41 | pipe holds 112, both surfaces at 15 |
+| a tank with a gap under the waterline | 719 cells one side, 108 the other, surfaces 13 and 35 | 420 and 405, both surfaces at 24 |
+| a still pond, 300 ticks | 0 chunks awake, 0 cells moved | 0 chunks awake, 0 cells moved |
+| a pond half under a rock lid, 1500 ticks | no bubbles | no bubbles |
+
+The still pond is safe structurally rather than by tuning: in a level
+pool the head is a function of the row alone, every neighbour holds the
+same number, the row term never wins, bit 7 is never set, and the arm
+is never even reached.
+
+**What it costs**, best of three interleaved runs on the same machine:
+
+| Bench | Without | With |
+| --- | --- | --- |
+| Lake, 200 ticks | 5.12 ms a tick | 6.4 to 7.9 |
+| Coalmine, 100 ticks | 2.29 | 2.68 to 2.99 |
+| Homelands, 300 ticks | 1.30 | 1.50 to 1.83 |
+
+About a third of the tick, and four megabytes at `SANDBOX_PLAY_SIZE`.
+Skipping the pass on dry rows and relaxing the field only every fourth
+tick were both tried and neither moved the number much: the cost is not
+the relaxation, it is that LOAD touches one more array a cell and
+INTENT asks one more question of it.
+
+**And it is not the whole of pressure.** The field is relaxed only on
+rows that are awake, so a body of water that is drawn at rest sleeps
+before the head reaches the foot of it and never presses at all:
+measured, a U bend painted full on one side and empty on the other does
+not move a cell with the press in. It works where the water is already
+going somewhere -- filling, draining, dug into -- which is where a
+player meets it, and not on a shape that starts still.
+
+So: a third of the tick, for pressure that only acts on water that is
+already moving. The whole suite passes with it, including the
+determinism checksums and the vector-agrees-with-plain test. If it is
+wanted, this section is the design; what would make it cheap is folding
+the head into the LOAD pass rather than reading a second array.
 
 ### Waking what a fluid can see
 
