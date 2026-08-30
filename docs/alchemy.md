@@ -567,6 +567,9 @@ reason.
 
 The mix is a thing that flashes, so a still is a still of one tick.
 Judge it by a run of them, 30 ticks apart, and by the pool that is
-left when they stop. Room 6's burst is brief, measured at "Layering
-seals a slow drip" above: look inside the first 150 ticks or the shot
-misses it.
+left when they stop. Room 4's burst is the brief one, measured at
+"Layering seals a slow drip" above: look inside the first 150 ticks or
+the shot misses it. Room 6 is the room that section is the answer to,
+and it is the other way about — shot at 300, 700, 1300 and 1600 ticks
+the ribbon is still hanging there, so any tick inside the run of the
+two chambers gives a picture of it.
