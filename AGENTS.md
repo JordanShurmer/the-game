@@ -6,8 +6,8 @@ Run every command from the repository root, because the data paths are
 relative to it.
 
 ```sh
-odin check src -vet     # types, and the things vet catches
-odin test src           # the whole suite, under ten seconds
+make check              # types, and the things vet catches
+make test               # the whole suite: a mark for each test
 make                    # bin/the-game, bin/game-mcp, bin/shot
 make bench              # bin/bench, which times a tick
 ```
@@ -17,13 +17,46 @@ If `odin` is not on the PATH, install it:
 the network. See `docs/toolchain.md` for what it does, and why the
 Odin repository must not be cloned to get raylib.
 
+### How loud the toolset is
+
+A run that goes right prints its result and nothing else: the files a
+build wrote, a mark for each test that passed, the PNG a shot drew.
+The talk behind it is on a ladder, and every part of the toolset reads
+the same rung:
+
+```
+0  the result, and nothing else            (the default)
+1  a line for each piece of work
+2  the detail behind each line
+3  everything, the graphics trace log included
+```
+
+```sh
+make V=2                   # the Makefile, and the compiler timing itself
+tools/test.sh -v           # the suite, with a name beside each mark
+./bin/shot biome=Lake debug=2 out=shots/lake.png
+tools/seed_tiles.py --check -vv
+sudo tools/install-toolchain.sh -v
+GAME_DEBUG=1 ./bin/bench    # the ladder in the environment, for a whole shell
+```
+
+Every one of these runs wrong with no argument at all, or with an
+argument it does not know, and prints its usage instead of guessing.
+
+When you add a message: if a run that goes right must print it, it is
+a result, and it goes to stdout with no rung. Everything else takes a
+rung and goes to stderr, so a shell can keep the result and drop the
+talk. `src/noise.odin` holds the ladder for the Odin side and
+`tools/noise.py` for the Python side.
+
 ## Measure before you optimize
 
 `src/prof.odin` times every phase of the tick and the frame, and counts
 what a tick worked: rows stepped, cells loaded, reacts, swaps. Three
 ways to read it, no tools to attach:
 
-- `./bin/bench biome=Lake ticks=300` prints the tick phases and counts.
+- `./bin/bench biome=Lake ticks=300` prints the cost of a tick, and
+  the phases and counts behind it at `debug=2`.
 - **F3** in the game window overlays the same, averaged over the last
   second.
 - A headless shot prints the whole run on exit with `profile=1`:
@@ -118,7 +151,7 @@ the legs from where the world diverged.
 ## Iterate on the world
 
 1. Change the tiles or the code.
-2. `odin test src`.
+2. `make test`.
 3. `./bin/shot ...` and look at the picture.
 4. Repeat until it reads right, then commit.
 

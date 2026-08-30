@@ -158,6 +158,10 @@ import struct
 import sys
 import zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import noise
+
 TILE = 512
 SEAM = 4
 
@@ -1830,6 +1834,7 @@ def seed_set(name, biome, colors, seed=None):
         for v in range(biome["variants"]):
             rng = random.Random(seed * 31 + value * 977 + v * 104729)
 
+            noise.say(noise.TRACE, f"{name}: tile {sig} variant {v}")
             grid = carve_interior(sig, rng, fields, corner_field, cut)
             room = ROOMS.get((name, sig, v))
             overlay = {} if room is None else room(grid, rng, colors)
@@ -1843,7 +1848,12 @@ def seed_set(name, biome, colors, seed=None):
             write_png(f"{biome['prefix']}_{sig[0]}{sig[1]}{sig[2]}{sig[3]}_{v}.png", pix)
 
     tiles = 16 * biome["variants"]
-    print(f"{name}: {tiles} tiles at {biome['prefix']}_*.png, {100 * air / (tiles * TILE * TILE):.1f}% air")
+    noise.say(
+        noise.DETAIL,
+        f"{name}: {tiles} tiles at {biome['prefix']}_*.png, "
+        f"{100 * air / (tiles * TILE * TILE):.1f}% air",
+    )
+    print(f"{noise.TICK} {name}: {tiles} tiles")
 
 
 def check_set(name, biome):
@@ -1853,7 +1863,7 @@ def check_set(name, biome):
         for v in range(biome["variants"]):
             path = f"{biome['prefix']}_{sig[0]}{sig[1]}{sig[2]}{sig[3]}_{v}.png"
             if not os.path.exists(path):
-                print(f"{name}: {path} is missing")
+                noise.fault(f"{name}: {path} is missing")
                 return False
             tiles[(sig, v)] = read_png(path)
 
@@ -1872,7 +1882,7 @@ def check_set(name, biome):
                     leader[color] = ((sig, v), pix[y][x])
                     continue
                 if pix[y][x] != leader[color][1]:
-                    print(
+                    noise.fault(
                         f"{name}: tile {sig} variant {v} and tile {leader[color][0][0]} "
                         f"variant {leader[color][0][1]} disagree at cell ({x},{y}), "
                         f"which is in the {band} band"
@@ -1884,7 +1894,7 @@ def check_set(name, biome):
     air = sum(1 for pix in tiles.values() for row in pix for c in row if c == AIR)
     percent = 100 * air / (len(tiles) * TILE * TILE)
     if faults == 0:
-        print(f"{name}: {len(tiles)} tiles, seams agree, {percent:.1f}% air")
+        noise.say(noise.DETAIL, f"{name}: {len(tiles)} tiles, seams agree, {percent:.1f}% air")
     return faults == 0
 
 
@@ -1899,7 +1909,9 @@ def main():
     parser.add_argument("--check", action="store_true", help="verify the files on disk instead of writing")
     parser.add_argument("--force", action="store_true", help="overwrite tiles that already exist")
     parser.add_argument("--seed", type=int, default=None, help="draw another set with the same rules")
+    noise.add_debug(parser)
     options = parser.parse_args()
+    noise.read_debug(options)
 
     if not os.path.exists(BIOMES_PATH):
         sys.exit(f"cannot read {BIOMES_PATH}; run this from the repository root")
@@ -1918,14 +1930,24 @@ def main():
 
     chosen = list(biomes) if (options.all or options.check) and not options.biome else options.biome
     if not chosen:
-        sys.exit("name a biome, or --all. --list shows which ones draw a set.")
+        parser.error("name a biome, or --all; --list shows which ones draw a set")
 
     for name in chosen:
         if name not in biomes:
-            sys.exit(f"{name} does not draw a tile set. --list shows which biomes do.")
+            parser.error(f"{name} draws no tile set; --list shows which biomes do")
 
     if options.check:
-        return 0 if all(check_set(name, biomes[name]) for name in chosen) else 1
+        marks = []
+        for name in chosen:
+            noise.say(noise.STEP, f"checking {name}")
+            marks.append(noise.TICK if check_set(name, biomes[name]) else noise.CROSS)
+        print("".join(marks))
+        bad = marks.count(noise.CROSS)
+        if bad:
+            print(f"{noise.CROSS} {bad} of {len(marks)} tile sets")
+            return 1
+        print(f"{noise.TICK} {len(marks)} tile sets")
+        return 0
 
     for name in chosen:
         existing = [p for p in tile_paths(biomes[name]) if os.path.exists(p)]
@@ -1936,9 +1958,13 @@ def main():
             )
 
     for name in chosen:
+        noise.say(noise.STEP, f"drawing {name}")
         seed_set(name, biomes[name], colors, options.seed)
 
-    print("\nLook at what you drew:  ./bin/shot biome=" + chosen[0] + " grid=1 out=shots/look.png")
+    noise.say(
+        noise.STEP,
+        "look at what you drew:  ./bin/shot biome=" + chosen[0] + " grid=1 out=shots/look.png",
+    )
     return 0
 
 

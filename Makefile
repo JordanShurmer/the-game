@@ -6,38 +6,80 @@
 # Built and tested against the Odin nightly of 2026-08-20. The game
 # uses `asm` templates, which no monthly release holds yet; see
 # docs/toolchain.md, "Why a nightly".
+#
+# A build says one line for each binary it wrote, and nothing else.
+# The debug ladder is V, and it is the same ladder everything else in
+# the toolset reads:
+#
+#   make          the binaries it wrote                    (V=0)
+#   make V=1      the compiler command behind each one
+#   make V=2      the compiler's own output as well
+#   make V=3      everything, the graphics trace log included
+#
+# V reaches the tests and the binaries too, as GAME_DEBUG.
 
 ODIN ?= odin
 BIN  ?= bin
+V    ?= 0
 
 SOURCES := $(wildcard src/*.odin)
 
-.PHONY: all game mcp shot bench test check run clean
+export GAME_DEBUG = $(V)
+
+# The compiler is already quiet when a build goes right: it says
+# nothing, and a warning or an error is not the normal path. So the
+# rungs here are about what the Makefile itself says. At V=0 the
+# command is hidden and only the file it wrote is named. From V=1 the
+# command is echoed, and from V=2 the compiler is asked to time itself.
+ifeq ($(V),0)
+  Q     := @
+  TIMES :=
+else ifeq ($(V),1)
+  Q     :=
+  TIMES :=
+else
+  Q     :=
+  TIMES := -show-timings
+endif
+
+# What a target says when it is done. One line, one binary.
+define wrote
+@printf '%s  %s\n' "$$(du -h $(1) | cut -f1)" "$(1)"
+endef
+
+.PHONY: all game mcp shot bench test check run clean help
 
 all: game mcp shot
+
+help:
+	@sed -n '2,20p' Makefile | cut -c3-
+	@printf '\ntargets: all game mcp shot bench test check run clean\n'
 
 # The game window.
 game: $(BIN)/the-game
 
 $(BIN)/the-game: $(SOURCES)
-	@mkdir -p $(BIN)
-	$(ODIN) build src -out:$@ -o:speed
+	$(Q)mkdir -p $(BIN)
+	$(Q)$(ODIN) build src -out:$@ -o:speed $(TIMES)
+	$(call wrote,$@)
 
 # The MCP server. An MCP client starts this binary. It loads the same
 # world and edits it through the same procedures, with no window.
 mcp: $(BIN)/game-mcp
 
 $(BIN)/game-mcp: $(SOURCES) $(wildcard cmd/mcp/*.odin)
-	@mkdir -p $(BIN)
-	$(ODIN) build cmd/mcp -out:$@ -o:speed
+	$(Q)mkdir -p $(BIN)
+	$(Q)$(ODIN) build cmd/mcp -out:$@ -o:speed $(TIMES)
+	$(call wrote,$@)
 
 # The world as a PNG, with no window. Run it from the repository root:
 #   ./bin/shot biome=Coalmine grid=1 out=shots/coalmine.png
 shot: $(BIN)/shot
 
 $(BIN)/shot: $(SOURCES) $(wildcard cmd/shot/*.odin)
-	@mkdir -p $(BIN)
-	$(ODIN) build cmd/shot -out:$@ -o:speed
+	$(Q)mkdir -p $(BIN)
+	$(Q)$(ODIN) build cmd/shot -out:$@ -o:speed $(TIMES)
+	$(call wrote,$@)
 
 # What a tick costs, on a real region of the shipped world. Run it from
 # the repository root:
@@ -45,18 +87,21 @@ $(BIN)/shot: $(SOURCES) $(wildcard cmd/shot/*.odin)
 bench: $(BIN)/bench
 
 $(BIN)/bench: $(SOURCES) $(wildcard cmd/bench/*.odin)
-	@mkdir -p $(BIN)
-	$(ODIN) build cmd/bench -out:$@ -o:speed
+	$(Q)mkdir -p $(BIN)
+	$(Q)$(ODIN) build cmd/bench -out:$@ -o:speed $(TIMES)
+	$(call wrote,$@)
 
-# The whole suite lives beside the code it covers.
+# The whole suite lives beside the code it covers. tools/test.sh is the
+# quiet front for `odin test src`: a mark for each test, and the
+# failures, with their file and line, at the end.
 test:
-	$(ODIN) test src
+	$(Q)tools/test.sh $(if $(filter-out 0,$(V)),-d$(V),)
 
 check:
-	$(ODIN) check src -vet
+	$(Q)$(ODIN) check src -vet $(TIMES) && printf '%s  src\n' "✓"
 
 run: game
-	./$(BIN)/the-game
+	$(Q)./$(BIN)/the-game
 
 clean:
-	rm -rf $(BIN)
+	$(Q)rm -rf $(BIN)

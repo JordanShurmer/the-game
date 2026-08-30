@@ -68,6 +68,10 @@ import os
 import random
 import struct
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import noise
 import zlib
 
 OUT_PATH = "data/sprites/drudge.png"
@@ -468,15 +472,19 @@ def main():
     parser.add_argument("--check", action="store_true", help="hold the file on disk to the rules")
     parser.add_argument("--seed", type=int, default=0x0C0A1, help="another hand draws it")
     parser.add_argument("--out", default=OUT_PATH)
+    noise.add_debug(parser)
     args = parser.parse_args()
+    noise.read_debug(args)
 
     if args.check:
+        noise.say(noise.STEP, f"checking {args.out}")
         faults = check(args.out)
         for fault in faults:
-            print(fault, file=sys.stderr)
+            noise.fault(fault)
         if faults:
+            print(f"{noise.CROSS} {args.out}: {len(faults)} faults")
             sys.exit(1)
-        print(f"{args.out}: {sum(ROW_FRAMES.values())} frames, and every rule holds")
+        print(f"{noise.TICK} {args.out}")
         return
 
     # The seed exists for the same reason it does in seed_wizard.py: so
@@ -484,8 +492,13 @@ def main():
     # shape. Nothing below reads randomness yet — every number is
     # authored — so today every seed draws the same drudge.
     random.Random(args.seed)
+    noise.say(noise.STEP, f"drawing {sum(ROW_FRAMES.values())} frames")
     write_png(args.out, draw_sheet())
-    print(f"{args.out}: {FRAME_W * COLUMNS}x{FRAME_H * ROWS}, {sum(ROW_FRAMES.values())} frames")
+    noise.say(
+        noise.DETAIL,
+        f"{args.out}: {FRAME_W * COLUMNS}x{FRAME_H * ROWS}, {sum(ROW_FRAMES.values())} frames",
+    )
+    print(f"{noise.TICK} {args.out}")
 
 
 if __name__ == "__main__":

@@ -44,6 +44,11 @@ commands always give the same checksum, so a run repeats exactly.
 The y axis points down. Painting uses the glyphs that list_materials and
 list_biomes print.`
 
+// The protocol owns stdout, and the graphics library writes its trace
+// there. So the server shuts that log whatever rung of the debug
+// ladder the run is on: one trace line would be a broken frame to the
+// client. Everything the server itself says goes to stderr, on a rung.
+// See src/noise.odin.
 mcp_silence_graphics_log :: proc() {
 	rl.SetTraceLogLevel(.NONE)
 }
