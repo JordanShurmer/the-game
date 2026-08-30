@@ -36,8 +36,13 @@ one is a rule about where code may live.
   panic, and on a freestanding one its path constants do not resolve.
   The package `game` imports it nowhere. Every file the game reads goes
   through `src/file.odin`, which is raylib's own reader on every target,
-  and every diagnostic goes through `src/note.odin`, which is raylib's
-  log. In the browser the data files sit inside the page, laid out by
+  and every diagnostic goes through the debug ladder in
+  `src/noise.odin`, whose three target-dependent calls -- where the rung
+  comes from, where the talk goes, where a result goes -- are answered
+  by `src/noise_desktop.odin` and, through raylib's log, by
+  `src/noise_web.odin`.
+
+  In the browser the data files sit inside the page, laid out by
   emscripten under the same names, so `data/materials.txt` is one path
   everywhere and no loader knows which target it is on.
 
@@ -48,7 +53,7 @@ one is a rule about where code may live.
 
 - **No `core:testing`.** It reaches `core:os`, and one import anywhere
   in a package stops the whole build -- so a browser build of the game
-  is a browser build of the 312 tests that live in the same files.
+  is a browser build of the tests that live in the same files.
   `src/check` is four names wide: T, expect, expectf, expect_value.
   On the desktop each is `core:testing`'s own, aliased, so `^check.T`
   **is** `^testing.T` and `odin test src` runs what it always ran. In

@@ -21,7 +21,7 @@ package game
 import "base:runtime"
 import "core:fmt"
 import "core:strconv"
-import "core:testing"
+import testing "check"
 import rl "vendor:raylib"
 
 NOISE_RESULT  :: 0

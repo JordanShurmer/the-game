@@ -2,7 +2,7 @@ package game
 
 import "core:fmt"
 import "core:strings"
-import "core:testing"
+import testing "check"
 
 // The Laboratory: the world one seed opens instead of laying the
 // ordinary map out again.

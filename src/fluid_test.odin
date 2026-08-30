@@ -1,6 +1,6 @@
 package game
 
-import "core:testing"
+import testing "check"
 
 // What water has to do to read as water.
 //
