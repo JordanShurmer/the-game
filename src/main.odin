@@ -1220,7 +1220,7 @@ draw_hud :: proc(app: ^App) {
 	// seed is a different one. See src/laboratory.odin.
 	world := world_is_laboratory(app.world.biomes, app.world.seed) ? "Laboratory" : "world"
 
-	rl.DrawRectangle(0, 0, 460, 130, rl.Fade(rl.BLACK, 0.55))
+	rl.DrawRectangle(0, 0, 620, 130, rl.Fade(rl.BLACK, 0.55))
 	rl.DrawText(
 		fmt.ctprintf(
 			"centre %d, %d   %d cell/texel   %dx zoom   %s seed %d",

@@ -348,6 +348,13 @@ now proves it by walking the wizard there with `sim_step_player`, the
 way a player really would, rather than trusting a distance check to
 stand in for reachability.
 
+One world places no drudge at all. The Laboratory is the two galleries
+and nothing else, so every column that answers all four questions is
+inside a room built to show one thing, and a pot thrown in there
+spills over the exhibit. `sim_load` skips `drudge_place` on that seed,
+and `test_the_museum_keeps_nobody` holds both ends of it: no drudge
+there, and still one in the ordinary world. See `docs/laboratory.md`.
+
 **The fourth test is that he is underground.** The first three checks
 above pass just as happily on solid ground beside the pond as they do
 in a mine shaft — solid, unembedded, in the wizard's own region, all

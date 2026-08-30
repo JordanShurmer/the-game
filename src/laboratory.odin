@@ -203,13 +203,13 @@ test_the_galleries_keep_the_coordinates_the_notes_give_them :: proc(t: ^testing.
 
 	// docs/physics.md and docs/alchemy.md give a room of each gallery a
 	// world coordinate, and every shot command in them is written from
-	// these two. Moving the museum into its own world must not move it.
+	// these two.
 	_, gx, gy, g_ok := only_region_of(t, s.world, GALLERY_NAME)
 	_, ax, ay, a_ok := only_region_of(t, s.world, ALCHEMY_NAME)
 	if !g_ok || !a_ok do return
 
-	testing.expectf(t, gx == 0 && gy == -2560, "the physics gallery starts at 0,-2560, and it is at %d,%d", gx, gy)
-	testing.expectf(t, ax == 512 && ay == -2560, "the alchemy gallery starts at 512,-2560, and it is at %d,%d", ax, ay)
+	testing.expectf(t, gx == 512 && gy == -3072, "the physics gallery starts at 512,-3072, and it is at %d,%d", gx, gy)
+	testing.expectf(t, ax == 1024 && ay == -3072, "the alchemy gallery starts at 1024,-3072, and it is at %d,%d", ax, ay)
 }
 
 @(test)
@@ -541,4 +541,83 @@ test_the_museum_keeps_nobody :: proc(t: ^testing.T) {
 	if !testing.expect(t, sim_load(&ordinary) == .None, "the ordinary world must load") do return
 	defer sim_unload(&ordinary)
 	testing.expect(t, ordinary.drudges.count == 1, "and the ordinary world must still place one")
+}
+
+// How much of the light square must be left around the museum. The
+// window is 320 cells across and 180 down at the zoom the game starts
+// at, so this is a screen either way and more.
+LABORATORY_LIGHT_MARGIN :: 256
+
+// The whole Laboratory is one light square.
+//
+// The light is a square SANDBOX_PLAY_SIZE on a side, snapped to a grid
+// of that size, and everything outside the square the wizard is in is
+// drawn black -- see docs/lighting.md. A world laid against the edge of
+// that square shows the edge, and sky in the dark reads as a hole in
+// the world rather than as the wall it is. So the museum is laid in the
+// middle of a square instead, and this is the rule that says so: the
+// two halls, and the cutting of sky over them, are all in the one
+// square the wizard lands in, with a margin of it left west, east and
+// under the museum.
+//
+// The sky reaches the top of the square, which is the one edge with no
+// margin. One tank of fuel lifts him about 260 cells, and the cutting
+// is 1024 deep, so he cannot fly to it.
+@(test)
+test_the_whole_laboratory_is_one_light_square :: proc(t: ^testing.T) {
+	s: Sim
+	if !open_laboratory(t, &s) do return
+	defer sim_unload(&s)
+
+	_, gx, gy, g_ok := only_region_of(t, s.world, GALLERY_NAME)
+	_, ax, _, a_ok := only_region_of(t, s.world, ALCHEMY_NAME)
+	if !g_ok || !a_ok do return
+
+	cpp := s.world.biomes.cells_per_pixel
+	west, east := gx, ax + cpp - 1
+	roof, floor := gy, gy + cpp - 1
+
+	// The square the wizard lands in, which is the square the light is
+	// thrown into. light_follow snaps to this grid.
+	square_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	square_y := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+
+	in_square :: proc(x, y, square_x, square_y: i32) -> bool {
+		return x >= square_x && x < square_x + SANDBOX_PLAY_SIZE &&
+			y >= square_y && y < square_y + SANDBOX_PLAY_SIZE
+	}
+
+	// Every corner of the museum, and the top of the cutting over it.
+	sky, sky_found := find_biome_index(s.world.biomes, "Sky")
+	if !testing.expect(t, sky_found) do return
+	sky_top := roof
+	for y := roof - cpp; y > roof - 16 * cpp; y -= cpp {
+		if int(world_biome_at(s.world, west, y)) != sky do break
+		sky_top = y
+	}
+
+	for corner in ([5][2]i32{{west, roof}, {east, roof}, {west, floor}, {east, floor}, {west, sky_top}}) {
+		testing.expectf(
+			t,
+			in_square(corner.x, corner.y, square_x, square_y),
+			"the cell at %d,%d is outside the light square at %d,%d, so it would be drawn black",
+			corner.x, corner.y, square_x, square_y,
+		)
+	}
+
+	testing.expectf(
+		t, west - square_x >= LABORATORY_LIGHT_MARGIN,
+		"the museum must stand clear of the west edge of the square, and it is %d cells from it",
+		west - square_x,
+	)
+	testing.expectf(
+		t, (square_x + SANDBOX_PLAY_SIZE - 1) - east >= LABORATORY_LIGHT_MARGIN,
+		"and of the east edge, and it is %d cells from it",
+		(square_x + SANDBOX_PLAY_SIZE - 1) - east,
+	)
+	testing.expectf(
+		t, (square_y + SANDBOX_PLAY_SIZE - 1) - floor >= LABORATORY_LIGHT_MARGIN,
+		"and of the bottom edge, and it is %d cells from it",
+		(square_y + SANDBOX_PLAY_SIZE - 1) - floor,
+	)
 }

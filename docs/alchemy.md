@@ -481,16 +481,15 @@ effect of the world already is.
 
 ## The alchemy gallery
 
-A second hand painted region, east of the physics gallery: map pixel
-(9,3), world x 512 to 1023, y -2560 to -2049. Same shape as the first
-one, and drawn by the same code: sixteen rooms in a four by four grid,
-each 128 cells square including its bedrock wall, doors between the
-rooms of a row, shafts down the ends.
+A second hand painted region, east of the physics gallery. Same shape
+as the first one, and drawn by the same code: sixteen rooms in a four
+by four grid, each 128 cells square including its bedrock wall, doors
+between the rooms of a row, shafts down the ends.
 
-Both galleries now live in a world of their own, opened by
-`seed=0x1AB`. The coordinates above are unchanged, because the
-Laboratory map is drawn against the same origin; every shot command
-below wants the seed in front of it. See `docs/laboratory.md`.
+Both galleries live in a world of their own now, opened by
+`seed=0x1AB`, and this one is map pixel (10,2) of it: world x 1024 to
+1535, y -3072 to -2561. Every shot command below wants the seed in
+front of it. See `docs/laboratory.md`.
 
 `tools/seed_gallery.py` and the new `tools/seed_alchemy.py` share
 `tools/museum.py`: the canvas, the room, the doors, the shafts, the
@@ -546,15 +545,15 @@ make shot
 S=seed=0x1AB   # the world the galleries are in; see docs/laboratory.md
 ./bin/shot $S biome=Alchemy out=shots/alchemy.png                       # as painted
 ./bin/shot $S biome=Alchemy ticks=600 out=shots/alchemy600.png          # after ten seconds
-./bin/shot $S x=640 y=-2560 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
-./bin/shot $S x=640 y=-2432 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
-./bin/shot $S x=896 y=-2432 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
-./bin/shot $S x=896 y=-2304 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
-./bin/shot $S x=512 y=-2176 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
+./bin/shot $S x=1152 y=-3072 w=128 h=128 scale=2 ticks=240 light=1 out=shots/mix.png   # room 2
+./bin/shot $S x=1152 y=-2944 w=128 h=128 scale=2 ticks=100 light=1 out=shots/dark.png  # room 6
+./bin/shot $S x=1408 y=-2944 w=128 h=128 scale=3 ticks=1200 out=shots/powder.png       # room 8
+./bin/shot $S x=1408 y=-2816 w=128 h=128 scale=3 ticks=200 light=1 out=shots/gleam.png # room 12
+./bin/shot $S x=1024 y=-2688 w=128 h=128 scale=3 ticks=200 light=1 out=shots/cure.png  # room 13
 ```
 
-A room of the second alchemy sits at world x `512 + 128 * col`, y
-`-2560 + 128 * row`, counting rooms 1 to 16 in reading order. Rooms 8,
+A room of the second alchemy sits at world x `1024 + 128 * col`, y
+`-3072 + 128 * row`, counting rooms 1 to 16 in reading order. Rooms 8,
 9, 11 and 14 make no light of their own, so shoot them flat: the
 picture to read there is what the colours have become, not what is lit.
 

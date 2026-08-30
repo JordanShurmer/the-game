@@ -6,9 +6,10 @@ middle of a coal seam. It now has a world of its own.
 A seed opens a world. Every seed but one opens the ordinary world:
 the village, the mouth east of it, the coal and the lake and the deep
 rock under all of it, drawn one way or another way but always the same
-places. One seed opens the Laboratory instead — the physics gallery
-and the alchemy gallery side by side under an open sky, their two
-bedrock roofs joined into one floor, and rock in every other direction.
+places. One seed opens the Laboratory instead — the physics gallery and
+the alchemy gallery side by side at the bottom of a cutting in the
+rock, their two bedrock roofs joined into one floor, and nothing else
+in the world at all.
 
 ```sh
 ./bin/the-game seed=0x1AB
@@ -96,19 +97,18 @@ it would be the wrong world under the right name.
 ## What the Laboratory is made of
 
 The map is 16 by 16 pixels drawn against the same origin as the
-ordinary one, so a room of a gallery keeps the world coordinates every
-other note already gives it.
+ordinary one, so a map pixel is a region of 512 world cells there too.
 
 | | |
 | --- | --- |
-| map pixels (0,0) to (15,2) | `Sky`, which is a light and throws the day |
-| map pixel (8,3) | `Gallery`, the physics gallery: world x 0 to 511, y -2560 to -2049 |
-| map pixel (9,3) | `Alchemy`, the alchemy gallery: world x 512 to 1023, same rows |
+| map pixels (9,0) and (9,1), (10,0) and (10,1) | `Sky`, which is a light and throws the day: the cutting |
+| map pixel (9,2) | `Gallery`, the physics gallery: world x 512 to 1023, y -3072 to -2561 |
+| map pixel (10,2) | `Alchemy`, the alchemy gallery: world x 1024 to 1535, same rows |
 | everything else | `Deep_Rock` |
 
-The rock is flush with the roofs, so the roof of the museum and the
-ground beside it are one surface at world y -2560, and the wizard can
-walk off the museum onto the rock and back.
+So the museum is 1024 cells across and 512 down, the cutting over it is
+1024 across and 1024 deep, and rock is everything else in every
+direction.
 
 `tools/seed_laboratory.py` draws the picture and `--check` holds it to
 five rules, of which three are the shape of the place:
@@ -118,12 +118,42 @@ five rules, of which three are the shape of the place:
   from one to the other.
 - **There is open sky the whole way up over both.** The roof is what
   the wizard stands on, and a roof with earth over it is a cellar.
-- **Everything else is the ground the museum is sunk in.**
+- **Everything else is the rock the museum is cut into**, the sky
+  included: the sky stops where the museum stops.
 
 ```sh
 tools/seed_laboratory.py           # draws data/biome_map_laboratory.png
 tools/seed_laboratory.py --check   # holds the file to the rules
 ```
+
+## Why it sits where it sits
+
+The light is drawn a square `SANDBOX_PLAY_SIZE` on a side at a time,
+snapped to a grid of that size, and everything outside the square the
+wizard is in is black — see `docs/lighting.md`. World x 0 to 2047 by y
+-4096 to -2049 is one of those squares.
+
+The museum used to be at world x 0 to 1023, y -2560 to -2049, which is
+the corner of that square, so its west wall and its floor lay along two
+edges of the light. Standing at the physics door, half the window was
+the black beyond the edge, and the black stood where the day should
+have been.
+
+It is laid in the middle of a square now: 512 cells of lit rock west of
+it, 512 east, 512 under it, and the cutting filling the rest above.
+`test_the_whole_laboratory_is_one_light_square` holds it there. The one
+edge with no margin is the top of the cutting, and one tank of fuel
+lifts him about 260 cells of the 1024 he would need to reach it.
+
+That move is why the two gallery notes give the rooms coordinates they
+did not give before. A room of the physics gallery is at world x
+`512 + 128 * col`, y `-3072 + 128 * row`, and a room of the alchemy
+gallery at x `1024 + 128 * col`, same rows, counting 1 to 16 in reading
+order.
+
+The sky stops where the museum stops for the same reason. Rock in the
+dark reads as rock, because that is what unlit rock looks like; sky in
+the dark reads as a hole in the world.
 
 ## The two doors
 
@@ -134,13 +164,13 @@ from the entrance shaft in the top edge. So the museum is entered from
 above, and it has exactly two ways in: the two shafts, 4 to 24 cells in
 from the west side of each gallery's own picture.
 
-On this map that puts the physics door at world x 4 to 23 and the
-alchemy door at x 516 to 535.
+On this map that puts the physics door at world x 516 to 535 and the
+alchemy door at x 1028 to 1047.
 
 The wizard lands between them. `spawn_biome = Gallery` sends
 `world_find_ground_in_region` down the middle of the physics gallery's
 region, the first solid cell it meets is the roof, and the middle of
-that region is world x 256 — about 240 cells west to one door and 260
+that region is world x 768 — about 240 cells west to one door and 260
 east to the other. He is standing on the museum with a hall under each
 foot and a door either way.
 
@@ -183,14 +213,14 @@ make shot
 ./bin/shot seed=0x1AB biome=Gallery out=shots/gallery.png            # the physics gallery
 ./bin/shot seed=0x1AB biome=Alchemy ticks=600 out=shots/alchemy.png  # the alchemy one, running
 ./bin/shot seed=0x1AB player=1 out=shots/landing.png                 # where he lands
-./bin/shot seed=0x1AB x=-256 y=-2816 w=384 h=256 step=5 out=shots/lab.png   # the whole world
+./bin/shot seed=0x1AB x=0 y=-4096 w=342 h=342 step=6 out=shots/lab.png      # the whole world
 ```
 
-The whole world in one picture is four regions across and one down, so
-`step=5` holds it. Every shot command in `docs/physics.md` and
-`docs/alchemy.md` still names the same rectangle it always did; it
-wants `seed=0x1AB` in front of it now, because that is the world those
-rectangles are in.
+That last one is the whole world in one picture, because the whole
+world is the one light square: the museum at the bottom of the
+cutting, and lit rock all round both. Every shot command in
+`docs/physics.md` and `docs/alchemy.md` wants `seed=0x1AB` in front of
+it, because that is the world those rectangles are in.
 
 Without the seed, `biome=Gallery` says so:
 
@@ -203,8 +233,8 @@ seed=0x1AB (see [Laboratory] in data/biomes.txt)
 
 The ordinary world has no way into the Laboratory and is not supposed
 to have one: they are two worlds, not two places. Map pixels (8,3) and
-(9,3) of `data/biome_map.png` are plain coal again, which is what their
-neighbours were on every side.
+(9,3) of `data/biome_map.png`, where the two galleries used to be, are
+plain coal again, which is what their neighbours were on every side.
 
 There is one other world and the loader knows its name. A third would
 be the point at which `[Laboratory]` should stop being a section and

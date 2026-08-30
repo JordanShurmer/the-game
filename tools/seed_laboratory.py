@@ -11,9 +11,26 @@ docs/laboratory.md.
 
 The world is three things and nothing else:
 
-  - the physics gallery, at map pixel (8,3), which is world x 0 to 511
-  - the alchemy gallery beside it, at (9,3), world x 512 to 1023
-  - open sky over both, and rock everywhere else
+  - the physics gallery, at map pixel (9,2), which is world x 512 to
+    1023 and y -3072 to -2561
+  - the alchemy gallery beside it, at (10,2), world x 1024 to 1535
+  - open sky over those two columns and nothing else, so the museum
+    stands at the bottom of a cutting in the rock
+
+Where the museum sits in the square is the whole of why it sits there.
+The light the game draws with is a square 2048 cells on a side, snapped
+to a grid of that size, and world x 0 to 2047 by y -4096 to -2049 is
+one of those squares. Everything outside the square the wizard is in is
+drawn black, edge and all, so a world laid against that edge shows the
+edge. The museum is 1024 by 512 and it is laid in the middle of the
+square instead: 512 cells of lit rock west of it, 512 east, 512 under
+it, and the cutting over it filling the rest. Nothing the wizard can
+walk to, and nothing one tank of fuel can fly to, has the edge of the
+square in the frame.
+
+The sky stops where the museum stops for the same reason it is a
+cutting: rock in the dark reads as rock, and sky in the dark reads as a
+hole in the world.
 
 The two galleries share a row, so their bedrock roofs are one floor
 under the sky, and the wizard lands on it between their two doors.
@@ -42,14 +59,14 @@ BIOMES_PATH = "data/biomes.txt"
 
 MAP = 16  # pixels along one edge, the same as data/biome_map.png
 
-SKY_ROWS = 3          # rows 0 to 2 are open sky
-MUSEUM_ROW = 3        # the row the two galleries sit on
-GROUND = "Deep_Rock"  # everything the museum is sunk in
+SKY_ROWS = 2          # rows 0 and 1 are the cutting over the museum
+MUSEUM_ROW = 2        # the row the two galleries sit on
+GROUND = "Deep_Rock"  # everything the museum is cut into
 SKY = "Sky"
 
 # The halls, west to east along MUSEUM_ROW. Their order is the layout:
 # the first one is the one the wizard's own region rule counts to.
-HALLS = [(8, "Gallery"), (9, "Alchemy")]
+HALLS = [(9, "Gallery"), (10, "Alchemy")]
 
 
 def read_biomes(path=BIOMES_PATH):
@@ -68,10 +85,9 @@ def read_biomes(path=BIOMES_PATH):
 def paint():
     """The map as a grid of biome names, addressed [y][x]."""
     cells = [[GROUND] * MAP for _ in range(MAP)]
-    for y in range(SKY_ROWS):
-        for x in range(MAP):
-            cells[y][x] = SKY
     for x, name in HALLS:
+        for y in range(SKY_ROWS):
+            cells[y][x] = SKY
         cells[MUSEUM_ROW][x] = name
     return cells
 
@@ -119,17 +135,15 @@ def check(path):
             if names[y][x] != SKY:
                 faults.append(f"pixel ({x},{y}) over {name} is {names[y][x]}, not {SKY}")
 
-    # Rule 4: everything that is not a hall and not sky is the ground
-    # the museum is sunk in.
+    # Rule 4: everything that is not a hall and not the sky over one is
+    # the rock the museum is cut into. The sky stops where the museum
+    # stops, so the world and the light square agree; see the header.
     halls = {x for x, _ in HALLS}
     for y in range(height):
         for x in range(width):
-            if y < SKY_ROWS:
-                want = SKY
-            elif y == MUSEUM_ROW and x in halls:
+            if y == MUSEUM_ROW and x in halls:
                 continue
-            else:
-                want = GROUND
+            want = SKY if (y < SKY_ROWS and x in halls) else GROUND
             if names[y][x] != want:
                 faults.append(f"pixel ({x},{y}) is {names[y][x]}, and it must be {want}")
 
@@ -181,7 +195,7 @@ def main():
         if faults:
             sys.exit(1)
         halls = ", ".join(name for _, name in HALLS)
-        print(f"{out}: {MAP}x{MAP}, {halls} under the open sky, every rule holds")
+        print(f"{out}: {MAP}x{MAP}, {halls} in a cutting under the open sky, every rule holds")
         return
 
     for name in [SKY, GROUND] + [n for _, n in HALLS]:
