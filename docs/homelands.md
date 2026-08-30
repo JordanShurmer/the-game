@@ -100,9 +100,52 @@ depends on the seed, so *every* picture has to be one he can land in:
 | the yard | soil, grass and the gravel track, so there is always somewhere to stand |
 
 That is why the middle of every picture is pasture with a track across
-it. It is not an oversight; it is where he lands. The pond used to be
-the other reason — it was dug into the green beside him — but the pond
-lives in the caves now; see `docs/water.md`.
+it. It is not an oversight; it is where he lands. The yard is held
+tighter than the rest of the green: the green forbids only what people
+built -- no Brick, no Thatch, no Wheat -- while the yard forbids
+everything but soil, grass, gravel and the rock and coal under them.
+Water is legal on the green and not in the yard, which is exactly the
+room the millpond needs.
+
+## The millpond
+
+One village of the twelve has a mill, and the mill is the only water on
+the surface of the world. `millpond()` in the seeder draws it, west to
+east: a pond dug into the green with a shelving bank, a stone dam
+across it, a spillway cut clean through the foot of the dam, a pool
+under the spillway drawn dry, and a slipway out of the pool that the
+track through the village runs down. The pond is drawn full, five cells
+over the head of the spillway, so the first tick of the world sends it
+through the dam and down into the pool.
+
+It is at local x 96 to 206, which is west of the yard and inside the
+green. That span is the one place in a picture where it can go, and the
+reason is in the two spans above: the yard (232 to 280) may hold no
+water at any depth, and the plot spans east and west of the green are
+full of what people built. The site is levelled first -- a mill site is
+the one place in a village where the ground was worked flat on purpose
+-- and `level_site` ramps the ground back to the line it had at each
+end, a cell a column, so no step out of the works is more than a
+wizard's stride.
+
+Three things about it that are easy to get wrong:
+
+- **The spillway is a hole through the dam, not a hole in it.** The
+  picture is a section: the dam's seven columns are its thickness, so
+  an opening has to be cut across all seven or the water never reaches
+  it. Two drafts of this drew a neat notch in the middle of the dam and
+  watched the pond sit there for fifteen hundred ticks.
+- **The bowl is Rock, all of it.** Dirt, Loam, Gravel and Sand are
+  powders heavier than water, so an unlined bank walks into the pond as
+  soon as the sandbox reaches it.
+- **`--check` will not catch a pond.** `check_walkable` only faults on
+  a step made of Grass, Dirt, Loam, Gravel or Sand, so a stone-faced
+  dam or coping of any height passes it for free. Judge the mill by the
+  picture and by walking it. The Odin tests in `src/pond.odin` are the
+  gate that does hold it.
+
+`docs/water.md` says what the water then does, and
+`docs/physics.md`, "The reach is the flatness", says why it does it.
 
 ## The strata, and why nothing under the fields is hollow
 
@@ -189,6 +232,9 @@ Five materials came with it, and not a line of Odin came with them:
 | `Wheat` | the standing crop | the most flammable thing in the world |
 | `Thatch` | a roof of reed and straw | stands like timber, burns like a crop |
 | `Brick` | fired clay, the walls of a house | not at all |
+
+And `Water`, which is not new and is not the village's, but the mill is
+where it first stands in the daylight.
 
 Grass and Wheat are `state = Brush`, which is new with the homelands:
 matter that holds its cell against sand and water the way a solid does,
