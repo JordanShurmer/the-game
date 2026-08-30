@@ -83,19 +83,25 @@ sandbox_step_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 	prof.count[.Rows_Stepped] += 1
 	prof.count[.Cells_Loaded] += int(x1 - x0 + 1)
 
-	if sandbox_load_row(sb, table, y, x0, x1) {
+	hot, wet := sandbox_load_row(sb, table, y, x0, x1)
+	if hot {
 		prof.count[.Hot_Rows] += 1
 		if sandbox_hot_row(sb, table, y, x0, x1) {
-			sandbox_load_row(sb, table, y, x0, x1)
+			_, wet = sandbox_load_row(sb, table, y, x0, x1)
 		}
 	}
+	// The head is a liquid's alone, so a dry row -- which is most of the
+	// world -- never pays for it. A row with no liquid in it also has no
+	// head in it to go stale, because the pass writes zero wherever the
+	// cell is not a liquid.
+	if wet do sandbox_head_row(sb, table, y, x0, x1)
 	if sandbox_intent_row(sb, y, x0, x1) {
 		prof.count[.Moving_Rows] += 1
 		sandbox_apply_row(sb, table, y, x0, x1)
 	}
 }
 
-sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (hot: bool) {
+sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) -> (hot, wet: bool) {
 	lo := max(x0 - 1, 0)
 	hi := min(x1 + 1, sb.width - 1)
 	r  := &sb.rows
@@ -111,9 +117,11 @@ sandbox_load_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) ->
 
 		r.here[x + 1] = table.weight[c] | wall
 		r.kind[x + 1] = Cell_Kind(u16(table.kind[c]) &~ wall)
+		r.head[x + 1] = u16(sb.head[i]) &~ wall
 		hot ||= (table.work[c] != {} || sb.lifetime[i] > 0) && !sb.moved[i]
+		wet ||= table.kind[c] == .Liquid
 	}
-	return hot
+	return hot, wet
 }
 
 sandbox_load_weights :: proc(sb: ^Sandbox, table: Material_Table, out: []u16, y, lo, hi: i32) {
@@ -303,6 +311,9 @@ sandbox_intent_cell :: proc(sb: ^Sandbox, y, x: i32) -> (dx, dy: i16) {
 		return i16(side), 0
 	case climbs && sandbox_spreads(r.here[far], r.below[far]):
 		return i16(-side), 0
+
+	case floats && sandbox_presses(r.head[i], w, r.below[i]):
+		return 0, -1
 	}
 	return 0, 0
 }
@@ -320,6 +331,13 @@ sandbox_apply_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 		kind := sb.rows.kind[x + 1]
 		if dy == 0 && (kind == .Liquid || kind == .Riser) {
 			sandbox_flow(sb, table, x, y, dx, kind == .Liquid ? 1 : -1)
+			continue
+		}
+		// Two arms send a liquid up: the rise rule, which wants a
+		// heavier liquid over it, and the press, which does not. One
+		// test tells them apart.
+		if kind == .Liquid && dy < 0 && !sandbox_heavier(sb.rows.here[x + 1], sb.rows.above[x + 1]) {
+			sandbox_press(sb, table, x, y)
 			continue
 		}
 		sandbox_slide(sb, table, x, y, dx, dy)
@@ -408,6 +426,180 @@ sandbox_flow :: proc(sb: ^Sandbox, table: Material_Table, x, y, side, ahead: i32
 // length of a row.
 sandbox_wake_reach :: proc(sb: ^Sandbox, x, y, k: i32) {
 	sandbox_mark_box(sb, x - k - 1, y - 1, x + k + 1, y + 1)
+}
+
+// How deep a body of liquid stands over a cell, and whether more of it
+// stands there than the cell's own column explains.
+//
+// The low seven bits are the head: one more than the cell over this one,
+// where that cell is the same liquid, and otherwise nothing. That alone
+// is a column count, and a column count knows nothing about the water
+// round the corner. So the row term takes the greatest head of a
+// same-liquid neighbour on this row as well, which is how a head walks
+// along a passage and out of the far end of it, and how the water at
+// the foot of one shaft learns that a taller shaft stands on the same
+// floor.
+//
+// Bit 7 says the row term won: there is head here that this column
+// cannot account for, and something must give. That bit is the whole
+// gate on the press, and it is inherited down a column, because at the
+// foot of a short shaft the column term is one greater a row and would
+// otherwise swallow the very difference it is carrying.
+//
+// **The pass marks nothing, ever.** A head is one number for a whole
+// body of water, so a cell that moves anywhere in a lake changes it
+// everywhere, and a pass that woke what it changed woke the lake:
+// measured, Lake went from 7.3 ms a tick to 39.6. Instead the field
+// travels only where matter is already awake, which is the only place
+// anything can act on it, and a settled pool's field is frozen because
+// nothing in it changed.
+SANDBOX_HEAD_MAX   :: 127
+SANDBOX_HEAD_PRESS :: 0x80
+
+// The whole field at once, for a sandbox that has just been filled from
+// the world. The step relaxes the field only on rows that are awake, and
+// water drawn at rest sleeps on its second tick -- long before a head has
+// travelled the depth of it -- so a pond that is authored full would
+// never learn it stands over anything. This gives it the field it has
+// earned before the first tick: one pass down, both ways along every
+// row, which is all the relaxation a body needs when nothing has moved
+// yet.
+sandbox_head_fill :: proc(sb: ^Sandbox, table: Material_Table) {
+	for y in i32(0) ..< sb.height {
+		sandbox_head_sweep(sb, table, y, 0, sb.width - 1, true)
+		sandbox_head_sweep(sb, table, y, 0, sb.width - 1, false)
+	}
+}
+
+sandbox_head_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
+	sandbox_head_sweep(sb, table, y, x0, x1, sb.tick & 1 == 0)
+}
+
+// One sweep of the relaxation, left to right or right to left. The row
+// term is a running maximum, so it only travels the way the sweep goes;
+// the step alternates the direction by tick so a head reaches both ends
+// of a passage, and the fill sweeps both ways at once so a world that
+// opens with water already in it starts with the field it has earned.
+sandbox_head_sweep :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32, rightward: bool) {
+	base := sandbox_index(sb, 0, y)
+	first, last, step := x0, x1 + 1, i32(1)
+	if !rightward do first, last, step = x1, x0 - 1, -1
+
+	for x := first; x != last; x += step {
+		i := base + int(x)
+		c := sb.cells[i]
+		out := u8(0)
+		if table.kind[c] == .Liquid {
+			column, carried := u8(0), u8(0)
+			if y > 0 {
+				j := i - int(sb.width)
+				if sb.cells[j] == c {
+					h := sb.head[j] & SANDBOX_HEAD_MAX
+					column = h < SANDBOX_HEAD_MAX ? h + 1 : SANDBOX_HEAD_MAX
+					carried = sb.head[j] & SANDBOX_HEAD_PRESS
+				}
+			}
+			head := column
+			if x > 0 && sb.cells[i - 1] == c do head = max(head, sb.head[i - 1] & SANDBOX_HEAD_MAX)
+			if x < sb.width - 1 && sb.cells[i + 1] == c do head = max(head, sb.head[i + 1] & SANDBOX_HEAD_MAX)
+			out = head | (head > column ? SANDBOX_HEAD_PRESS : carried)
+		}
+		sb.head[i] = out
+		sb.rows.head[x + 1] = u16(out) &~ (u16(0) - u16(sb.moved[i]))
+	}
+}
+
+// A liquid presses when a deeper body than its own column stands over it
+// and it rests on something that is not its own kind. The second test is
+// what makes a column ask once a tick rather than once for every cell in
+// it: only the foot of a column ever asks.
+sandbox_presses :: #force_inline proc "contextless" (head, self, under: u16) -> bool {
+	return head & SANDBOX_HEAD_PRESS != 0 && under != self
+}
+
+// Carrying a head round a corner and up a shaft.
+//
+// The cell that presses does not move. It looks along the row it stands
+// in, through its own liquid, for a column of that liquid standing two
+// clear cells over the top of its own, and moves the top cell of that
+// column onto the top of this one. Every cell between the two is the
+// same liquid, so taking the far end is the same picture in the grid as
+// shifting the whole run one cell along, and it leaves no hole anywhere
+// -- which is why this and not a cell climbing into the air over its own
+// head, which foams: the cell rises, the cell under it falls back into
+// the hole, and the pair swap for ever.
+//
+// Two clear cells and not one. One press drops the far surface a cell
+// and lifts this one a cell, so a difference of one would cross over and
+// press straight back: measured, a pool locked into a permanent 2,3,2,3
+// and never slept. It is the same shape as the rise rule's strict test.
+//
+// It marks nothing when it finds nothing, which is what leaves a settled
+// pool asleep -- and in a level pool nothing sets bit 7 at all, so this
+// is never even called.
+sandbox_press :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
+	m := sb.cells[sandbox_index(sb, x, y)]
+	reach := i32(table.materials[m].spread)
+
+	// The top of this column, and the cell over it, which must be open.
+	ys := y
+	for _ in i32(0) ..< reach {
+		ny := ys - 1
+		if !sandbox_in_bounds(sb, x, ny) do return false
+		if sb.cells[sandbox_index(sb, x, ny)] != m do break
+		ys = ny
+	}
+	over := ys - 1
+	if !sandbox_in_bounds(sb, x, over) do return false
+	oi := sandbox_index(sb, x, over)
+	if sb.cells[oi] != MATERIAL_AIR || sb.moved[oi] do return false
+
+	side := 1 - 2 * i32(sandbox_side_bit(sb, x, y))
+	for s in ([2]i32{side, -side}) {
+		for k in i32(1) ..= reach {
+			nx := x + s * k
+			if !sandbox_in_bounds(sb, nx, y) do break
+			if sb.cells[sandbox_index(sb, nx, y)] != m do break // the body ends here
+
+			high := over - 1
+			if !sandbox_in_bounds(sb, nx, high) do continue
+			if sb.cells[sandbox_index(sb, nx, high)] != m do continue
+
+			ts := high
+			for _ in i32(0) ..< reach {
+				ny := ts - 1
+				if !sandbox_in_bounds(sb, nx, ny) do break
+				if sb.cells[sandbox_index(sb, nx, ny)] != m do break
+				ts = ny
+			}
+			if sb.moved[sandbox_index(sb, nx, ts)] do continue
+			free := ts - 1
+			if !sandbox_in_bounds(sb, nx, free) do continue
+			if sb.cells[sandbox_index(sb, nx, free)] != MATERIAL_AIR do continue // under a lid
+
+			if !sandbox_press_move(sb, nx, ts, x, over) do return false
+			sandbox_wake_reach(sb, x, y, k)
+			return true
+		}
+	}
+	return false
+}
+
+// The press moves two cells that are not neighbours, so it wakes each
+// end itself: sandbox_swap's one box would wake every chunk between them.
+sandbox_press_move :: proc(sb: ^Sandbox, sx, sy, dx, dy: i32) -> bool {
+	from := sandbox_index(sb, sx, sy)
+	to   := sandbox_index(sb, dx, dy)
+	if sb.moved[from] || sb.moved[to] do return false
+
+	prof.count[.Swaps] += 1
+	sb.cells[from], sb.cells[to] = sb.cells[to], sb.cells[from]
+	sb.lifetime[from], sb.lifetime[to] = sb.lifetime[to], sb.lifetime[from]
+	sb.moved[from] = true
+	sb.moved[to] = true
+	sandbox_mark(sb, sx, sy)
+	sandbox_mark(sb, dx, dy)
+	return true
 }
 
 sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {

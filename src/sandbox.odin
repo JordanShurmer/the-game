@@ -39,6 +39,7 @@ Sandbox :: struct {
 	cells:    []Cell,
 	lifetime: []i16,
 	moved:    []bool,
+	head:     []u8,
 	width:    i32,
 	height:   i32,
 
@@ -67,6 +68,7 @@ Sandbox :: struct {
 }
 
 Sandbox_Rows :: struct {
+	head:  []u16,
 	above: []u16,
 	here:  []u16,
 	below: []u16,
@@ -83,6 +85,7 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.cells = make([]Cell, count, allocator)
 	sb.lifetime = make([]i16, count, allocator)
 	sb.moved = make([]bool, count, allocator)
+	sb.head = make([]u8, count, allocator)
 	sb.width = width
 	sb.height = height
 	sb.seed = seed
@@ -97,6 +100,7 @@ sandbox_make :: proc(width, height: i32, seed: u64, allocator := context.allocat
 	sb.dirty_rows = make([]u64, chunk_count, allocator)
 	sb.next_dirty_rows = make([]u64, chunk_count, allocator)
 
+	sb.rows.head  = make([]u16, width + 2, allocator)
 	sb.rows.above = make([]u16, width + 2, allocator)
 	sb.rows.here  = make([]u16, width + 2, allocator)
 	sb.rows.below = make([]u16, width + 2, allocator)
@@ -117,10 +121,12 @@ sandbox_destroy :: proc(sb: ^Sandbox, allocator := context.allocator) {
 	delete(sb.cells, allocator)
 	delete(sb.lifetime, allocator)
 	delete(sb.moved, allocator)
+	delete(sb.head, allocator)
 	delete(sb.dirty, allocator)
 	delete(sb.next_dirty, allocator)
 	delete(sb.dirty_rows, allocator)
 	delete(sb.next_dirty_rows, allocator)
+	delete(sb.rows.head, allocator)
 	delete(sb.rows.above, allocator)
 	delete(sb.rows.here, allocator)
 	delete(sb.rows.below, allocator)
@@ -160,6 +166,8 @@ sandbox_fill_from_world :: proc(sb: ^Sandbox, world: World, origin_x, origin_y: 
 		sb.lifetime[i] = material_start_life(world.materials, c)
 	}
 	mem.zero_slice(sb.moved)
+	mem.zero_slice(sb.head)
+	sandbox_head_fill(sb, world.materials)
 	bang_forget_all(&sb.bangs)
 	spark_forget_all(&sb.sparks)
 
@@ -285,6 +293,10 @@ sandbox_checksum :: proc(sb: ^Sandbox) -> u64 {
 		hash *= FNV_PRIME
 	}
 	for b in slice.to_bytes(sb.lifetime) {
+		hash ~= u64(b)
+		hash *= FNV_PRIME
+	}
+	for b in sb.head {
 		hash ~= u64(b)
 		hash *= FNV_PRIME
 	}

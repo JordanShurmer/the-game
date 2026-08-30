@@ -14,9 +14,11 @@ over the bottom.
 
 This note says where the two ponds are, how the fireflies find the
 first, where the shader came from, what it draws, and what the phase
-leaves out. `docs/physics.md`, "The reach is the flatness", says what
-makes the water move at all, and it is worth reading first: a pond
-that reads as a pond is a pond that has found its level.
+leaves out. `docs/physics.md` says what makes the water move at all, and it is
+worth reading first: "The reach is the flatness" for how a pond finds
+its level, and "The head and the press" for how a body of it carries a
+head, which is what levels the two sides of an opening under the
+waterline.
 `docs/lighting.md` says how the fireflies light the place, because
 they are a light and belong to the same machinery as the orb and the
 crystals.

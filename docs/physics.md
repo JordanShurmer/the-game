@@ -20,6 +20,7 @@ behaviour the game is known for.
 | Powder falls and piles | Already done |
 | Liquid falls, pools, and layers by density | Falling and pooling were done. Layering was not: see "The rise rule". Pooling was not enough either: see "The reach is the flatness" |
 | Liquid finds its level | **New**: `sandbox_flow`, and the `spread` of a material |
+| Liquid carries a head, so a submerged opening levels both sides | **New**: `sb.head` and `sandbox_press`. Noita does not do this one |
 | Gas climbs and gathers under a ceiling | Climbing was done. Gathering was not: a gas heaped in the corner it came up in. `sandbox_flow` runs it along the roof |
 | Fire spreads along fuel and leaves smoke | Already done |
 | Wood burns for a time, then becomes ash | Data only: `burns_to` a burning material with a `lifetime` and a `decays_to` |
@@ -47,23 +48,19 @@ reader knows the gap is a decision and not an oversight.
   is local to the damage that caused it. The rung that adds it is a
   flood fill from the anchored cells of a chunk, run only where a
   chunk was cut.
-- **No pressure, and no sideways exchange between liquids.** A pool
-  finds its own level now -- see "The reach is the flatness" -- but it
-  does that by looking along the row it lies in, not by carrying a
-  head. Two things follow.
+- **No siphon, and no sideways exchange between liquids.** A pool finds
+  its level and carries a head now -- see "The reach is the flatness"
+  and "The head and the press" -- so a U bend stands level in both its
+  arms and a standpipe fills off the cistern beside it. Two things it
+  still will not do.
 
-  **Water does not climb.** Fill one arm of a U bend and the other
-  stays empty, and two chambers joined by a gap under the waterline
-  only level up to the top of the gap: measured, a tank with a wall
-  across it and an opening at the foot of the wall settles with 719
-  cells on one side and 108 on the other, their surfaces 22 rows
-  apart. Noita does not equalise across a U bend either, so that part
-  is a match with the reference; the gap under the waterline is a real
-  limit.
-
-  The rung that would lift it was **built and measured**, and it is
-  written up here rather than shipped. See "The head and the press"
-  below.
+  **The head goes down and along, never up over a sill.** Nothing in
+  the field carries tension, so an inverted U does not run: a body
+  cannot pull water over a lip and down the far side of it. And the
+  walk that spends a head reads one row, so two columns equalise when
+  they lie on a common row of their own liquid within `spread` cells of
+  each other, and not otherwise. That is the honest shape of
+  communicating vessels here.
 
   **A liquid never swaps sideways with a lighter one.** It swaps with
   a lighter one below it and steps aside only onto emptiness, so three
@@ -352,13 +349,24 @@ So it is the one number that says how runny a fluid is, and it is a
 column in `data/materials.txt`: water 64 and level, oil 24, sludge 12,
 lava 3 and keeping the slope of a flow.
 
-**What it costs is nothing, because it is nearly free where it does
-not apply.** The look stops at the first cell it cannot enter, and
-inside a body of water that is the cell next door, so a submerged cell
-pays one comparison. Only a cell with open row beside it looks far,
-and a pool has those at its two ends. Both benchmarks came out faster
-than the step before: Lake 5.40 -> 5.12 ms a tick, Coalmine 2.56 ->
-2.29, because water settles sooner and sleeps.
+**What it costs is nearly nothing, because it is free where it does not
+apply.** The look stops at the first cell it cannot enter, and inside a
+body of water that is the cell next door, so a submerged cell pays one
+comparison. Only a cell with open row beside it looks far, and a pool
+has those at its two ends. Measured, `./bin/bench`, interleaved best of
+seven -- read the pairs, not the digits, and see "Measure before you
+optimize" in AGENTS.md for the method:
+
+| Bench | Before | With the look |
+| --- | --- | --- |
+| Lake, 200 ticks | 4.815 ms a tick | 4.952 (+3%) |
+| Coalmine, 100 ticks | 2.142 | 2.251 (+5%) |
+| Homelands, 300 ticks | 1.358 | 1.371 (+1%) |
+| Cavemouth, 300 ticks | 3.499 | 4.031 (+15%) |
+
+Cavemouth is the one that pays, and it pays because it has water in it
+that used to be stuck and now runs. A homelands region with no mill in
+it comes out bit-identical and costs the same.
 
 ### Two things tried there that did not pay
 
@@ -384,13 +392,14 @@ Read this before trying them again.
   **do**, not the order in which it asks. See "No momentum" above for
   the form that would.
 
-### The head and the press: built, measured, and not shipped
+### The head and the press
 
-A hydrostatic head, and a move that spends it. This is the rung that
-gives communicating vessels, and it works. It is not in the tree
-because of what it costs, and it is written down in full so that the
-next person to want it starts from the measurements rather than from
-the beginning.
+The look levels a free surface. It does nothing at all for water that
+is already under water, because a submerged cell has nowhere to step:
+before this, a tank with a wall across it and an opening at the foot of
+the wall settled with 719 cells on one side and 108 on the other, their
+surfaces 22 rows apart, and held that for ever. Pressure is what closes
+that, and pressure is a field.
 
 **The field.** One `u8` a cell, `sb.head`. The low seven bits are how
 many cells of the same liquid stand over this one; bit 7 says the row
@@ -401,72 +410,108 @@ term won.
     head    = max(column, head[left] and head[right] where they are the same liquid)
     out     = head | (head > column ? 0x80 : carried)
 
-The row term is what carries a head along a passage and out of the far
-end of it. Bit 7 has to be inherited down a column (`carried`), because
-at the foot of a short shaft the column term is one greater a row and
-would otherwise swallow the very difference it is carrying.
+The column term alone is a depth count, and a depth count knows nothing
+about the water round the corner. The **row term** -- the greatest head
+of a same-liquid neighbour on this row -- is what walks a head along a
+passage and out of the far end of it, and it is why this is a field and
+not a column. It is a running maximum, so it travels the way the sweep
+goes: the step alternates the direction by tick, and the fill sweeps
+both ways.
 
-**The pass marks nothing, ever.** A head is one number for a whole
-body of water, so a cell that moves anywhere in a lake changes it
-everywhere. A first version woke what it changed and took Lake from
-7.3 ms a tick to **39.6**. The field must travel only where matter is
-already awake, which is the only place anything can act on it.
+Bit 7 has to be **inherited down a column** (`carried`), because at the
+foot of a short shaft the column term is one greater a row and would
+otherwise swallow the very difference it is carrying. It never sticks:
+it is recomputed every pass and clears from the top down as soon as the
+row term stops winning.
+
+**The pass marks nothing, ever.** A head is one number for a whole body
+of water, so a cell that moves anywhere in a lake changes it
+everywhere. A version that woke what it changed took Lake from 7.3 ms a
+tick to **39.6**. The field travels only where matter is already awake,
+which is the only place anything can act on it.
+
+**And so it has to be seeded.** Water drawn into the world at rest
+sleeps on its second tick -- long before a head could travel the depth
+of it -- so a pond that is authored full would never learn it stands
+over anything. `sandbox_head_fill` gives a sandbox the whole field when
+it is filled from the world: one pass down, both ways along every row,
+which is all the relaxation a body needs when nothing has moved yet.
+Without it a U bend painted full on one side does not move a cell.
 
 **The press.** One intent arm, the lowest priority of all: a liquid
-with bit 7 set, standing on something that is not its own kind, asks
-to go up. The move is not a climb. The cell that presses does not move
-at all: it looks along its own row, through its own liquid, for a
-column standing **two** clear cells over the top of its own, and moves
-the top cell of that column onto the top of this one. Every cell
-between is the same liquid, so that is the same picture as shifting
-the whole run one cell along, and it leaves no hole. A cell climbing
-into the air over its own head instead **foams**: it rises, the cell
-under it falls back into the hole, and the pair swap for ever. Two
-cells and not one is the anti-jitter rule, the same shape as the rise
-rule's strict test; with one, a pool locks into a permanent 2,3,2,3
-and never sleeps.
+with bit 7 set, standing on something that is not its own kind, asks to
+go up. Standing on something else is what makes a column ask once a
+tick rather than once for every cell in it.
 
-**What it buys**, measured against the tree as it stands:
+The move is not a climb. The cell that presses does not move at all: it
+looks along its own row, through its own liquid, for a column standing
+**two** clear cells over the top of its own, and moves the top cell of
+that column onto the top of this one. Every cell between is the same
+liquid, so that is the same picture as shifting the whole run one cell
+along, and it leaves no hole. A cell climbing into the air over its own
+head instead **foams**: it rises, the cell under it falls back into the
+hole, and the pair swap for ever.
+
+Two cells and not one is the anti-jitter rule, the same shape as the
+rise rule's strict test. With one, a press drops the far surface a cell
+and lifts this one a cell, so a difference of one crosses over and
+presses straight back: measured, a pool locked into a permanent
+2,3,2,3, thirty swaps a tick, and never slept.
+
+**What it buys**, measured:
 
 | Shape | Without | With |
 | --- | --- | --- |
-| a standpipe beside a reservoir | pipe holds 8 cells, surfaces 12 and 41 | pipe holds 112, both surfaces at 15 |
-| a tank with a gap under the waterline | 719 cells one side, 108 the other, surfaces 13 and 35 | 420 and 405, both surfaces at 24 |
+| a tank with a gap under the waterline | 719 cells one side, 108 the other, surfaces 13 and 35 | 418 and 407, both surfaces at 24 |
+| a standpipe off a cistern | pipe holds 8 cells, surfaces 12 and 41 | pipe holds 120, surfaces 15 and 13 |
+| a U bend, painted full on one side | right arm 30 cells, surfaces 6 and 38 | surfaces 22 and 21 |
 | a still pond, 300 ticks | 0 chunks awake, 0 cells moved | 0 chunks awake, 0 cells moved |
-| a pond half under a rock lid, 1500 ticks | no bubbles | no bubbles |
+| a pond half under a rock lid, 1200 ticks | no bubble | no bubble |
 
-The still pond is safe structurally rather than by tuning: in a level
-pool the head is a function of the row alone, every neighbour holds the
-same number, the row term never wins, bit 7 is never set, and the arm
-is never even reached.
+**The still pond is safe structurally, not by tuning.** In a level pool
+the head is a function of the row alone, so every same-liquid neighbour
+on a row holds the same number, the row term never wins, bit 7 is never
+set anywhere, and `sandbox_presses` is false for every cell. The arm is
+not merely declined -- it is never reached, the row's `moving` stays
+false, and APPLY never runs.
+`test_a_settled_pond_goes_back_to_sleep` and
+`test_a_pond_under_a_lid_holds_no_bubble` hold both halves of that.
 
-**What it costs**, best of three interleaved runs on the same machine:
+**What it costs**, `./bin/bench`, interleaved best of seven:
 
-| Bench | Without | With |
+| Bench | The look | And the press |
 | --- | --- | --- |
-| Lake, 200 ticks | 5.12 ms a tick | 6.4 to 7.9 |
-| Coalmine, 100 ticks | 2.29 | 2.68 to 2.99 |
-| Homelands, 300 ticks | 1.30 | 1.50 to 1.83 |
+| Lake, 200 ticks | 4.952 ms a tick | 7.435 (+50%) |
+| Coalmine, 100 ticks | 2.251 | 2.764 (+23%) |
+| Homelands, 300 ticks | 1.371 | 1.509 (+10%) |
+| Cavemouth, 300 ticks | 4.031 | 4.655 (+15%) |
 
-About a third of the tick, and four megabytes at `SANDBOX_PLAY_SIZE`.
-Skipping the pass on dry rows and relaxing the field only every fourth
-tick were both tried and neither moved the number much: the cost is not
-the relaxation, it is that LOAD touches one more array a cell and
-INTENT asks one more question of it.
+Plus one byte a cell, which is four megabytes at `SANDBOX_PLAY_SIZE`.
 
-**And it is not the whole of pressure.** The field is relaxed only on
-rows that are awake, so a body of water that is drawn at rest sleeps
-before the head reaches the foot of it and never presses at all:
-measured, a U bend painted full on one side and empty on the other does
-not move a cell with the press in. It works where the water is already
-going somewhere -- filling, draining, dug into -- which is where a
-player meets it, and not on a shape that starts still.
+Lake is the honest worst case and is not a place: it is a whole region
+of nothing but water and oil, all of it awake and separating. **In the
+game the press does not show.** A headless run of 300 ticks standing in
+the village spends 0.43 ms a tick in `Step_Rows` with it and 0.47
+without, inside a frame that is otherwise sixteen.
 
-So: a third of the tick, for pressure that only acts on water that is
-already moving. The whole suite passes with it, including the
-determinism checksums and the vector-agrees-with-plain test. If it is
-wanted, this section is the design; what would make it cheap is folding
-the head into the LOAD pass rather than reading a second array.
+Two things were tried to make the field cheaper and neither moved the
+number: skipping it on dry rows -- which is in, because it is free, but
+worth nothing where the water is -- and relaxing it only every fourth
+tick. The cost is not the relaxation. It is that LOAD touches one more
+array a cell and INTENT asks one more question of it, so what would
+make it cheap is folding the head into LOAD's own loop rather than
+reading a second array.
+
+**The gas press was built and cut.** The mirror was free to write --
+one sign, exactly as `sandbox_flow` does it -- so it was written: head
+counts gas below, and the arm sends a pressed gas down. It never fired
+once on the shipped world, and where it did fire it made things worse:
+`test_a_gas_runs_along_the_roof_it_gathers_under` went from thirty
+columns of roof to twenty-seven and failed. Hydrostatic head is the
+wrong physics for a gas. What fills a room is volume pressure, and a
+gas that has reached the ceiling as a one-cell sheet has no column to
+redistribute. `sandbox_flow` already gives a gas the ceiling run, and
+it does it better.
 
 ### Waking what a fluid can see
 
@@ -1064,6 +1109,7 @@ and no pass carries an answer from one cell to the next.
 | --- | --- |
 | LOAD | reads the row, and the rows above and below it, into weights and kinds |
 | HOT | the few cells with a lifetime, a reaction, or fire to spread |
+| HEAD | on a row that holds liquid, how deep a body stands over each cell |
 | INTENT | compares the three rows and writes the one step each cell wants |
 | APPLY | moves the cells that want to move, and for a fluid going sideways looks along the row for the way on first |
 
@@ -1174,6 +1220,8 @@ two builds rather than running one after the other.
 | `BLAST_FLING` | 2 | cells a scattered grain flies per unit of lift |
 | `SANDBOX_LANES` | 16 | cells the vector intent pass answers at once |
 | `SPREAD_DEFAULT` | 16 | how far a fluid looks along its row when its row in `data/materials.txt` names no `spread` |
+| `SANDBOX_HEAD_MAX` | 127 | the deepest head a cell can hold, in the low seven bits of `sb.head` |
+| `SANDBOX_HEAD_PRESS` | 0x80 | the eighth bit: more head stands here than this column explains |
 | `spread` (Water) | 64 | and what water names, which is why a pond reads level |
 | `spread` (Lava) | 3 | and what lava names, which is why a flow keeps its slope |
 | `ROOM` (tools/museum.py) | 128 | cells along one edge of a room |

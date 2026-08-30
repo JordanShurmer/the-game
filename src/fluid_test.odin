@@ -35,6 +35,10 @@ fluid_fill :: proc(sb: ^Sandbox, table: Material_Table, x0, y0, x1, y1: i32, nam
 		}
 	}
 	sandbox_mark_all(sb)
+	// The world hands a filled sandbox its head field before the first
+	// tick, because water drawn at rest sleeps before the field could
+	// grow. A test that paints its own water has to do the same.
+	sandbox_head_fill(sb, table)
 }
 
 // The topmost cell of `name` in each column, or -1 where there is none.
@@ -282,4 +286,96 @@ test_a_settled_pond_goes_back_to_sleep :: proc(t: ^testing.T) {
 	moved := 0
 	for c, i in sb.cells do if c != before[i] do moved += 1
 	testing.expectf(t, moved == 0, "and not one of its cells may move, and %d did", moved)
+}
+
+
+// Pressure. A body of water carries a head, and the head is what makes
+// the far side of a submerged opening come up to meet the near side.
+// Before the press, a tank with a gap at the foot of its middle wall
+// held 719 cells on one side and 108 on the other, 22 rows between
+// their surfaces, for ever. See docs/physics.md, "The head and the
+// press".
+@(test)
+test_water_finds_its_level_through_an_opening_under_the_surface :: proc(t: ^testing.T) {
+	sb, table := fluid_sandbox(t, 60, 40)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	fluid_fill(&sb, table, 0, 0, 59, 39, "Rock")
+	fluid_fill(&sb, table, 1, 1, 58, 38, "Air")
+	fluid_fill(&sb, table, 29, 1, 31, 38, "Rock")  // a wall across the middle
+	fluid_fill(&sb, table, 29, 34, 31, 38, "Air")  // open only at its foot
+	fluid_fill(&sb, table, 1, 9, 28, 38, "Water")  // and water on one side
+
+	poured := fluid_count(&sb, table, "Water")
+	for _ in 0 ..< 2000 do sandbox_step(&sb, table)
+
+	s := fluid_surface(&sb, table, "Water")
+	defer delete(s)
+	testing.expectf(
+		t, abs(s[10] - s[45]) <= 2,
+		"the two sides must come level through the opening, and they stand at rows %d and %d",
+		s[10], s[45],
+	)
+	testing.expectf(
+		t, fluid_count(&sb, table, "Water") == poured,
+		"and nothing may be lost doing it: %d poured, %d left",
+		poured, fluid_count(&sb, table, "Water"),
+	)
+}
+
+// The same head, taken round a corner and up a shaft. This is the one
+// behaviour a falling-sand liquid is usually said not to have.
+@(test)
+test_water_climbs_a_standpipe_off_the_cistern_that_feeds_it :: proc(t: ^testing.T) {
+	sb, table := fluid_sandbox(t, 60, 44)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	fluid_fill(&sb, table, 0, 0, 59, 43, "Rock")
+	fluid_fill(&sb, table, 2, 10, 40, 42, "Air")   // the cistern
+	fluid_fill(&sb, table, 44, 4, 47, 42, "Air")   // the standpipe, dry
+	fluid_fill(&sb, table, 41, 40, 43, 42, "Air")  // joined along the floor
+	fluid_fill(&sb, table, 2, 12, 40, 42, "Water")
+
+	for _ in 0 ..< 2000 do sandbox_step(&sb, table)
+
+	s := fluid_surface(&sb, table, "Water")
+	defer delete(s)
+	testing.expectf(
+		t, s[45] >= 0 && abs(s[45] - s[20]) <= 2,
+		"the standpipe must fill to the level of the cistern: cistern row %d, pipe row %d",
+		s[20], s[45],
+	)
+}
+
+// And a still pond must not be pressed into froth. A body under a rock
+// lid is where a rule that lets pressed water rise into the air over its
+// own head shows up: it lifts a cell, the cell under it drops back into
+// the hole, and the pair swap for ever. The press moves the top of
+// another column instead, so it leaves no hole to swap with.
+@(test)
+test_a_pond_under_a_lid_holds_no_bubble :: proc(t: ^testing.T) {
+	sb, table := fluid_sandbox(t, 120, 60)
+	defer sandbox_destroy(&sb)
+	defer destroy_material_table(table)
+
+	fluid_fill(&sb, table, 0, 0, 119, 59, "Rock")
+	fluid_fill(&sb, table, 5, 20, 114, 54, "Air")
+	fluid_fill(&sb, table, 5, 20, 60, 34, "Rock")   // a lid over the west half
+	fluid_fill(&sb, table, 5, 35, 114, 54, "Water")
+
+	worst := 0
+	for tick in 1 ..= 1200 {
+		sandbox_step(&sb, table)
+		if tick % 100 != 0 do continue
+		bubbles := 0
+		for y in i32(36) ..< 54 {
+			for x in i32(6) ..< 114 {
+				if sandbox_cell(&sb, x, y) == MATERIAL_AIR do bubbles += 1
+			}
+		}
+		worst = max(worst, bubbles)
+	}
+	testing.expectf(t, worst == 0, "not one cell of air may open inside the body, and %d did", worst)
 }

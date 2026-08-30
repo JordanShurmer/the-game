@@ -35,6 +35,12 @@ wide_spreads :: #force_inline proc "contextless" (side, behind_side: Weights) ->
 }
 
 @(private = "file")
+wide_presses :: #force_inline proc "contextless" (head, self, under: Weights) -> Weights {
+	return simd.lanes_ne(head & Weights(u16(SANDBOX_HEAD_PRESS)), Weights(0)) &
+	       simd.lanes_ne(under, self)
+}
+
+@(private = "file")
 wide_side_bit :: #force_inline proc "contextless" (sb: ^Sandbox, x, y: i32) -> Weights {
 	xs := Weights(u16(x)) + LANE
 	h  := xs * Weights(0x2545)
@@ -90,7 +96,10 @@ sandbox_intent_row :: proc(sb: ^Sandbox, y, x0, x1: i32) -> (moving: bool) {
 		floats := simd.lanes_eq(kind, Weights(u16(Cell_Kind.Liquid)))
 		climbs := simd.lanes_eq(kind, Weights(u16(Cell_Kind.Riser)))
 
+		head := wide_at(r.head, i)
+
 		dx, dy: Steps
+		wide_put(&dx, &dy, floats & wide_presses(head, w, below), 0, -1)
 		wide_put(&dx, &dy, climbs & wide_spreads(here_far, below_far), far_step, 0)
 		wide_put(&dx, &dy, climbs & wide_spreads(here_near, below_near), near_step, 0)
 		wide_put(&dx, &dy, floats & wide_spreads(here_far, above_far), far_step, 0)
@@ -139,7 +148,7 @@ test_the_vector_intent_agrees_with_the_plain_one :: proc(t: ^testing.T) {
 			x0 := y % width
 			x1 := max(x0, width - 1 - (y * 3) % width)
 
-			sandbox_load_row(&sb, table, y, x0, x1)
+			_, _ = sandbox_load_row(&sb, table, y, x0, x1)
 			sandbox_intent_row(&sb, y, x0, x1)
 
 			for x in x0 ..= x1 {
