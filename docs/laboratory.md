@@ -52,6 +52,12 @@ halves of that: one seed twice is the same world, and two seeds are not.
 The seed reaches the light as well, because `light_make` seeds the
 twinkle of the crystals he leaves behind him.
 
+It is not the sandbox seed. A sandbox is opened on a rectangle of the
+world with a seed of its own, which decides the sift of a brush and the
+scatter of a dig, and `world_status` prints the two on separate lines
+for that reason. The world seed says what the rectangle is made of; the
+sandbox seed says what happens to it next.
+
 ## One seed opens another map
 
 `[Laboratory]` is the second reserved section of `data/biomes.txt`, and
@@ -161,7 +167,7 @@ Neither gallery has a door in its side. Every gallery is painted by
 `tools/museum.py`, and one of the three rules that module holds a
 gallery to is that the outer border of its picture is bedrock apart
 from the entrance shaft in the top edge. So the museum is entered from
-above, and it has exactly two ways in: the two shafts, 4 to 24 cells in
+above, and it has exactly two ways in: the two shafts, 4 to 23 cells in
 from the west side of each gallery's own picture.
 
 On this map that puts the physics door at world x 516 to 535 and the
