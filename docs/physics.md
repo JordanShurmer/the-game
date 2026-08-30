@@ -325,10 +325,14 @@ under a gas.
 **So a stopped fluid looks along its row.** `sandbox_flow`: a liquid
 looks for a cell it can sink from, a gas for one it can climb from, as
 far as the material's `spread` says, and goes to the first one it
-finds. The cells between are empty and all of one kind, so arriving at
-the far end is the same picture as walking there -- and walking there
-would leave a cell standing in the row for the water behind to trip
-over, which measurably stops the flow. `ahead` is +1 for a liquid and
+finds. It goes the whole way in one step: the cells it crosses are all
+of one kind, so arriving at the far end is nearly the same picture as
+walking there, and walking there would leave a cell standing in the row
+for the water behind to trip over, which measurably stops the flow.
+(Once a fluid may cross another fluid -- see "Displacement" -- the
+picture is no longer exact: the heavy cell goes the whole gap and one
+light cell comes back a cell the other way. The count is conserved and
+it settles cleanly, but that is the sentence to push on.) `ahead` is +1 for a liquid and
 -1 for a gas, and that is the only difference between the two.
 
 The reach is the flatness. What settles is a surface that falls about
