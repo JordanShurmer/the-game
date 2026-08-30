@@ -396,7 +396,7 @@ load_or_create_biome_map :: proc(biomes: Biome_Table, path: string) -> (m: Biome
 	// a starter map painted over it would be the wrong world under the
 	// right name.
 	if path != biomes.map_image_path {
-		fmt.eprintfln("cannot read %s; run tools/seed_laboratory.py to draw it", path)
+		fault("cannot read %s; run tools/seed_laboratory.py to draw it", path)
 		return {}, false
 	}
 
