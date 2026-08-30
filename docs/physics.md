@@ -385,6 +385,18 @@ Read this before trying them again.
   (Lake 5.12 -> 6.53 ms, Coalmine 2.29 -> 2.87), because the water
   takes more ticks to settle and every one of them is work. A quarter
   of the tick for a difference nobody can point at is not a trade.
+- **The two numbers the step reads a cell at a time, moved out of the
+  24-byte `Material` and into byte tables beside `weight` and `kind`.**
+  This one is *in*, and it is in for the shape rather than for the
+  clock: the checksums are identical and nine interleaved runs put it
+  inside the noise on both benches (Lake best 7.489 against 7.664,
+  Coalmine 2.883 against 2.848). `sandbox_flow` is called once for a
+  moving fluid cell, not once a cell, so there was less there to win
+  than the phrasing of "Where the tick goes now" suggests. It is kept
+  because a `Material` load in the step is the thing that shape exists
+  to keep out, and the next number that goes there will be read the
+  same way.
+
 - **The side a fluid looks first, remembered in a byte a cell.** The
   obvious form of momentum, and it buys nothing, for a structural
   reason worth writing down: `sandbox_flow` looks BOTH ways and takes

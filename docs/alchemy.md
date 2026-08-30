@@ -141,15 +141,30 @@ is all that fits through it in a step. That is the whole meter, and it
 is why room 2's rack of pipettes runs for about 370 ticks and room 6's
 two chambers for about 1400 each.
 
-The shape of the tap matters as much as the size of the hole. A wide
-tank over a narrow hole does **not** drain at one cell a tick: a
-liquid only moves sideways into a cell that has nothing claiming the
-cell above it, so a full tank cannot walk its bottom row across to the
-hole, and it drains at the speed its surface can spread instead —
-slower, and slower still the wider it is. A tall narrow column over
-its own hole has every cell standing over the hole already. So a tap
-that has to keep time is a pipette; a tank that only has to look full
-is a pond.
+The shape of the tap used to matter as much as the size of the hole,
+and it no longer does. A wide tank could not walk its bottom row
+across to its own hole, so it drained at the speed its surface could
+spread — slower, and slower still the wider it was — and a tap that
+had to keep time had to be a pipette. The fluid rules have moved under
+that: a liquid looks along its own row for the way down and a body of
+it carries a head, so a full tank feeds its hole from the whole of
+itself. Measured on the rules as they stand, 240 cells of water
+through a one-cell hole:
+
+| Tank | Ticks to empty |
+| --- | --- |
+| 4 wide, 60 deep | 479 |
+| 10 wide, 24 deep | 476 |
+| 20 wide, 12 deep | 471 |
+| 40 wide, 6 deep | 461 |
+
+So the meter is the hole and nothing else now, and a tank may be any
+shape it looks best as. See `docs/physics.md`, "The reach is the
+flatness" and "The head and the press".
+
+The two room numbers above were measured before that change and have
+not been re-measured; if an exhibit has to keep time to the tick,
+measure it rather than trusting them.
 
 ## The light of a sparkle
 

@@ -22,6 +22,11 @@ Material_Table :: struct {
 	weight:      []u16,
 	kind:        []Cell_Kind,
 	work:        []Cell_Works,
+	// The two numbers the step reads a cell at a time, out of the 24
+	// byte Material the whole shape of the step was built to keep out
+	// of the inner loop. See docs/physics.md, "Where the tick goes now".
+	spread:      []u8,
+	fall_speed:  []u8,
 
 	weight_lut: [8 * SANDBOX_WIDE_LANES]u8,
 	lut_ok:     bool,
@@ -362,15 +367,19 @@ load_materials :: proc(path: string, allocator := context.allocator) -> (table: 
 	table.reaction_at = reaction_at
 	table.partners    = reaction_partners(reaction_at, n, allocator)
 
-	table.weight = make([]u16, n, allocator)
-	table.kind   = make([]Cell_Kind, n, allocator)
-	table.work   = make([]Cell_Works, n, allocator)
+	table.weight     = make([]u16, n, allocator)
+	table.kind       = make([]Cell_Kind, n, allocator)
+	table.work       = make([]Cell_Works, n, allocator)
+	table.spread     = make([]u8, n, allocator)
+	table.fall_speed = make([]u8, n, allocator)
 	for &m, i in table.materials {
 		is_air := Cell(i) == MATERIAL_AIR
 		m.spread = cell_spread_of(m)
-		table.weight[i] = cell_weight_of(m, is_air)
-		table.kind[i]   = cell_kind_of(m, is_air)
-		table.work[i]   = cell_work_of(m, reacts[i])
+		table.weight[i]     = cell_weight_of(m, is_air)
+		table.kind[i]       = cell_kind_of(m, is_air)
+		table.work[i]       = cell_work_of(m, reacts[i])
+		table.spread[i]     = m.spread
+		table.fall_speed[i] = m.fall_speed
 	}
 	sandbox_build_luts(&table)
 
@@ -425,6 +434,8 @@ destroy_material_table :: proc(table: Material_Table, allocator := context.alloc
 	delete(table.weight, allocator)
 	delete(table.kind, allocator)
 	delete(table.work, allocator)
+	delete(table.spread, allocator)
+	delete(table.fall_speed, allocator)
 }
 
 parse_contact_effects :: proc(s: string) -> bit_set[Contact_Effect; u32] {

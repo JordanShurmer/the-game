@@ -392,7 +392,7 @@ sandbox_apply_row :: proc(sb: ^Sandbox, table: Material_Table, y, x0, x1: i32) {
 sandbox_flow :: proc(sb: ^Sandbox, table: Material_Table, x, y, side, ahead: i32) -> bool {
 	m := sb.cells[sandbox_index(sb, x, y)]
 	w := table.weight[m]
-	reach := i32(table.materials[m].spread)
+	reach := i32(table.spread[m])
 
 	open_row := false
 	for s in ([2]i32{side, -side}) {
@@ -569,7 +569,7 @@ sandbox_presses :: #force_inline proc "contextless" (head, self, under: u16) -> 
 // is never even called.
 sandbox_press :: proc(sb: ^Sandbox, table: Material_Table, x, y: i32) -> bool {
 	m := sb.cells[sandbox_index(sb, x, y)]
-	reach := i32(table.materials[m].spread)
+	reach := i32(table.spread[m])
 
 	// The top of this column, and the cell over it, which must be open.
 	ys := y
@@ -643,7 +643,7 @@ sandbox_slide :: proc(sb: ^Sandbox, table: Material_Table, x, y, dx, dy: i32) {
 	if dy <= 0 || dx != 0 do return
 
 	w     := table.weight[sb.cells[sandbox_index(sb, cx, cy)]]
-	speed := i32(table.materials[sb.cells[sandbox_index(sb, cx, cy)]].fall_speed)
+	speed := i32(table.fall_speed[sb.cells[sandbox_index(sb, cx, cy)]])
 
 	for _ in 1 ..< speed {
 		nx, ny := cx, cy + 1
