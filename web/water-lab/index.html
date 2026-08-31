@@ -1,5 +1,5 @@
-<title>Nine Waters</title>
-<meta name="description" content="Nine attempts at the water shader, each drawn in a different school of art, running live in the browser.">
+<title>Many Waters</title>
+<meta name="description" content="Seventeen water shaders for one game, live in the browser: nine schools of art, eight ways of modelling water, one contract.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;0,6..96,700;1,6..96,500&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -442,6 +442,30 @@ a:hover { text-decoration-color: var(--parch); }
   gap: 6px 28px;
 }
 
+/* ---------- a band that opens a set of plates ---------- */
+
+.setband {
+  padding: clamp(40px, 6vw, 76px) var(--pad) clamp(22px, 3vw, 34px);
+  border-top: 1px solid var(--line);
+}
+.setband .inner {
+  display: grid;
+  grid-template-columns: minmax(0, 21rem) minmax(0, 42rem);
+  gap: clamp(16px, 4vw, 56px);
+  align-items: start;
+}
+@media (max-width: 860px) { .setband .inner { grid-template-columns: 1fr; } }
+.setband h2 {
+  font-family: var(--display);
+  font-weight: 500;
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.02;
+  margin: 10px 0 0;
+  text-wrap: balance;
+}
+.setband p { color: var(--slate); margin: 0 0 14px; }
+.setband p:last-child { margin-bottom: 0; }
+
 /* ---------- what they cost ---------- */
 
 .costs { padding: clamp(44px, 7vw, 88px) var(--pad) 0; }
@@ -499,6 +523,15 @@ table.cost td.name small { color: var(--dim); font-size: 11.5px; display: block;
 table.cost td.work { font-size: 13px; color: var(--dim); }
 table.cost td.n { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 table.cost tr.ref td { color: var(--dim); }
+table.cost tr.group td {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--parch);
+  padding: 22px 0 8px;
+  border-bottom: 1px solid var(--line-2);
+}
 table.cost tr.ref td.name { color: var(--slate); }
 .bar { position: relative; height: 8px; min-width: 110px; background: var(--ink-3); border-radius: 2px; }
 .bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--parch); border-radius: 2px 3px 3px 2px; transition: width 320ms ease; }
@@ -512,14 +545,15 @@ tr.ref .bar i { background: var(--parch-dk); }
 <header class="hero">
   <canvas id="hero-canvas" aria-label="The water shader the game ships, running over the Grotto"></canvas>
   <div class="hero-scrim"></div>
-  <p class="hero-tag">The Game<br>water shader<br>nine attempts</p>
+  <p class="hero-tag">The Game<br>water shader<br>seventeen plates</p>
   <div class="hero-text">
     <p class="eyebrow">A lab, not a release</p>
-    <h1>Nine <em>Waters</em></h1>
-    <p>One pond, drawn nine ways. Every panel below is a real fragment shader
-      running on your machine against the same picture the game hands its
-      water pass &mdash; the lit cells, and a byte a texel saying how deep the
-      water is there. Only the first is in the game.</p>
+    <h1>Many <em>Waters</em></h1>
+    <p>One pond, drawn seventeen ways: nine schools of art, and eight ways
+      of modelling the water itself. Every panel below is a real fragment
+      shader running on your machine against the same picture the game
+      hands its water pass &mdash; the lit cells, and a byte a texel saying
+      how deep the water is there. Only the first is in the game.</p>
   </div>
 </header>
 
@@ -552,7 +586,7 @@ tr.ref .bar i { background: var(--parch-dk); }
 
 <section class="prose">
   <p class="eyebrow">What you are looking at</p>
-  <h2>The same two things, given to nine shaders</h2>
+  <h2>The same two things, given to seventeen shaders</h2>
   <p>The world reaches the screen as one texture of cells, already shaded by
     the light. Beside it the game builds a second texture, one byte a texel:
     <strong>0 where there is no water</strong>, and otherwise how many cells
@@ -567,12 +601,58 @@ tr.ref .bar i { background: var(--parch-dk); }
     browser, from the colours in <code>data/materials.txt</code>, because a
     shader can only be judged against a picture.</p>
   <p><strong>Plate I is the shader in the game today.</strong> It is here as
-    the mark to beat. The eight after it are attempts at a new one, each
-    committed to a school of art rather than to realism, because the game is
-    a grid of coloured cells and has no third dimension to be real in.</p>
+    the mark to beat, and the sixteen after it are attempts at a new one.
+    They come in two sets. The first nine each commit to a school of art:
+    what water should <em>look</em> like in a game made of coloured cells.
+    The eight after those commit to a model: what water <em>is</em>, and
+    what falls out of the arithmetic once you have said so.</p>
 </section>
 
-<main class="plates" id="plates"></main>
+<section class="setband">
+  <div class="inner">
+    <div>
+      <p class="eyebrow">Plates I to IX</p>
+      <h2>Nine schools of art</h2>
+    </div>
+    <div>
+      <p>Each of these commits to a way of picturing water rather than to a
+        way of modelling it. None of them simulates anything: depth chooses
+        a tone, or a pane of glass, or how much ink the brush left standing.
+        They are here because the game is a grid of coloured cells with no
+        third dimension to be real in, so the first question is which
+        picture of water suits it &mdash; not which physics.</p>
+    </div>
+  </div>
+</section>
+
+<main class="plates" id="plates-schools"></main>
+
+<section class="setband">
+  <div class="inner">
+    <div>
+      <p class="eyebrow">Plates X to XVII</p>
+      <h2>Eight ways of modelling it</h2>
+    </div>
+    <div>
+      <p>These are told apart by what they take water to be. A sum of
+        trochoids; a spectrum with a speed for every wavelength; a current
+        that drags a pattern; an eddy that cannot gain or lose itself; a
+        ring that disperses as it spreads; a surface smoothed out of the
+        grid; the slope of the water's own head; and a sheet of light
+        folded by the surface it came through. Still one pass, still the
+        same two textures.</p>
+      <p>They share one habit the first nine do not: they ask the mask how
+        big it is. Nothing the game passes says how many screen units make
+        a world cell, and <code>textureSize</code> is the only way to find
+        out &mdash; the mask holds one texel a cell. With it a pattern can be
+        laid out in cells, so <strong>the second set keeps its size when
+        you change the zoom and the first set does not</strong>. Try it on
+        Plate I and Plate X.</p>
+    </div>
+  </div>
+</section>
+
+<main class="plates" id="plates-methods"></main>
 
 <section class="costs">
   <div class="head">
@@ -583,20 +663,23 @@ tr.ref .bar i { background: var(--parch-dk); }
       <code>app_draw_water</code> already makes, and every one of them throws
       away the fragments where the mask reads zero. No plate adds a
       framebuffer, a second pass, a mipmap or a buffer upload. So the draw
-      count is one, and it is one for all nine.</p>
+      count is one, and it is one for all seventeen.</p>
     <p>What differs is the work inside a water fragment. Two things say how
       much: how many times the shader reads a texture, which is what a
       memory-bound pass waits on, and how much arithmetic it does between
       the reads, which is what the table below actually measures. The pass
       is charged only for the water on screen, so a wide shallow pond costs
       less than this bench and a screen full of pond costs more.</p>
-    <p>Two things the table says before you press anything. Plate I searches
-      a three by three block of drifting points, twice over, once for each
-      of the two nets it lays on the bottom; nothing else here searches a
-      neighbourhood more than once. Plate III makes the most reads &mdash;
-      twelve of them, two for every brush mark &mdash; and reads are what a
-      memory-bound pass waits on. Plates VI and IX read almost nothing and
-      run no noise at all, which is what a demake and a wireframe are.</p>
+    <p>Three things the table says before you press anything. Plate XV
+      makes the most reads by a distance &mdash; nineteen, seventeen of
+      them of the mask alone, because a screen-space surface is a blur and
+      a blur is reads &mdash; and reads are what a memory-bound pass waits
+      on. Plate I does the most searching: a three by three block of
+      drifting points, twice over, once for each of the two caustic nets,
+      and nothing else here searches a neighbourhood more than once. And
+      Plates VI, IX, XVI and XVII run almost no noise at all, which is
+      what a demake, a wireframe, a shader that reads its answer off the
+      mask, and a sheet of sines look like from outside.</p>
   </div>
   <div class="actions">
     <button type="button" class="measure" id="measure">Measure on this machine</button>
@@ -625,8 +708,9 @@ tr.ref .bar i { background: var(--parch-dk); }
   <h2>A plate is a file</h2>
   <p>Open a plate, press <em>Copy</em>, and write it over
     <code>data/shaders/water.fs</code>. Nothing else moves: the depth map,
-    the uniforms and the draw call are the same for all nine. The loader
-    puts the version line on, which is why no shader here has one.</p>
+    the uniforms and the draw call are the same for all seventeen. The
+    loader puts the version line on, which is why no shader here has
+    one.</p>
   <pre>make game
 ./bin/the-game shot=shots/water.png frames=140 walk=-40   # the millpond
 xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frames=140</pre>
@@ -642,8 +726,8 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frame
 </section>
 
 <footer class="colophon">
-  <span>Nine Waters &mdash; a shader lab for The Game</span>
-  <span>WebGL 2 &middot; GLSL ES 300 &middot; no libraries</span>
+  <span>Many Waters &mdash; a shader lab for The Game</span>
+  <span>Seventeen plates &middot; WebGL 2 &middot; GLSL ES 300 &middot; no libraries</span>
   <span>Plate I after raylib <code>wave.fs</code>, zlib</span>
   <span>Bodoni Moda &middot; IBM Plex</span>
 </footer>
@@ -1855,6 +1939,814 @@ void main()
 }
 </script>
 
+<!-- ==================== the methods ====================
+     The eight below are told apart by how they model the water rather
+     than by how they paint it, and they share one habit the first nine
+     do not: they ask the mask how big it is. `textureSize` gives the
+     cells across the view, which is the one thing the uniforms leave
+     out -- nothing the game passes says how many screen units a cell
+     is worth. With it a pattern can be laid out in world cells, so it
+     keeps its size when the player zooms. Without it, as in Plate I, a
+     pattern is laid out in screen units and grows and shrinks with the
+     zoom.                                                            -->
+
+<script type="x-shader/x-fragment" id="fs-plate-10">
+// Plate X. Gerstner swell. The surface is a sum of four trochoids: the
+// wave shape a ring of water makes when every particle in it runs round
+// a circle. Crests come to a point and troughs go broad and flat, which
+// no sum of sines does on its own, so the sample point is pulled toward
+// the crest twice before the height is read. The waterline moves: this
+// is the first plate on the page where the top of the water is not
+// where the mask says it is.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float SWELL = 1.15;            // cells from the trough to the crest
+const float STEEP = 0.85;            // how far the crest is drawn to a point
+const float ORBIT = 3.2;             // cells the water swings sideways
+const float SINK = 0.055;
+const vec3 DEEP = vec3(0.10, 0.30, 0.44);
+const vec3 SHOAL = vec3(0.42, 0.76, 0.82);
+const vec3 FOAM = vec3(0.92, 0.97, 0.99);
+
+// Four waves, each shorter and quicker than the one before it, running
+// the two ways a pond is worked by the wind.
+float g_wave(float x, float t)
+{
+    return sin(x*0.220 + t*1.10)*1.00
+         + sin(x*0.372 - t*1.45 + 1.7)*0.58
+         + sin(x*0.604 + t*1.95 + 3.1)*0.31
+         + sin(x*0.972 - t*2.60 + 5.5)*0.16;
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;              // units to a cell
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;   // in world cells
+
+    // The trochoid: the point that lands here is not the point below it.
+    // Two turns of the fixed point are enough to sharpen the crests.
+    float x = at.x;
+    for (int i = 0; i < 2; ++i) {
+        float slope = (g_wave(x + 0.7, seconds) - g_wave(x - 0.7, seconds))*0.714;
+        x = at.x - STEEP*slope;
+    }
+    float h = g_wave(x, seconds);
+    float slope = (g_wave(x + 0.7, seconds) - g_wave(x - 0.7, seconds))*0.714;
+
+    // The wave stands over the mask's flat waterline, so the top of the
+    // water is the mask's top plus the height of the swell here.
+    float lift = (h + 2.05)*SWELL*0.5;
+    float d = depth - lift;
+
+    // Water swings in circles, and the circles shrink with depth. That
+    // is why a swell moves the surface and leaves the bottom alone.
+    float orbit = exp(-max(d, 0.0)*0.09);
+    vec2 bend = vec2(-slope*ORBIT*orbit*unit*texel.x, h*0.5*orbit*unit*texel.y);
+    vec3 under = texture(texture0, clamp(fragTexCoord + bend, vec2(0.0), vec2(1.0))).rgb;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    float sink = 1.0 - exp(-max(d, 0.0)*SINK);
+    vec3 col = under*mix(SHOAL, DEEP, sink)*1.55;
+
+    // A crest steeper than the water can hold spills, and what spills is
+    // white. Above the drawn surface there is spray and nothing else.
+    float steepness = abs(slope);
+    float cap = smoothstep(0.55, 1.15, steepness)*exp(-max(d, 0.0)*0.30);
+    col = mix(col, FOAM*lit, cap*0.70);
+    col = mix(col, mix(under, FOAM, 0.55)*max(lit, 0.25), smoothstep(0.0, -1.4, d));
+
+    // The sun on the face of a wave, which is the slope and nothing else.
+    float face = clamp(-slope*1.4, 0.0, 1.0);
+    col += FOAM*lit*pow(face, 5.0)*0.35*exp(-max(d, 0.0)*0.22);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-11">
+// Plate XI. The spectrum. A real sea is not a wave, it is a spectrum:
+// many wavenumbers at once, each with the speed its own wavelength
+// gives it. Sixteen of them here, spaced geometrically, with amplitudes
+// off a Phillips curve and each one running at the deep water speed for
+// its wavenumber -- the square root of g over k. Long waves outrun short
+// ones, the pattern never repeats, and the slope falls out of the same
+// sum for nothing.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const int TERMS = 16;
+const float K0 = 0.055;              // the longest wave the pond holds
+const float RATIO = 1.235;           // and how the rest are spaced
+const float WIND = 26.0;             // cells: the fetch the wind has had
+const float GRAV = 1.35;             // gravity, in cells and in seconds
+
+const vec3 DEEP = vec3(0.07, 0.21, 0.36);
+const vec3 SHOAL = vec3(0.36, 0.70, 0.80);
+const vec3 SPUME = vec3(0.94, 0.98, 1.00);
+
+float s_hash(float n) { return fract(sin(n*127.1 + 3.7)*43758.5453); }
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    // The whole sea, in one sum. Height and slope come out together,
+    // because the derivative of a sine is free.
+    float h = 0.0, slope = 0.0, norm = 0.0;
+    for (int i = 0; i < TERMS; ++i) {
+        float k = K0*pow(RATIO, float(i));
+        float amp = exp(-1.0/pow(k*WIND, 2.0))/pow(k*8.0, 1.4);
+        float w = sqrt(GRAV*k);                    // deep water dispersion
+        float ph = 6.2831*s_hash(float(i) + 1.0);
+        float a = k*at.x - w*seconds*6.0 + ph;
+        h += amp*sin(a);
+        slope += amp*k*cos(a);
+        norm += amp;
+    }
+    h /= norm*0.42;
+    slope /= norm*K0*1.15;
+
+    float lift = (h + 1.60)*1.05;
+    float d = depth - lift;
+
+    vec3 under = texture(texture0, clamp(fragTexCoord
+        + vec2(-slope*2.6*exp(-max(d, 0.0)*0.10)*unit*texel.x, 0.0),
+        vec2(0.0), vec2(1.0))).rgb;
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    float sink = 1.0 - exp(-max(d, 0.0)*0.05);
+    vec3 col = under*mix(SHOAL, DEEP, sink)*1.60;
+
+    // Where the spectrum piles its short waves on the back of a long
+    // one, the water is rough, and rough water is white.
+    float rough = smoothstep(0.40, 1.05, abs(slope))*exp(-max(d, 0.0)*0.45);
+    col = mix(col, SPUME*lit, rough*0.8);
+    col = mix(col, mix(under, SPUME, 0.5)*max(lit, 0.22), smoothstep(0.0, -1.2, d));
+
+    float face = clamp(-slope*1.6, 0.0, 1.0);
+    col += SPUME*lit*pow(face, 6.0)*0.32*exp(-max(d, 0.0)*0.60);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-12">
+// Plate XII. The flow map. Water that goes somewhere cannot be drawn by
+// a pattern that stands still, and a pattern dragged along a current
+// stretches until it tears. The trick is to drag two copies, half a
+// period apart, and cross fade between them, so each is thrown away and
+// begun again before it has stretched far enough to show. The current
+// itself is a field: fast along the surface, slow at the bottom, and
+// turned aside by the shape of the bowl.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float PERIOD = 3.2;            // seconds a copy of the pattern lives
+const float DRAG = 7.0;              // cells it is dragged in that time
+const vec3 DEEP = vec3(0.09, 0.26, 0.40);
+const vec3 SHOAL = vec3(0.40, 0.72, 0.80);
+const vec3 RACE = vec3(0.86, 0.95, 0.98);
+
+float f_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float f_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(f_hash(i), f_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(f_hash(i + vec2(0.0, 1.0)), f_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float f_fbm(vec2 p)
+{
+    return 0.6*f_noise(p) + 0.3*f_noise(p*2.13 + 5.7) + 0.1*f_noise(p*4.31 + 1.3);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // The current. It runs along the surface and dies with depth, and a
+    // slow turn in it keeps the whole pond from sliding one way.
+    float turn = f_fbm(at*0.035 + vec2(0.0, seconds*0.02))*2.0 - 1.0;
+    vec2 flow = normalize(vec2(1.0, turn*0.55))*exp(-depth*0.045);
+
+    // Two copies of the pattern, half a period apart. Each is dragged
+    // from nothing to full drag and back, and the fade is a triangle.
+    float p0 = fract(seconds/PERIOD);
+    float p1 = fract(seconds/PERIOD + 0.5);
+
+    // The pattern is read in the current's own frame, long along it and
+    // short across it, because that is the shape water draws in.
+    vec2 dir = flow/max(length(flow), 0.0001);
+    mat2 along = mat2(dir.x, -dir.y, dir.y, dir.x);
+    vec2 a = along*(at - flow*DRAG*p0)*vec2(0.045, 0.21);
+    vec2 b = along*(at - flow*DRAG*p1)*vec2(0.045, 0.21);
+    float n0 = f_fbm(a);
+    float n1 = f_fbm(b);
+    float blend = abs(1.0 - 2.0*p0);
+    float n = mix(n0, n1, blend);
+
+    // The same field a step along the current, so the pattern can be
+    // read for which way it is going and shaded on that face.
+    vec2 aa = a + vec2(0.16, 0.0);
+    float dn = mix(f_fbm(aa), f_fbm(b + vec2(0.16, 0.0)), blend) - n;
+
+    float sink = 1.0 - exp(-depth*0.055);
+    vec3 col = texture(texture0, fragTexCoord).rgb*mix(SHOAL, DEEP, sink)*1.60;
+
+    // The pattern itself: bands of streaked light, tighter where the
+    // current is quicker, and gone where it is still.
+    float speed = length(flow);
+    float streak = smoothstep(0.55, 0.85, n)*speed;
+    col += RACE*lit*streak*0.55;
+    col += RACE*lit*clamp(-dn*7.0, 0.0, 1.0)*speed*0.30*exp(-depth*0.08);
+
+    // Where the current is quickest it tears, and tearing water is white.
+    float tear = smoothstep(0.70, 0.95, n)*smoothstep(0.35, 0.9, speed);
+    col = mix(col, RACE*max(lit, 0.3), tear*exp(-depth*0.20)*0.7);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-13">
+// Plate XIII. Curl and carry. A fluid does not gain or lose itself, so
+// its velocity field has no divergence, and the cheapest field with no
+// divergence is the curl of a scalar. This takes the curl of a noise
+// field for the velocity, then walks backwards along it three times and
+// reads a dye pattern at the point the water came from -- which is
+// advection, done the way a fluid solver does it, without a solver and
+// without a frame of history.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float SWIRL = 5.0;             // cells a step of the walk covers
+const float FIELD = 0.030;           // how wide an eddy is
+const vec3 COLD = vec3(0.06, 0.20, 0.34);
+const vec3 WARM = vec3(0.30, 0.68, 0.74);
+const vec3 DYE = vec3(0.72, 0.93, 0.96);
+
+float c_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float c_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(c_hash(i), c_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(c_hash(i + vec2(0.0, 1.0)), c_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+// The stream function. Its contours are the streamlines, and water
+// never crosses one of them.
+float c_psi(vec2 p, float t)
+{
+    return c_noise(p*FIELD + vec2(t*0.035, -t*0.02))
+         + 0.5*c_noise(p*FIELD*2.3 + vec2(-t*0.05, t*0.03));
+}
+
+// Velocity is the curl of it, which in two dimensions is the stream
+// function turned a quarter turn.
+vec2 c_curl(vec2 p, float t)
+{
+    float e = 1.6;
+    float dx = c_psi(p + vec2(e, 0.0), t) - c_psi(p - vec2(e, 0.0), t);
+    float dy = c_psi(p + vec2(0.0, e), t) - c_psi(p - vec2(0.0, e), t);
+    return vec2(dy, -dx)/(2.0*e)*140.0;
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // Walk back up the current. Three steps is enough to bend a straight
+    // pattern into an eddy and not so many that it smears to nothing.
+    vec2 q = at;
+    float speed = 0.0;
+    for (int i = 0; i < 3; ++i) {
+        vec2 v = c_curl(q, seconds);
+        speed += length(v);
+        q -= v*SWIRL;
+    }
+    speed /= 3.0;
+
+    // The dye the water was carrying when it set out.
+    float dye = c_noise(q*0.09) + 0.5*c_noise(q*0.21 + 3.3);
+    dye = smoothstep(0.45, 1.25, dye);
+
+    float sink = 1.0 - exp(-depth*0.05);
+    vec3 col = texture(texture0, fragTexCoord).rgb*mix(WARM, COLD, sink)*1.60;
+    col += DYE*dye*lit*0.55*exp(-depth*0.020);
+
+    // An eddy shows where the water turns hardest, so the speed of the
+    // walk is drawn as well as where it ended.
+    col += vec3(0.55, 0.85, 0.95)*smoothstep(0.06, 0.30, speed)*lit*0.22;
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-14">
+// Plate XIV. Rain. Six drips, each striking the pond on its own clock,
+// and every strike sends a ring out across the surface and down into
+// the water. Deep water waves are dispersive: a long wave travels
+// faster than a short one, so a ring that leaves as a pulse arrives as
+// a chirp, long waves at the front and short ones trailing. Three bands
+// at three speeds is enough to show it. The ring dies as it spreads,
+// because the same lift is being shared round a longer circle.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const int DRIPS = 6;
+const float SPAN = 5.5;              // seconds between one drip and the next
+const vec3 DEEP = vec3(0.10, 0.27, 0.42);
+const vec3 SHOAL = vec3(0.42, 0.74, 0.82);
+const vec3 CROWN = vec3(0.93, 0.98, 1.00);
+
+float r_hash(float n) { return fract(sin(n*127.1 + 11.3)*43758.5453); }
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    // Where the surface is, in cells: straight up from here by the depth
+    // the mask gives. Every ring is centred on it.
+    float sx = at.x;
+
+    float h = 0.0, slope = 0.0;
+    for (int i = 0; i < DRIPS; ++i) {
+        float fi = float(i);
+        float hx = r_hash(fi + 1.0);
+        float ht = r_hash(fi + 21.0);
+        float px = origin.x + (10.0 + 80.0*hx)*2.0;              // where it fell
+        float age = mod(seconds + ht*SPAN, SPAN);                // and how long ago
+
+        float rx = (at.x - px);
+        float r = sqrt(rx*rx + depth*depth) + 0.001;
+        float spread = 1.0/sqrt(1.0 + r*0.55);                   // the ring thins
+        float fade = exp(-age*0.55)*smoothstep(0.0, 0.25, age);  // and the drip dies
+
+        // Three bands, three speeds: the long wave gets there first.
+        for (int b = 0; b < 3; ++b) {
+            float fb = float(b);
+            float speed = 26.0 - fb*7.0;
+            float k = 0.55 + fb*0.55;
+            float front = age*speed;
+            float env = exp(-pow((r - front)*0.16, 2.0));
+            float a = k*(r - front);
+            h += cos(a)*env*spread*fade/(1.0 + fb);
+            slope += -sin(a)*k*env*spread*fade*sign(rx)/(1.0 + fb);
+        }
+    }
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    float lift = clamp(h*0.9, -1.2, 1.6);
+    float d = max(depth - lift, 0.0);
+
+    vec2 bend = vec2(-slope*4.5*exp(-d*0.10)*unit*texel.x, 0.0);
+    vec3 under = texture(texture0, clamp(fragTexCoord + bend, vec2(0.0), vec2(1.0))).rgb;
+
+    float sink = 1.0 - exp(-d*0.055);
+    vec3 col = under*mix(SHOAL, DEEP, sink)*1.55;
+
+    // The lift itself is drawn: the ring is bright on its near face and
+    // dark on the far one, which is what a ring on a pond looks like.
+    col += CROWN*lit*clamp(slope*1.8, 0.0, 1.0)*0.55*exp(-d*0.05);
+    col *= 1.0 - clamp(-slope*1.2, 0.0, 0.55)*exp(-d*0.05);
+
+    // And where it strikes, a crown of white.
+    col = mix(col, CROWN*max(lit, 0.3), smoothstep(0.9, 1.5, h)*exp(-d*0.5));
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-15">
+// Plate XV. The screen space surface. This is how a particle fluid is
+// drawn when there is no mesh to draw: take the depth the simulation
+// wrote, blur it, and treat the blurred field as a surface. Seventeen
+// reads of the mask over two rings give a coverage and its gradient;
+// the gradient is the normal, and the coverage rounds off the staircase
+// the cell grid leaves at the shore. It is the one plate that stops the
+// water looking like a grid, and it pays for it in reads.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float RING = 1.6;              // cells to the inner ring of taps
+const float BEND = 2.4;              // how hard the normal bends the view
+const vec3 DEEP = vec3(0.08, 0.24, 0.40);
+const vec3 SHOAL = vec3(0.44, 0.78, 0.84);
+const vec3 SHEEN = vec3(0.90, 0.97, 1.00);
+
+const vec2 RAYS[8] = vec2[8](
+    vec2( 1.000,  0.000), vec2( 0.707,  0.707), vec2( 0.000,  1.000), vec2(-0.707,  0.707),
+    vec2(-1.000,  0.000), vec2(-0.707, -0.707), vec2( 0.000, -1.000), vec2( 0.707, -0.707));
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));   // one cell, in texture
+
+    // Two rings of taps. Coverage says how much water stands around this
+    // fragment; the same taps, weighted by the way they lie, say which
+    // way the surface leans.
+    float cover = 1.0;
+    vec2 grad = vec2(0.0);
+    for (int i = 0; i < 8; ++i) {
+        float a = texture(mask, clamp(fragTexCoord + RAYS[i]*RING*mtex, vec2(0.0), vec2(1.0))).r;
+        float b = texture(mask, clamp(fragTexCoord + RAYS[i]*RING*2.0*mtex, vec2(0.0), vec2(1.0))).r;
+        float wa = step(0.5/255.0, a);
+        float wb = step(0.5/255.0, b);
+        cover += wa + wb*0.5;
+        grad += RAYS[i]*(wa + wb*0.5);
+    }
+    cover /= 13.0;
+    grad /= 13.0;
+
+    // The surface, as a normal. A fragment deep inside the body has taps
+    // wet on every side and no lean at all, which is right: the surface
+    // is only where the water ends.
+    vec3 n = normalize(vec3(-grad*BEND*6.0, 1.0));
+
+    // The edge of the water is where coverage falls off, and rounding it
+    // is what takes the staircase out of a grid of cells.
+    float rim = smoothstep(0.30, 0.72, cover);
+
+    vec3 world = texture(texture0, fragTexCoord).rgb;
+    vec2 bend = n.xy*BEND*1.6*texel*(1.0 + min(depth, 20.0)*0.15)*size.x*step_cells*mtex.x;
+    vec3 under = texture(texture0, clamp(fragTexCoord + bend, vec2(0.0), vec2(1.0))).rgb;
+
+    float bright = max(max(world.r, world.g), world.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    float sink = 1.0 - exp(-depth*0.055);
+    vec3 col = under*mix(SHOAL, DEEP, sink)*1.60;
+
+    // Curvature, taken from how far the normal has leaned, is the thin
+    // bright line a fluid keeps along every edge it has.
+    float curve = length(grad);
+    col += SHEEN*lit*smoothstep(0.05, 0.35, curve)*0.55;
+
+    vec3 light = normalize(vec3(-0.45, -0.35, 0.82));
+    col += SHEEN*lit*pow(max(dot(n, light), 0.0), 40.0)*0.9;
+
+    // Outside the rounded edge the world stands as the light drew it.
+    col = mix(world, col, rim);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-16">
+// Plate XVI. The head. docs/water.md ends on what the shader is not
+// told: which way the water is going. This plate works it out from the
+// one thing it is given. Two texels of the mask, left and right of this
+// one and on the same row, say how much water stands over each; the
+// difference is the slope of the surface between them, and water runs
+// down a slope. A pond that has found its level reads still, and the
+// spillway of the millpond, where the run of water restarts six cells
+// lower, reads as a race. Nothing was added to the game to do it.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float REACH = 3.0;             // cells each way the head is read over
+const float GAIN = 0.55;             // slope to speed
+const vec3 STILL = vec3(0.16, 0.40, 0.55);
+const vec3 QUICK = vec3(0.55, 0.86, 0.92);
+const vec3 SPRAY = vec3(0.94, 0.99, 1.00);
+
+float h_hash(vec2 p)
+{
+    p = fract(p*vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x*p.y);
+}
+
+float h_noise(vec2 p)
+{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f*f*(3.0 - 2.0*f);
+    return mix(mix(h_hash(i), h_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(h_hash(i + vec2(0.0, 1.0)), h_hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    // How much water stands over the cell to each side. A dry neighbour
+    // is a bank, not a fall, so it is read as level and left alone.
+    float l = texture(mask, clamp(fragTexCoord - vec2(REACH, 0.0)*mtex, vec2(0.0), vec2(1.0))).r*255.0;
+    float r = texture(mask, clamp(fragTexCoord + vec2(REACH, 0.0)*mtex, vec2(0.0), vec2(1.0))).r*255.0;
+    float dl = l < 0.5 ? code : l;
+    float dr = r < 0.5 ? code : r;
+
+    // The surface falls the way the water stands shallower, and that is
+    // the way the water goes.
+    float head = (dl - dr)/(2.0*REACH);
+    float vel = head*GAIN;
+    float speed = abs(vel);
+
+    // Speed dies with depth: the top of a race runs and the bottom of it
+    // barely moves. The same head drives both, over a longer column.
+    float carry = exp(-depth*0.045);
+    vel *= carry;
+    speed *= carry;
+
+    vec3 world = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(world.r, world.g), world.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    // Still water is a mirror and quick water is a texture, so the two
+    // are drawn by different things and mixed by the speed.
+    float up = depth/step_cells;
+    vec3 sky = texture(texture0, clamp(fragTexCoord + vec2(0.0, -2.0*up/size.y), vec2(0.0), vec2(1.0))).rgb;
+    vec3 glass = world*mix(QUICK, STILL, 1.0 - exp(-depth*0.06))*1.50 + sky*0.30*exp(-depth*0.03);
+
+    // The texture the current carries, dragged at the speed the head
+    // gives it, so a still pond holds its pattern still.
+    float phase = at.x*0.30 - seconds*vel*9.0;
+    float streak = h_noise(vec2(phase, at.y*0.55 + seconds*0.05*sign(vel)));
+    float rough = smoothstep(0.45, 0.85, streak);
+
+    vec3 col = glass;
+    col += QUICK*lit*rough*smoothstep(0.02, 0.35, speed)*0.9;
+    col = mix(col, SPRAY*max(lit, 0.25),
+              smoothstep(0.55, 1.05, speed)*rough*exp(-depth*0.16)*0.8);
+
+    // And a mark for the head itself: where the surface is steepest the
+    // water is standing on nothing, and that is where a fall begins.
+    col += SPRAY*lit*smoothstep(0.8, 1.8, abs(head))*exp(-depth*0.10)*0.25;
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+<script type="x-shader/x-fragment" id="fs-plate-17">
+// Plate XVII. Photons. Plate I draws its caustics from the seams of a
+// cell pattern, which looks like caustics and is not. This draws them
+// the way they happen: light enters through a wavy surface, every ray
+// is bent by the slope where it crosses, and the brightness at a depth
+// is how much the sheet of rays has been squeezed by the time it gets
+// there. That squeeze is the derivative of where a ray lands with
+// respect to where it started, and where it turns over, the rays fold
+// and the water burns white. Focus falls out of the arithmetic: the
+// net is soft near the surface, sharp at the focal depth, and soft
+// again under it, with no constant anywhere saying so.
+
+in vec2 fragTexCoord;
+in vec4 fragColor;
+
+uniform sampler2D texture0;
+uniform vec4 colDiffuse;
+
+uniform sampler2D mask;
+uniform vec2 size;
+uniform vec2 origin;
+uniform float step_cells;
+uniform float seconds;
+
+out vec4 finalColor;
+
+const float BEND = 0.55;             // how hard the surface bends a ray
+const float SPLIT = 0.055;           // and how much less it bends the red
+const vec3 DEEP = vec3(0.09, 0.26, 0.42);
+const vec3 SHOAL = vec3(0.40, 0.74, 0.82);
+
+// The surface, and its slope. Three waves is enough for a net that does
+// not repeat inside a pond.
+float q_wave(float x, float t)
+{
+    return sin(x*0.31 + t*1.25)*0.55
+         + sin(x*0.52 - t*0.95 + 2.1)*0.32
+         + sin(x*0.87 + t*1.75 + 4.4)*0.17;
+}
+
+float q_slope(float x, float t)
+{
+    return (q_wave(x + 0.35, t) - q_wave(x - 0.35, t))/0.70;
+}
+
+// Where a ray that crossed the surface at x has got to, d cells down.
+float q_land(float x, float d, float bend)
+{
+    return x + q_slope(x, seconds)*bend*d;
+}
+
+// How bright the sheet of rays is there: one over how much it stretched.
+float q_light(float d, float x, float bend)
+{
+    float e = 0.5;
+    float j = (q_land(x + e, d, bend) - q_land(x - e, d, bend))/(2.0*e);
+    return 1.0/max(abs(j), 0.06);
+}
+
+void main()
+{
+    float code = texture(mask, fragTexCoord).r*255.0;
+    if (code < 0.5) discard;
+
+    float depth = code - 1.0;
+    vec2 texel = 1.0/size;
+    vec2 mtex = 1.0/vec2(textureSize(mask, 0));
+    float unit = size.x*step_cells*mtex.x;
+    vec2 at = origin + fragTexCoord*size*step_cells/unit;
+
+    // The ray that reaches this cell left the surface a little to one
+    // side of it, so the sheet is measured where it started.
+    float x = at.x - q_slope(at.x, seconds)*BEND*depth;
+
+    // Three sheets, because glass bends blue harder than red and so
+    // does water. It is a small split, and it is what colours the edges
+    // of a caustic on a swimming pool floor.
+    vec3 sheet = vec3(
+        q_light(depth, x, BEND*(1.0 - SPLIT)),
+        q_light(depth, x, BEND),
+        q_light(depth, x, BEND*(1.0 + SPLIT)));
+
+    float slope = q_slope(at.x, seconds);
+    vec2 bendv = vec2(-slope*2.8*exp(-depth*0.08)*unit*texel.x, 0.0);
+    vec3 under = texture(texture0, clamp(fragTexCoord + bendv, vec2(0.0), vec2(1.0))).rgb;
+
+    vec3 here = texture(texture0, fragTexCoord).rgb;
+    float bright = max(max(here.r, here.g), here.b);
+    float lit = 1.0 - exp(-bright*3.0);
+
+    float sink = 1.0 - exp(-depth*0.055);
+    vec3 col = under*mix(SHOAL, DEEP, sink)*1.55;
+
+    // The light the sheet carries is spent as it goes, so a fold near
+    // the surface is worth more than the same fold in the dark.
+    vec3 net = (sheet - 1.0)*0.30*exp(-depth*0.045);
+    col += max(net, vec3(0.0))*lit*mix(vec3(0.55, 0.82, 1.0), vec3(1.0), 0.35);
+
+    // Where the sheet has been pulled thin instead of folded, the water
+    // is darker than it would be with no surface at all.
+    col *= 1.0 - clamp((1.0 - sheet.g)*0.35, 0.0, 0.30);
+
+    finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
+}
+</script>
+
+
+
+
 <script>
 // ---------------------------------------------------------------------
 // Nine Waters. One WebGL 2 context draws every panel on the page: the
@@ -1870,6 +2762,7 @@ const HEADER = "#version 300 es\nprecision highp float;\nprecision highp int;\n"
 
 const PLATES = [
   {
+    set: "school",
     id: 1, num: "Plate I", title: "Ripple and net",
     work: "two 3×3 seam searches, run twice",
     school: "The one in the game",
@@ -1882,6 +2775,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 2, num: "Plate II", title: "Three plates of indigo",
     work: "three noise fields, one only for the register",
     school: "Ukiyo-e woodblock",
@@ -1894,6 +2788,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 3, num: "Plate III", title: "Broken colour",
     work: "six strokes, each with two reads",
     school: "Impressionism",
@@ -1906,6 +2801,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 4, num: "Plate IV", title: "One brush of ink",
     work: "one four-octave noise, and three wet rims",
     school: "Sumi-e",
@@ -1918,6 +2814,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 5, num: "Plate V", title: "Panes and came",
     work: "one 3×3 pane search, two hashes a pane",
     school: "Stained glass",
@@ -1930,6 +2827,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 6, num: "Plate VI", title: "Eight colours",
     work: "a dither lookup and two hashes; no noise",
     school: "Pixel art",
@@ -1942,6 +2840,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 7, num: "Plate VII", title: "Beer's law",
     work: "three height evaluations, for the normal",
     school: "Photoreal",
@@ -1954,6 +2853,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 8, num: "Plate VIII", title: "Painted cel",
     work: "two noise fields, and a lattice of stars",
     school: "Cel animation",
@@ -1966,6 +2866,7 @@ const PLATES = [
     ]
   },
   {
+    set: "school",
     id: 9, num: "Plate IX", title: "The horizon",
     work: "one hash; the rest is plain arithmetic",
     school: "Arcade neon",
@@ -1976,8 +2877,113 @@ const PLATES = [
       ["Tube", "Channels pulled apart, scanlines, a grille"],
       ["Rule", "Still no light the world did not give"]
     ]
+  },
+  {
+    set: "method",
+    id: 10, num: "Plate X", title: "Gerstner swell",
+    work: "four trochoids, and two turns of a fixed point",
+    school: "Trochoidal waves",
+    note: "The surface is a sum of four trochoids \u2014 the shape a wave takes when every particle in it runs round a circle. Crests come to a point and troughs go broad, which no sum of sines does on its own, so the sample is pulled toward the crest twice before the height is read. The waterline moves with it, and the sideways swing of the water dies with depth, which is why a swell moves the surface and leaves the bottom alone.",
+    how: [
+      ["Surface", "Four trochoids, long to short"],
+      ["Crest", "Two turns of a fixed point sharpen it"],
+      ["Orbit", "The sideways swing dies with depth"],
+      ["Foam", "A crest too steep to hold, spilling"]
+    ]
+  },
+  {
+    set: "method",
+    id: 11, num: "Plate XI", title: "The spectrum",
+    work: "sixteen terms; the slope comes free with them",
+    school: "Deep water dispersion",
+    note: "A sea is not a wave, it is a spectrum. Sixteen wavenumbers spaced geometrically, amplitudes off a Phillips curve, and every one running at the speed its own wavelength gives it \u2014 the square root of g over k. Long waves outrun short ones, so the pattern never repeats inside a pond. The slope falls out of the same sum for nothing, because the derivative of a sine is a cosine.",
+    how: [
+      ["Terms", "Sixteen wavenumbers, spaced geometrically"],
+      ["Amplitude", "A Phillips curve over the fetch"],
+      ["Speed", "The square root of g over k"],
+      ["Slope", "Free, in the same loop"]
+    ]
+  },
+  {
+    set: "method",
+    id: 12, num: "Plate XII", title: "The flow map",
+    work: "two dragged copies of one pattern, cross faded",
+    school: "Advected pattern",
+    note: "Water that goes somewhere cannot be drawn with a pattern that stands still, and a pattern dragged along a current stretches until it tears. So drag two copies, half a period apart, and cross-fade between them: each is thrown away and begun again before the stretch can show. The current runs fast along the surface and dies with depth, and a slow turn in it keeps the whole pond from sliding one way.",
+    how: [
+      ["Current", "Quick on top, dead at the bottom"],
+      ["Drag", "Two copies, half a period apart"],
+      ["Fade", "A triangle between the two"],
+      ["Tear", "Quick water goes white"]
+    ]
+  },
+  {
+    set: "method",
+    id: 13, num: "Plate XIII", title: "Curl and carry",
+    work: "a curl of noise, walked back three steps",
+    school: "Divergence-free advection",
+    note: "A fluid neither gains nor loses itself, so its velocity field has no divergence, and the cheapest field with none is the curl of a scalar. This takes the curl of a noise field for the velocity, then walks backwards along it three times and reads a dye pattern where the water came from. That is advection as a solver does it \u2014 without a solver, and without a frame of history to keep.",
+    how: [
+      ["Field", "The curl of a stream function"],
+      ["Walk", "Three steps back up the current"],
+      ["Dye", "Read where the water set out"],
+      ["Eddy", "Drawn where the walk turns hardest"]
+    ]
+  },
+  {
+    set: "method",
+    id: 14, num: "Plate XIV", title: "Rain",
+    work: "six drips, three bands of speed for each",
+    school: "Dispersive rings",
+    note: "Six drips, each on its own clock, and every strike sends a ring across the surface and down into the water. Deep water waves disperse: a long wave travels faster than a short one, so a ring that leaves as a pulse arrives as a chirp, long waves at the front and short ones trailing. The ring dies as it spreads, because the same lift is being shared round a longer circle.",
+    how: [
+      ["Ring", "The lift shared round a longer circle"],
+      ["Chirp", "Three speeds; the long wave gets there first"],
+      ["Clock", "Six drips, none of them in step"],
+      ["Crown", "White where the drip strikes"]
+    ]
+  },
+  {
+    set: "method",
+    id: 15, num: "Plate XV", title: "The screen-space surface",
+    work: "seventeen reads of the mask, over two rings",
+    school: "Particle fluid rendering",
+    note: "How a particle fluid is drawn when there is no mesh to draw: take the depth the simulation wrote, blur it, and treat the blurred field as a surface. Seventeen reads over two rings give a coverage and its gradient; the gradient is the normal, and the coverage rounds off the staircase the cell grid leaves at the shore. The one plate that stops the water looking like a grid, and it pays for that in reads.",
+    how: [
+      ["Taps", "Two rings, seventeen reads of the mask"],
+      ["Normal", "The gradient of the coverage"],
+      ["Rim", "The staircase of cells rounded away"],
+      ["Curve", "A bright line along every edge"]
+    ]
+  },
+  {
+    set: "method",
+    id: 16, num: "Plate XVI", title: "The head",
+    work: "two more mask reads, and arithmetic",
+    school: "Flow read off the mask",
+    note: "docs/water.md ends on the thing the shader is never told: which way the water is going. This works it out from what it is given. Two texels of the mask, left and right of this one and on the same row, say how much water stands over each; the difference is the slope of the surface, and water runs down a slope. A pond that has found its level reads still, and the millpond's spillway, where the run of water restarts six cells lower, reads as a race. Nothing was added to the game to do it.",
+    how: [
+      ["Head", "Two mask reads, three cells either side"],
+      ["Speed", "The slope of the surface, damped by depth"],
+      ["Still", "Glass, with the sky standing in it"],
+      ["Quick", "A texture dragged at the speed it found"]
+    ]
+  },
+  {
+    set: "method",
+    id: 17, num: "Plate XVII", title: "Photons",
+    work: "four wave evaluations, and three sheets of light",
+    school: "Caustics by Jacobian",
+    note: "Plate I draws its caustics from the seams of a cell pattern, which looks like caustics and is not. This draws them the way they happen: every ray is bent by the slope where it crosses the surface, and the brightness at a depth is how much the sheet of rays has been squeezed getting there. Where the squeeze turns over, the rays fold and the water burns. Focus falls out of the arithmetic \u2014 soft near the surface, sharp at the focal depth, soft again under it \u2014 with no constant anywhere saying so.",
+    how: [
+      ["Ray", "Bent by the slope where it entered"],
+      ["Bright", "One over how far the sheet was stretched"],
+      ["Fold", "Where the squeeze turns over, it burns"],
+      ["Split", "Blue bends harder than red"]
+    ]
   }
 ];
+
 
 const SCENES = [
   { name: "Grotto", centre: [118, 62] },
@@ -2069,7 +3075,10 @@ function board(cw, ch) {
 <script>
 // --------------------------- the panels ------------------------------
 
-const platesEl = document.getElementById("plates");
+const platesBySet = {
+  school: document.getElementById("plates-schools"),
+  method: document.getElementById("plates-methods")
+};
 const targets = [];
 
 function el(tag, cls, text) {
@@ -2148,7 +3157,7 @@ function buildCards() {
     body.appendChild(details);
 
     card.appendChild(body);
-    platesEl.appendChild(card);
+    platesBySet[p.set].appendChild(card);
 
     p.card = card;
     targets.push({
@@ -2162,7 +3171,7 @@ function fail(message) {
   note.textContent = message;
   const box = el("p", "note", message);
   box.style.padding = "28px";
-  platesEl.appendChild(box);
+  platesBySet.school.appendChild(box);
 }
 
 buildCards();
@@ -2225,9 +3234,24 @@ function costRow(name, school, reads, lines, work, isRef) {
   return { ms, rel, fill };
 }
 
+function groupRow(label) {
+  const tr = document.createElement("tr");
+  tr.className = "group";
+  const td = el("td", null, label);
+  td.colSpan = 7;
+  tr.appendChild(td);
+  costRows.appendChild(tr);
+}
+
 const refRow = costRow("The world alone", "no water pass", 1, null,
                        "one read, and a write; the floor every plate stands on", true);
+let lastSet = null;
 for (const p of PLATES) {
+  if (p.set !== lastSet) {
+    groupRow(p.set === "school" ? "The schools \u2014 how it is pictured"
+                                : "The methods \u2014 how it is modelled");
+    lastSet = p.set;
+  }
   const text = src("fs-plate-" + p.id);
   p.cells = costRow(p.num + " \u2014 " + p.title, p.school, readCount(text), lineCount(text), p.work, false);
 }
@@ -2262,7 +3286,7 @@ function start() {
     }
   }
   note.textContent = broken === 0
-    ? "WebGL 2 · nine plates live"
+    ? "WebGL 2 · " + PLATES.length + " plates live"
     : "WebGL 2 · " + broken + " plate(s) would not compile";
 
   const locs = new WeakMap();

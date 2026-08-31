@@ -201,12 +201,14 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frame
 
 **Before a new design reaches the window there is a lab for it.**
 `web/water-lab/index.html` draws the two ponds in a browser and runs
-nine water shaders over them at once: this one, and eight attempts at a
-new one, each committed to a school of art. Every panel is a whole
-`data/shaders/water.fs` under the uniform names above, so a design goes
-from the page to the game by copying it over this file. The page can
-also time the nine against each other. `docs/water_lab.md` is the note
-for it, and says where the browser's pond differs from the game's.
+seventeen water shaders over them at once: this one, then nine attempts
+committed to a school of art and eight committed to a model of what
+water is. Every panel is a whole `data/shaders/water.fs` under the
+uniform names above, so a design goes from the page to the game by
+copying it over this file. The page also times them against each other.
+`docs/water_lab.md` is the note for it: where the browser's pond differs
+from the game's, and the one thing the uniform list above turns out to
+be missing -- nothing in it says how many pixels a cell is worth.
 
 ## What it costs
 

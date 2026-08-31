@@ -1,12 +1,25 @@
 # The water lab
 
-`web/water-lab/index.html` is one page that draws a pond nine times, once
-for each of nine attempts at the water shader, and runs all nine at once
-in a browser. Plate I is the shader the game ships. The eight after it
-are new designs, and each one is committed to a school of art rather
-than to realism: a woodblock print, a heap of impressionist marks, an
-ink wash, a stained glass window, an eight colour demake, a photograph,
-a painted cel, and a neon cabinet.
+`web/water-lab/index.html` is one page that draws a pond seventeen
+times, once for each of seventeen water shaders, and runs them all at
+once in a browser. Plate I is the shader the game ships. The sixteen
+after it are new designs, in two sets.
+
+**Plates I to IX, the schools.** Each commits to a way of picturing
+water rather than to a way of modelling it: a woodblock print, a heap of
+impressionist marks, an ink wash, a stained glass window, an eight
+colour demake, a photograph, a painted cel, and a neon cabinet. Nothing
+in them is simulated; depth chooses a tone, or a pane, or how much ink
+the brush left.
+
+**Plates X to XVII, the methods.** Each commits to a model of what water
+is, and takes what falls out of it: a sum of trochoids; a spectrum with
+a speed for every wavelength; a pattern dragged along a current; an eddy
+made from the curl of a field, so that it can neither gain nor lose
+itself; a ring that disperses as it spreads; a surface smoothed out of
+the cell grid the way a particle fluid is drawn; the slope of the
+water's own head, read off the mask; and a sheet of light folded by the
+surface it came through.
 
 Nothing in it is in the game. It is a place to judge a look before
 writing it into `data/shaders/water.fs`, because the look lives in the
@@ -51,6 +64,29 @@ The page holds to that contract in the way it draws, too. It runs one
 WebGL context for the whole page, draws the pond into a framebuffer of
 cells, and then draws each plate as a second full-screen pass over it,
 which is what `app_draw_water` does inside `BeginShaderMode`.
+
+## What the contract is missing
+
+Writing the second set turned one thing up. **Nothing the game passes
+says how many screen units make a world cell.** `size` is the window in
+pixels and `origin` is the camera in cells, so the `cell` a shader works
+out from them is neither one nor the other: at the zoom the game opens
+at, four of its units make a cell. Every constant in the shipped shader
+is tuned against that, which is why its caustics change size when the
+player zooms.
+
+The plates of the second set take the missing number from the mask
+instead. `textureSize(mask, 0)` gives the cells across the view, because
+the mask holds one texel a cell, and from it a shader can work in world
+cells and keep a pattern the same size at any zoom. It costs nothing at
+run time and is the same call in GLSL 330 and GLSL ES 300.
+
+The alternative is a uniform. `water_begin` already sends four; a fifth
+saying cells to a pixel would let every shader be written in cells, and
+would let the mirror in the shipped shader be right at more than one
+zoom. Either way, `textureSize` is the reading the lab makes of it, and
+the zoom control on the page is the demonstration: the first nine change
+size with the zoom and the second eight do not.
 
 ## The pond is drawn in the browser
 
@@ -100,6 +136,12 @@ the water on screen is charged for it.
 - **Nothing here is chosen.** The page compares; it does not decide.
 - **One material.** The depth map has water in it and nothing else, so
   no plate says anything about lava, acid or oil.
+- **The methods are still one pass.** None of them keeps a frame of
+  history, because the game's water pass is given none. Plate XIII
+  advects by walking backwards along a field it evaluates on the spot,
+  and Plate XVI reads the flow off the mask rather than being told it. A
+  real solver would want a texture it can write to and read next tick,
+  and that is not this contract.
 - **No sandbox.** The water in the page is a shape, not a fluid, so no
   plate can be judged on what it does with water that is moving --
   which is the thing `docs/water.md` lists first under what the shipped
