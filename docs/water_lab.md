@@ -65,6 +65,47 @@ WebGL context for the whole page, draws the pond into a framebuffer of
 cells, and then draws each plate as a second full-screen pass over it,
 which is what `app_draw_water` does inside `BeginShaderMode`.
 
+## Plate VI has controls
+
+The eight colour plate is tunable on the page. Its ramp and its eleven
+constants are on sliders, and moving one does not feed a uniform into
+the shader: it writes the shader's own tuning block, the part between
+`// >>> tuning` and `// <<< tuning`, and compiles the result. The panel,
+the water it draws and the source printed under it are one text, so the
+file **Copy** hands over is the file you tuned.
+
+| Knob | What it sets |
+| --- | --- |
+| Pixel | Screen units to one drawn pixel. Four units are a cell at the zoom the game opens at |
+| Frames | The clock, in frames a second. Zero runs it smooth |
+| Dither | How much of the 4x4 threshold is spent. Zero gives hard bands |
+| Ramp top | The step of the ramp the surface sits on |
+| Depth | Steps of ramp a cell of depth costs |
+| Band swell | How far the scrolling bands move the step |
+| Band height | How tall one band is |
+| Band speed | How fast the bands scroll |
+| Gloom | Steps the ramp drops where the world left the water dark |
+| Surface line | Cells of surface drawn as the bright broken line |
+| Sparkle | The share of pixels that catch the light for one frame |
+
+Four things worth knowing about it:
+
+- **The plate is still a whole `water.fs`.** Nothing was added to the
+  contract to make it tunable, so a tuning reaches the game the way any
+  other plate does: copy it over the file.
+- **A tuning that will not compile leaves the last good one running**
+  and says so under the sliders, which is the courtesy `water_load`
+  gives the game.
+- **At most one compile a frame.** A drag is collected and applied on
+  the next frame. The program is small and the cost is the browser's.
+- **The settings are kept in this browser**, under the key
+  `water-lab.plate-vi`. A reload keeps a tuning, nothing leaves the
+  machine, and *Reset* puts the shipped numbers back.
+
+Only Plate VI has them. The other sixteen are fixed text, and the
+obvious next step for the page is to mark a tuning block in each of
+them and let the same panel drive whichever plate is open.
+
 ## What the contract is missing
 
 Writing the second set turned one thing up. **Nothing the game passes
@@ -134,6 +175,7 @@ the water on screen is charged for it.
 ## What this leaves out
 
 - **Nothing here is chosen.** The page compares; it does not decide.
+- **One plate has controls.** The other sixteen are read, not tuned.
 - **One material.** The depth map has water in it and nothing else, so
   no plate says anything about lava, acid or oil.
 - **The methods are still one pass.** None of them keeps a frame of
