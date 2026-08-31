@@ -8,12 +8,13 @@ dam and a pool under it, and it is not still at all. It is drawn full,
 over the head of the spillway, so the first tick of the world sends it
 through the dam and down into the dry pool.
 
-Both are the same water, drawn by the same shader: the surface
-ripples, the depths go dark and cold, and a net of caustics slides
-over the bottom.
+Both are the same water, drawn by the same shader: eight colours, an
+ordered dither between them, and a slow band of light crossing the
+surface. The world is a grid of coloured cells, and the water is drawn
+like one.
 
 This note says where the two ponds are, how the fireflies find the
-first, where the shader came from, what it draws, and what the phase
+first, what the shader draws, where it came from, and what the phase
 leaves out. `docs/physics.md` says what makes the water move at all, and it is
 worth reading first: "The reach is the flatness" for how a pond finds
 its level, and "The head and the press" for how a body of it carries a
@@ -93,22 +94,35 @@ the game names the Grotto: the tile that carries firefly marks is the
 pond, whichever tile that is, and a pond painted into any tile of any
 biome gathers its own swarm without a line of code changing.
 
-## What was read before the shader was written
+## Where this shader came from
+
+It was chosen off `web/water-lab/index.html`, which draws both ponds in
+a browser and runs seventeen water shaders over them at once, and it was
+tuned there: the numbers between the two tuning marks in
+`data/shaders/water.fs` are the ones the sliders on that page were left
+at, copied back whole. `docs/water_lab.md` is the note for the lab. The
+lab keeps every attempt that was not chosen, this shader's predecessor
+among them.
+
+**It owes nothing to anyone.** Every line of it is the game's own: a
+ramp, a Bayer threshold, two sines and a hash. What follows is the
+reading that went into the shader it replaced, kept because the next
+one will want it.
 
 Water shaders with published source are not scarce; water shaders with
 a licence a game can ship are.
 
 | Read | Licence | What came of it |
 | --- | --- | --- |
-| raylib, `examples/shaders/resources/shaders/glsl330/wave.fs` | zlib | **Taken.** The two lines that bend the texture coordinate by a cosine of one axis and a sine of the other are that shader's, and are marked as such in `data/shaders/water.fs`. |
+| raylib, `examples/shaders/resources/shaders/glsl330/wave.fs` | zlib | **Taken, and since dropped.** Two lines bent the texture coordinate by a cosine of one axis and a sine of the other. They were the whole of the old shader's wave; nothing of them is in this one. The old shader is Plate I of the lab, and the attribution stands there. |
 | `elemel/water-shader`, `water.frag` | MIT | Read, not used. It cuts a wave-shaped silhouette out of a quad and is written against `gl_FragColor`, which is GLSL 1.x. |
 | `tuxalin/water-shader` | MIT | Read, not used. It is a 3D ocean surface: normals, foam, a projected grid. There is no third dimension here. |
-| Shadertoy "Tileable Water Caustic" (`MdlXz8`) and its Godot port | CC BY-NC-SA 3.0 | Read for the look only. The non-commercial term does not suit a game, so **none of it was copied**; the caustics here are written from ridged sines and are not that shader. |
+| Shadertoy "Tileable Water Caustic" (`MdlXz8`) and its Godot port | CC BY-NC-SA 3.0 | Read for the look only. The non-commercial term does not suit a game, so **none of it was copied**. |
 
-The raylib example is the natural base: it ships with the very library
-the game already links, under the same zlib licence, and the wave it
-draws is exactly the part of water that a texture of cells cannot say
-for itself.
+The one thing worth keeping from that round: the borrowed wave was the
+part of water a texture of cells cannot say for itself. This shader
+answers the same question the other way, by saying that a texture of
+cells should not try.
 
 ## What the shader draws
 
@@ -126,42 +140,44 @@ one channel texture beside the world. A texel of 0 is discarded by the
 shader, so everything that is not water is left exactly as the light
 drew it.
 
-From the depth the shader makes three things:
+From the depth the shader makes a step of a ramp, and from the step a
+colour. There is nothing else in it: no blend, no gradient, and no
+wave.
 
-1. **The wave.** The texture coordinate is bent by the raylib wave, so
-   what lies under the water — the rock of the bowl, the debris on the
-   bottom — wobbles with the surface.
-2. **The sink.** Deeper texels are pulled toward `DEEP`, which keeps
-   less red and a little more blue, so a pond reads as a bowl and not
-   as a flat blue shape. It is a multiply, never an add, so water in
-   the gloom stays in the gloom.
-3. **The caustics and the surface.** The net light leaves on the bottom
-   of a pond is the boundary of a pattern of cells — bright curved seams
-   where neighbouring lenses of surface meet — so it is drawn as one: a
-   scatter of points that drift, in world cells so the pattern stays
-   with the world as the camera moves, and the brightness is how close
-   the texel lies to the seam between the nearest point and the next.
-   Two such nets at different scales are laid over each other, and the
-   whole thing dims with depth, because a lens focuses light near the
-   surface and spends it there. The surface line carries a slow ripple
-   and a twinkle: each short run of it has its own phase, and a hard
-   `pow` keeps all but the crest of each pulse dark, so points of the
-   line catch the light and let it go.
-4. **The mirror.** The world above the surface, sampled upside down with
-   a sideways waver and mixed in faintly, fading with depth. The sample
-   is of the picture the light already drew, so a dark shore reflects as
-   a dark shore; what it brings the pond is the firefly and the orb,
-   inverted and wavering, which is what still water does at night.
+1. **The ramp.** Eight colours, dark to light, and every water texel
+   takes one of them whole. `TOP` is the step the surface sits on;
+   `FALL` is how many steps a cell of depth costs, so depth walks down
+   the ramp and a pond reads as a bowl. The middle of the ramp is the
+   Water row of `data/materials.txt`, so the shader and the material
+   agree about what colour water is.
+2. **The dither.** A step is a whole number and the level is not, so the
+   fraction between two steps is spent on a four by four ordered
+   threshold rather than on a blend. `DITHER` says how much of it is
+   spent: at 0 the ramp bands hard, and above 1 the two nearest steps
+   mix over a wider run of cells. That checker is the whole look, and it
+   is what a machine with eight colours and no blending would have done.
+3. **The pixel and the frame.** Cells are gathered into pixels of `PIX`
+   screen units, and the clock is quantised to `FPS` frames a second, so
+   the water moves in steps rather than smoothly. Both are the same idea
+   said twice: this is a sprite, not a surface.
+4. **The bands and the sparkle.** Two sines at odds cross the water and
+   move the step up and down by `SWELL`, which is the scrolling band
+   every sprite sheet's water has. `SPARK` of the pixels take the top of
+   the ramp for one frame and let it go. `LINE`, at 0 in the shipped
+   tuning, would draw the top cells of the surface as a broken bright
+   line instead.
 
-**The shader never lights what the light left dark.** The net and the
-twinkle are multiplied by `lit`, taken from the brightness of the texel
-the CPU already shaded and tinted by its colour, so a glint under the
-fireflies is green and one under the orb is warm. The mirror adds only
-light that already stands in the picture above the water. Water in the
-far gloom is a dark shape; water under the fireflies shimmers; water
-under the orb is bright. So the one place the look of light lives is
-still `light_shade`, and the shader only says what water does with the
-light it is given.
+**The shader never lights what the light left dark.** `GLOOM` is the
+steps the ramp falls where the CPU left the texel unlit, so water in the
+far gloom sits at the bottom of the ramp and water under the fireflies
+sits at the top. The light itself is not touched: the one place the look
+of light lives is still `light_shade`, and the shader only says what
+water does with the light it is given.
+
+**Every one of those names is a constant** in one block of the file,
+between `// >>> tuning` and `// <<< tuning`. They are set on the lab
+page, not by hand, and the file is copied back whole; see "Where this
+shader came from" above.
 
 ## Where it runs, and what happens when it cannot
 
@@ -181,7 +197,7 @@ has to be judged. `bin/the-game` takes a shot of itself:
 
 ```sh
 make game
-./bin/the-game shot=shots/water.png frames=140 walk=-40
+./bin/the-game shot=shots/water.png frames=200 walk=-40 ticks=60
 ./bin/the-game shot=shots/mill.png frames=2 ticks=90    # the mill, part way
 ```
 
@@ -199,16 +215,18 @@ xvfb-run -a -s "-screen 0 1280x720x24" ./bin/the-game shot=shots/water.png frame
 
 `bin/shot` still needs neither, and is still the way to judge terrain.
 
-**Before a new design reaches the window there is a lab for it.**
+**Before a design reaches the window there is a lab for it.**
 `web/water-lab/index.html` draws the two ponds in a browser and runs
-seventeen water shaders over them at once: this one, then nine attempts
-committed to a school of art and eight committed to a model of what
-water is. Every panel is a whole `data/shaders/water.fs` under the
+seventeen water shaders over them at once: nine committed to a school of
+art and eight to a model of what water is, with the shader this file
+held before as Plate I. This shader is Plate VI, and its numbers are on
+sliders there. Every panel is a whole `data/shaders/water.fs` under the
 uniform names above, so a design goes from the page to the game by
-copying it over this file. The page also times them against each other.
-`docs/water_lab.md` is the note for it: where the browser's pond differs
-from the game's, and the one thing the uniform list above turns out to
-be missing -- nothing in it says how many pixels a cell is worth.
+copying it over this file, and comes back the same way. The page also
+times them against each other. `docs/water_lab.md` is the note for it:
+where the browser's pond differs from the game's, and the one thing the
+uniform list above turns out to be missing -- nothing in it says how
+many pixels a cell is worth.
 
 ## What it costs
 
@@ -231,11 +249,16 @@ small floods.
 - **Ponds go where the lattice puts them.** The Grotto is one tile of
   the Coalmine's wang set, so the seed decides how many ponds a world
   holds and where; nothing places one by hand.
-- **GLSL 330 only.** There is no `#version 100` twin of the shader, so
-  a GL ES build would fall back to flat water.
+- **GLSL 330 and GLSL ES 300.** `src/shader_header.odin` puts the right
+  first line on for the target. There is no `#version 100` twin, so a GL
+  ES 2 build would fall back to flat water.
 - **The water does not move the light.** Light passes through water as
-  it passes through air, and the caustics are drawn on the water rather
-  than cast by it onto what is under the surface.
+  it passes through air. Nothing is cast on the bottom of a pond.
+- **Nothing is refracted and nothing is reflected.** The shader does not
+  read the world under the water at all, only how deep the water is, so
+  the rock of the bowl does not wobble and the fireflies do not stand
+  upside down in the surface. Both were in the shader this one replaced,
+  and both are still in the lab, Plate I.
 - **Nothing else is shaded.** Lava, acid and oil are liquids too and are
   drawn flat. The depth map has one material in it; giving it more is
   the obvious next step.
