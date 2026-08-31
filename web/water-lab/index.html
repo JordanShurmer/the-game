@@ -466,6 +466,115 @@ a:hover { text-decoration-color: var(--parch); }
 .setband p { color: var(--slate); margin: 0 0 14px; }
 .setband p:last-child { margin-bottom: 0; }
 
+/* ---------- the tuner, on the plate that has one ---------- */
+
+.tuner {
+  border-bottom: 1px solid var(--line);
+  background: var(--ink-3);
+  padding: 15px clamp(16px, 2.2vw, 26px) 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.tuner .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+.tuner .swatches { display: flex; gap: 5px; align-items: center; }
+.tuner .pills { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tuner input[type="color"] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.tuner input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+.tuner input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 1px; }
+.tuner input[type="color"]::-moz-color-swatch { border: 0; }
+
+.knobs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(178px, 1fr));
+  gap: 12px 22px;
+}
+.knob { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; align-items: baseline; }
+.knob label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.knob output {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--chalk);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.knob input[type="range"] {
+  grid-column: 1 / -1;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 2px;
+  margin: 4px 0 0;
+  background: var(--line-2);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.knob input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--parch);
+  cursor: pointer;
+}
+.knob input[type="range"]::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--parch);
+  cursor: pointer;
+}
+.knob input[type="range"]:focus-visible { outline: 2px solid var(--parch); outline-offset: 6px; }
+
+.tuner .pill {
+  appearance: none;
+  border: 1px solid var(--line-2);
+  background: transparent;
+  color: var(--slate);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 5px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.tuner .pill:hover { color: var(--chalk); border-color: var(--parch-dk); }
+.tuner .pill.reset { color: var(--parch); border-color: var(--parch-dk); }
+.tuner .said { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+.tuner .said b { color: var(--parch); font-weight: 400; }
+.tuner .said.bad { color: #e8a0a0; }
+
+.lightbox[data-tuning="on"] canvas { max-height: 54vh; }
+.lightbox .tuner {
+  width: min(100%, 980px);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
 /* ---------- what they cost ---------- */
 
 .costs { padding: clamp(44px, 7vw, 88px) var(--pad) 0; }
@@ -600,6 +709,11 @@ tr.ref .bar i { background: var(--parch-dk); }
     and the game draws that water. The pond under them is drawn here in the
     browser, from the colours in <code>data/materials.txt</code>, because a
     shader can only be judged against a picture.</p>
+  <p><strong>Plate VI has controls.</strong> Its ramp and its eleven
+    constants are on sliders, and moving one rewrites that shader's tuning
+    block and recompiles it on the spot &mdash; so the panel, the water and
+    the source under it never disagree, and the file you copy is the one
+    you tuned. Your settings are kept in this browser.</p>
   <p><strong>Plate I is the shader in the game today.</strong> It is here as
     the mark to beat, and the sixteen after it are attempts at a new one.
     They come in two sets. The first nine each commit to a school of art:
@@ -1536,9 +1650,13 @@ void main()
 <script type="x-shader/x-fragment" id="fs-plate-6">
 // Plate VI. The demake. Water as a machine with eight colours and no
 // blending would have drawn it: one ramp, a four by four ordered dither
-// between its steps, pixels two cells to a side, and six frames a
-// second. The game is a grid of coloured cells already, so this plate is
-// the one that argues it should look like one.
+// between its steps, chunky pixels, and a clock that ticks a few times
+// a second. The game is a grid of coloured cells already, so this plate
+// is the one that argues it should look like one.
+//
+// Everything between the two tuning marks below is set by the controls
+// on the page, and what you read here is what is running. Copy it and
+// it is a whole data/shaders/water.fs, tuned the way you left it.
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -1554,7 +1672,9 @@ uniform float seconds;
 
 out vec4 finalColor;
 
-// The ramp. The middle of it is the Water row of data/materials.txt.
+// >>> tuning
+// The ramp, dark to light. The middle of it is the Water row of
+// data/materials.txt.
 const vec3 RAMP[8] = vec3[8](
     vec3(0.024, 0.063, 0.110),
     vec3(0.051, 0.133, 0.200),
@@ -1565,8 +1685,18 @@ const vec3 RAMP[8] = vec3[8](
     vec3(0.749, 0.914, 0.949),
     vec3(0.949, 0.984, 1.000));
 
-const float PIX = 8.0;               // one drawn pixel: two cells a side
-const float FPS = 6.0;               // and it animates on sixes
+const float PIX = 8.0;         // screen units to one drawn pixel
+const float FPS = 6.0;         // frames a second; 0 runs the clock smooth
+const float DITHER = 1.0;      // how much of the 4x4 threshold is spent
+const float TOP = 6.4;         // the step of the ramp the surface sits on
+const float FALL = 0.115;      // steps of ramp a cell of depth costs
+const float SWELL = 0.85;      // how far the scrolling bands move the step
+const float BAND = 0.55;       // how tall one band is
+const float RUSH = 3.1;        // how fast the bands scroll
+const float GLOOM = 3.2;       // steps the ramp drops where nothing is lit
+const float LINE = 2.0;        // cells of surface drawn as the bright line
+const float SPARK = 0.0025;    // the share of pixels that catch the light
+// <<< tuning
 
 const float BAYER[16] = float[16](
     0.0000, 0.5000, 0.1250, 0.6250,
@@ -1593,38 +1723,39 @@ void main()
     float bright = max(max(here.r, here.g), here.b);
     float lit = 1.0 - exp(-bright*3.0);
 
-    vec2 pix = floor(cell/PIX);          // the pixel this fragment is in
-    float t = floor(seconds*FPS)/FPS;    // and the frame it is drawn on
+    vec2 pix = floor(cell/PIX);                          // the pixel it is in
+    float tick = max(FPS, 1.0);
+    float t = FPS > 0.5 ? floor(seconds*FPS)/FPS : seconds;   // and its frame
 
     // The bands that scroll: the whole of a sprite sheet's water in one
     // line. Two of them, at odds, so the pattern does not repeat soon.
-    float band = 0.55*sin(pix.y*0.55 - t*3.1 + pix.x*0.11)
-               + 0.45*sin(pix.x*0.21 + t*1.7);
+    float band = 0.55*sin(pix.y*BAND - t*RUSH + pix.x*0.11)
+               + 0.45*sin(pix.x*BAND*0.38 + t*RUSH*0.55);
 
     // Depth walks down the ramp; the light walks it back up.
-    float level = 6.4 - depth*0.115 + band*0.85 - (1.0 - lit)*3.2;
+    float level = TOP - depth*FALL + band*SWELL - (1.0 - lit)*GLOOM;
 
     // The dither: the fraction between two steps of the ramp is spent on
     // a threshold pattern instead of a blend.
     int bx = int(mod(pix.x, 4.0));
     int by = int(mod(pix.y, 4.0));
-    float thr = BAYER[by*4 + bx];
+    float thr = (BAYER[by*4 + bx] - 0.5)*DITHER + 0.5;
     int idx = int(clamp(floor(level + thr), 0.0, 7.0));
 
     vec3 col = RAMP[idx];
 
-    // The surface is one bright pixel wide, broken into runs that shift
-    // on every frame, which is how a sprite sheet says "water".
-    if (depth < 2.0) {
-        float run = d_hash(vec2(floor(pix.x*0.5), floor(t*FPS)*0.13));
+    // The surface is a bright line broken into runs that shift on every
+    // frame, which is how a sprite sheet says "water".
+    if (depth < LINE) {
+        float run = d_hash(vec2(floor(pix.x*0.5), floor(t*tick)*0.13));
         col = run > 0.42 ? RAMP[6] : RAMP[5];
         if (run > 0.93) col = RAMP[7];
         col *= mix(0.35, 1.0, lit);
     }
 
     // A sparkle: one pixel, one frame, and gone.
-    float spark = d_hash(pix + floor(t*FPS)*7.31);
-    if (spark > 0.9975 && lit > 0.25 && depth < 26.0) col = RAMP[7];
+    float spark = d_hash(pix + floor(t*tick)*7.31);
+    if (spark > 1.0 - SPARK && lit > 0.25 && depth < 26.0) col = RAMP[7];
 
     finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
 }
@@ -2831,12 +2962,12 @@ const PLATES = [
     id: 6, num: "Plate VI", title: "Eight colours",
     work: "a dither lookup and two hashes; no noise",
     school: "Pixel art",
-    note: "What a machine with eight colours and no blending would have drawn: one ramp, a four by four ordered dither between its steps, pixels two cells to a side, and six frames a second. The middle of the ramp is the Water row of data/materials.txt. The game is a grid of coloured cells already, and this is the plate that argues it should look like one.",
+    note: "What a machine with eight colours and no blending would have drawn: one ramp, a four by four ordered dither between its steps, chunky pixels, and a clock that ticks a few times a second. The middle of the ramp is the Water row of data/materials.txt. The game is a grid of coloured cells already, and this is the plate that argues it should look like one. It is also the one with controls: the panel above writes this shader\u2019s constants and the page compiles them as you drag, so the source below, the water above it and what Copy hands you are always the same text.",
     how: [
-      ["Ramp", "Eight colours, no blend between them"],
+      ["Ramp", "Eight colours you pick, no blend between them"],
       ["Dither", "A 4x4 Bayer threshold instead of a gradient"],
-      ["Pixel", "Two cells a side, snapped"],
-      ["Frame", "Six a second, sparkles and all"]
+      ["Pixel", "Snapped to a size you set"],
+      ["Frame", "A clock you can slow or stop"]
     ]
   },
   {
@@ -3088,6 +3219,223 @@ function el(tag, cls, text) {
   return e;
 }
 
+// --------------------------- the tuner -------------------------------
+// Plate VI is the one with controls. They do not feed uniforms into the
+// shader: they write its constants, and the page compiles the result.
+// So what the panel shows, what the plate draws, and what Copy hands you
+// are the same text, and a tuned plate is still a whole water.fs.
+
+const TUNER = {
+  id: 6,
+  ramp: ["#06101c", "#0d2233", "#16394f", "#24586e",
+         "#3a7ca5", "#6fb3ce", "#bfe9f2", "#f2fbff"],
+  knobs: [
+    { key: "PIX",    label: "Pixel",        min: 2, max: 24, step: 1, value: 8,
+      gloss: "screen units to one drawn pixel",
+      fmt: v => v + " units" },
+    { key: "FPS",    label: "Frames",       min: 0, max: 24, step: 1, value: 6,
+      gloss: "frames a second; 0 runs the clock smooth",
+      fmt: v => v < 0.5 ? "smooth" : v + " a second" },
+    { key: "DITHER", label: "Dither",       min: 0, max: 1.6, step: 0.05, value: 1,
+      gloss: "how much of the 4x4 threshold is spent" },
+    { key: "TOP",    label: "Ramp top",     min: 1, max: 8, step: 0.1, value: 6.4,
+      gloss: "the step of the ramp the surface sits on" },
+    { key: "FALL",   label: "Depth",        min: 0, max: 0.4, step: 0.005, value: 0.115,
+      gloss: "steps of ramp a cell of depth costs" },
+    { key: "SWELL",  label: "Band swell",   min: 0, max: 2.5, step: 0.05, value: 0.85,
+      gloss: "how far the scrolling bands move the step" },
+    { key: "BAND",   label: "Band height",  min: 0.05, max: 1.6, step: 0.05, value: 0.55,
+      gloss: "how tall one band is" },
+    { key: "RUSH",   label: "Band speed",   min: 0, max: 8, step: 0.1, value: 3.1,
+      gloss: "how fast the bands scroll" },
+    { key: "GLOOM",  label: "Gloom",        min: 0, max: 7, step: 0.1, value: 3.2,
+      gloss: "steps the ramp drops where nothing is lit" },
+    { key: "LINE",   label: "Surface line", min: 0, max: 6, step: 0.5, value: 2,
+      gloss: "cells of surface drawn as the bright line" },
+    { key: "SPARK",  label: "Sparkle",      min: 0, max: 0.02, step: 0.0005, value: 0.0025,
+      gloss: "the share of pixels that catch the light",
+      fmt: v => (v*100).toFixed(2) + "% of pixels" }
+  ],
+  presets: {
+    "Shipped":   ["#06101c", "#0d2233", "#16394f", "#24586e", "#3a7ca5", "#6fb3ce", "#bfe9f2", "#f2fbff"],
+    "Frostbite": ["#060d18", "#0f1e33", "#1b3550", "#2c5273", "#4a7fa3", "#7fb3cf", "#c2e3f0", "#ffffff"],
+    "Bogwater":  ["#0b0f08", "#16200f", "#24331a", "#3a4d24", "#587038", "#86a35a", "#bccb8c", "#eef0cf"],
+    "Cathode":   ["#000c04", "#02160a", "#052613", "#0a3d1e", "#10602c", "#1d8f3f", "#43c96a", "#b4ffc9"],
+    "Ember":     ["#100604", "#21100a", "#351b0e", "#4f2b14", "#74441c", "#a4702f", "#d0a457", "#f6dfa8"],
+    "Grape":     ["#08061c", "#130f33", "#201a52", "#33297a", "#4f3fa8", "#7a6bd0", "#ada2ea", "#e6e0ff"]
+  },
+  base: "",
+  apply: null,
+  said: null
+};
+
+const TUNER_FRESH = {
+  ramp: TUNER.ramp.slice(),
+  values: TUNER.knobs.map(k => k.value)
+};
+
+const TUNE_STORE = "water-lab.plate-vi";
+
+function tuneSave() {
+  try {
+    localStorage.setItem(TUNE_STORE, JSON.stringify({
+      ramp: TUNER.ramp,
+      values: TUNER.knobs.map(k => k.value)
+    }));
+  } catch (e) { /* a private window, or storage turned off */ }
+}
+
+function tuneLoad() {
+  try {
+    const raw = localStorage.getItem(TUNE_STORE);
+    if (!raw) return false;
+    const held = JSON.parse(raw);
+    if (Array.isArray(held.ramp) && held.ramp.length === 8) {
+      TUNER.ramp = held.ramp.map(c => /^#[0-9a-f]{6}$/i.test(c) ? c : "#000000");
+    }
+    if (Array.isArray(held.values)) {
+      TUNER.knobs.forEach((k, i) => {
+        const v = Number(held.values[i]);
+        if (isFinite(v)) k.value = Math.min(k.max, Math.max(k.min, v));
+      });
+    }
+    return true;
+  } catch (e) { return false; }
+}
+
+function glslFloat(v) {
+  const n = parseFloat(Number(v).toFixed(4));
+  return Number.isInteger(n) ? n.toFixed(1) : String(n);
+}
+
+function hexChannels(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(c => (c/255).toFixed(3));
+}
+
+// The tuning block, written out as the GLSL it is.
+function tuneBlock() {
+  const out = [];
+  out.push("// >>> tuning");
+  out.push("// The ramp, dark to light. The middle of it is the Water row of");
+  out.push("// data/materials.txt.");
+  out.push("const vec3 RAMP[8] = vec3[8](");
+  TUNER.ramp.forEach((hex, i) => {
+    const c = hexChannels(hex);
+    out.push("    vec3(" + c[0] + ", " + c[1] + ", " + c[2] + ")" + (i === 7 ? ");" : ","));
+  });
+  out.push("");
+  for (const k of TUNER.knobs) {
+    const decl = "const float " + k.key + " = " + glslFloat(k.value) + ";";
+    out.push(decl + " ".repeat(Math.max(1, 31 - decl.length)) + "// " + k.gloss);
+  }
+  out.push("// <<< tuning");
+  return out.join("\n");
+}
+
+function tunedSource() {
+  return TUNER.base.replace(/\/\/ >>> tuning[\s\S]*?\/\/ <<< tuning/, tuneBlock());
+}
+
+function buildTuner() {
+  const wrap = el("div", "tuner");
+
+  const top = el("div", "row");
+  const left = el("p", "eyebrow", "Tune this plate");
+  top.appendChild(left);
+  const swatches = el("div", "swatches");
+  const pickers = [];
+  TUNER.ramp.forEach((hex, i) => {
+    const input = document.createElement("input");
+    input.type = "color";
+    input.value = hex;
+    input.title = "Step " + i + " of the ramp";
+    input.setAttribute("aria-label", "Ramp step " + i);
+    input.addEventListener("input", () => {
+      TUNER.ramp[i] = input.value;
+      push();
+    });
+    swatches.appendChild(input);
+    pickers.push(input);
+  });
+  top.appendChild(swatches);
+  wrap.appendChild(top);
+
+  const knobs = el("div", "knobs");
+  const readouts = [];
+  TUNER.knobs.forEach((k, i) => {
+    const knob = el("div", "knob");
+    const id = "knob-" + k.key;
+    const label = el("label", null, k.label);
+    label.htmlFor = id;
+    const out = document.createElement("output");
+    const range = document.createElement("input");
+    range.type = "range";
+    range.id = id;
+    range.min = k.min;
+    range.max = k.max;
+    range.step = k.step;
+    range.value = k.value;
+    const show = () => { out.textContent = k.fmt ? k.fmt(k.value) : glslFloat(k.value); };
+    range.addEventListener("input", () => {
+      k.value = parseFloat(range.value);
+      show();
+      push();
+    });
+    show();
+    knob.appendChild(label);
+    knob.appendChild(out);
+    knob.appendChild(range);
+    knobs.appendChild(knob);
+    readouts.push({ range, show });
+  });
+  wrap.appendChild(knobs);
+
+  const foot = el("div", "row");
+  const buttons = el("div", "pills");
+  for (const name of Object.keys(TUNER.presets)) {
+    const b = el("button", "pill", name);
+    b.type = "button";
+    b.addEventListener("click", () => {
+      TUNER.ramp = TUNER.presets[name].slice();
+      pickers.forEach((pk, i) => { pk.value = TUNER.ramp[i]; });
+      push();
+    });
+    buttons.appendChild(b);
+  }
+  const reset = el("button", "pill reset", "Reset");
+  reset.type = "button";
+  reset.addEventListener("click", () => {
+    TUNER.ramp = TUNER_FRESH.ramp.slice();
+    TUNER.knobs.forEach((k, i) => { k.value = TUNER_FRESH.values[i]; });
+    pickers.forEach((pk, i) => { pk.value = TUNER.ramp[i]; });
+    readouts.forEach((r, i) => { r.range.value = TUNER.knobs[i].value; r.show(); });
+    push();
+  });
+  buttons.appendChild(reset);
+  foot.appendChild(buttons);
+
+  const said = el("span", "said");
+  said.innerHTML = "The numbers are written into the source below.";
+  foot.appendChild(said);
+  wrap.appendChild(foot);
+
+  TUNER.said = said;
+
+  let waiting = false;
+  function push() {
+    tuneSave();
+    if (waiting) return;
+    waiting = true;
+    requestAnimationFrame(() => {
+      waiting = false;
+      if (TUNER.apply) TUNER.apply();
+    });
+  }
+
+  return wrap;
+}
+
 const lightbox = document.getElementById("lightbox");
 const lbCanvas = document.getElementById("lightbox-canvas");
 const lbNum = document.getElementById("lightbox-num");
@@ -3108,6 +3456,13 @@ function buildCards() {
     frame.appendChild(el("span", "zoomhint", "Look closer"));
     frame.addEventListener("click", () => openLightbox(p));
     card.appendChild(frame);
+
+    if (p.id === TUNER.id) {
+      TUNER.base = src("fs-plate-" + p.id);
+      tuneLoad();
+      p.tunerEl = buildTuner();
+      card.appendChild(p.tunerEl);
+    }
 
     const body = el("div", "plate-body");
     const head = el("div", "plate-head");
@@ -3137,7 +3492,7 @@ function buildCards() {
     copy.addEventListener("click", async (ev) => {
       ev.preventDefault();
       try {
-        await navigator.clipboard.writeText(text + "\n");
+        await navigator.clipboard.writeText(box.querySelector("pre").textContent + "\n");
         copy.textContent = "Copied";
       } catch (e) {
         const r = document.createRange();
@@ -3152,9 +3507,11 @@ function buildCards() {
     const bar = el("div", "src-bar");
     bar.appendChild(copy);
     box.appendChild(bar);
-    box.appendChild(el("pre", null, text));
+    const pre = el("pre", null, text);
+    box.appendChild(pre);
     details.appendChild(box);
     body.appendChild(details);
+    p.pre = pre;
 
     card.appendChild(body);
     platesBySet[p.set].appendChild(card);
@@ -3288,6 +3645,30 @@ function start() {
   note.textContent = broken === 0
     ? "WebGL 2 · " + PLATES.length + " plates live"
     : "WebGL 2 · " + broken + " plate(s) would not compile";
+
+  // The tuner writes the plate's constants and the page compiles them.
+  // A shader that will not compile leaves the last good one running and
+  // says so, the same as the game does with a bad water.fs.
+  const tuned = PLATES.find(p => p.id === TUNER.id);
+  if (tuned) {
+    TUNER.apply = () => {
+      const text = tunedSource();
+      let next = null;
+      try {
+        next = program(src("vs-screen"), text);
+      } catch (e) {
+        TUNER.said.className = "said bad";
+        TUNER.said.textContent = String(e.message).split("\n")[0];
+        return;
+      }
+      if (tuned.prog) gl.deleteProgram(tuned.prog);
+      tuned.prog = next;
+      tuned.pre.textContent = text;
+      TUNER.said.className = "said";
+      TUNER.said.textContent = "Running. Copy takes it as it stands.";
+    };
+    TUNER.apply();
+  }
 
   const locs = new WeakMap();
   function loc(prog, name) {
@@ -3531,18 +3912,29 @@ targets.push(lbTarget);
 
 let lastFocus = null;
 
+// A plate with a tuner takes its panel with it into the large view, and
+// gives it back to the card on the way out. One panel, moved.
 function openLightbox(p) {
   lbTarget.plate = p;
   lbTarget.visible = true;
   lbNum.textContent = p.num;
   lbTitle.textContent = p.title;
   lbSchool.textContent = p.school;
+  if (p.tunerEl) {
+    lightbox.insertBefore(p.tunerEl, lightbox.querySelector(".caption"));
+    lightbox.setAttribute("data-tuning", "on");
+  }
   lightbox.setAttribute("open-state", "on");
   lastFocus = document.activeElement;
   document.getElementById("lightbox-close").focus();
 }
 
 function closeLightbox() {
+  const p = lbTarget.plate;
+  if (p && p.tunerEl && p.tunerEl.parentNode === lightbox) {
+    p.card.insertBefore(p.tunerEl, p.card.querySelector(".plate-body"));
+  }
+  lightbox.removeAttribute("data-tuning");
   lbTarget.visible = false;
   lightbox.setAttribute("open-state", "off");
   if (lastFocus) lastFocus.focus();
