@@ -1,9 +1,13 @@
-// The wave that bends what lies under the water is the wave of the
-// raylib example shader examples/shaders/resources/shaders/glsl330/wave.fs,
-// contributed by Anata (@anatagawa) and reviewed by Ramon Santamaria
-// (@raysan5), which ships with raylib under the zlib licence. The rest of
-// this file is the game's own. docs/water.md says what was taken, what was
-// added, and which other shaders were read before this one was written.
+// The water. Eight colours and no blending: one ramp, a four by four
+// ordered dither between its steps, chunky pixels, and a clock that
+// ticks a few times a second. The world is a grid of coloured cells
+// already, and this draws its water like one.
+//
+// Every number between the two tuning marks below is set by hand in the
+// water lab -- `web/water-lab/index.html`, Plate VI -- where sliders
+// write this block and compile it as they move, and the file is copied
+// back here whole. `docs/water_lab.md` says how that works and
+// `docs/water.md` says what the pass is given and what it does with it.
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -19,68 +23,43 @@ uniform float seconds;
 
 out vec4 finalColor;
 
-const float WAVE_FREQ_X = 0.21;
-const float WAVE_FREQ_Y = 0.17;
-const float WAVE_AMP_X = 1.7;
-const float WAVE_AMP_Y = 1.1;
-const float WAVE_SPEED_X = 1.4;
-const float WAVE_SPEED_Y = 1.1;
+// >>> tuning
+// The ramp, dark to light. The middle of it is the Water row of
+// data/materials.txt.
+const vec3 RAMP[8] = vec3[8](
+    vec3(0.024, 0.051, 0.094),
+    vec3(0.059, 0.118, 0.200),
+    vec3(0.106, 0.208, 0.314),
+    vec3(0.173, 0.322, 0.451),
+    vec3(0.290, 0.498, 0.639),
+    vec3(0.498, 0.702, 0.812),
+    vec3(0.651, 0.776, 1.000),
+    vec3(0.275, 0.643, 0.780));
 
-const float SINK = 0.07;
-const vec3 DEEP = vec3(0.55, 0.78, 1.06);
+const float PIX = 4.0;         // screen units to one drawn pixel
+const float FPS = 24.0;        // frames a second; 0 runs the clock smooth
+const float DITHER = 1.6;      // how much of the 4x4 threshold is spent
+const float TOP = 4.3;         // the step of the ramp the surface sits on
+const float FALL = 0.075;      // steps of ramp a cell of depth costs
+const float SWELL = 0.85;      // how far the scrolling bands move the step
+const float BAND = 0.15;       // how tall one band is
+const float RUSH = 1.3;        // how fast the bands scroll
+const float GLOOM = 4.5;       // steps the ramp drops where nothing is lit
+const float LINE = 0.0;        // cells of surface drawn as the bright line
+const float SPARK = 0.02;      // the share of pixels that catch the light
+// <<< tuning
 
-const vec3 GLINT = vec3(0.60, 0.86, 1.00);
-const float CAUSTIC_SCALE = 0.16;    // net cells about six world cells wide
-const float CAUSTIC_LIGHT = 0.55;
-const float CAUSTIC_SOFT = 0.32;     // how wide the bright bands blur
-const float CAUSTIC_FALL = 0.06;     // the net dims as the light spreads
-const float SURFACE_LIGHT = 0.36;
-const float SURFACE_FALL = 0.9;
-const float LIT_GAIN = 3.0;
+const float BAYER[16] = float[16](
+    0.0000, 0.5000, 0.1250, 0.6250,
+    0.7500, 0.2500, 0.8750, 0.3750,
+    0.1875, 0.6875, 0.0625, 0.5625,
+    0.9375, 0.4375, 0.8125, 0.3125);
 
-const float MIRROR = 0.34;           // how much of the world above shows
-const float MIRROR_FALL = 0.030;     // and how fast depth swallows it
-const float MIRROR_WOBBLE = 1.1;     // cells of sideways shimmer
-
-float w_hash(vec2 p)
+float d_hash(vec2 p)
 {
     p = fract(p*vec2(123.34, 456.21));
     p += dot(p, p + 45.32);
     return fract(p.x*p.y);
-}
-
-// The net light leaves on the bottom of a pond is the boundary of a
-// pattern of cells: bright curved seams where neighbouring lenses of
-// surface meet, dark inside each lens. So it is drawn from a scatter of
-// points that drift, as the distance to the *seam* between the nearest
-// point and the next: zero on the seam, and the seam glows.
-float w_seam(vec2 p, float t)
-{
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float f1 = 8.0;
-    float f2 = 8.0;
-    for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-            vec2 o = vec2(float(x), float(y));
-            vec2 h = vec2(w_hash(i + o), w_hash(i + o + 19.19));
-            vec2 c = o + 0.5 + 0.38*sin(t + 6.2831*h) - f;
-            float d = dot(c, c);
-            if (d < f1) { f2 = f1; f1 = d; }
-            else if (d < f2) { f2 = d; }
-        }
-    }
-    return sqrt(f2) - sqrt(f1);
-}
-
-float caustic(vec2 cell, float t)
-{
-    vec2 p = cell*CAUSTIC_SCALE;
-    float a = w_seam(p, t*0.6);
-    float b = w_seam(p*1.83 + 7.7, -t*0.45);
-    float net = smoothstep(CAUSTIC_SOFT, 0.0, a)*0.75
-              + smoothstep(CAUSTIC_SOFT*1.4, 0.0, b)*0.45;
-    return net*net;
 }
 
 void main()
@@ -89,57 +68,45 @@ void main()
     if (code < 0.5) discard;
 
     float depth = code - 1.0;
-    vec2 texel = 1.0/size;
     vec2 cell = origin + fragTexCoord*size*step_cells;
 
-    vec2 p = fragTexCoord;
-    p.x += cos(cell.y*WAVE_FREQ_X + seconds*WAVE_SPEED_X)*WAVE_AMP_X*texel.x;
-    p.y += sin(cell.x*WAVE_FREQ_Y + seconds*WAVE_SPEED_Y)*WAVE_AMP_Y*texel.y;
-
-    vec3 under = texture(texture0, p).rgb;
     vec3 here = texture(texture0, fragTexCoord).rgb;
-
     float bright = max(max(here.r, here.g), here.b);
-    float lit = 1.0 - exp(-bright*LIT_GAIN);
-    lit *= lit;
+    float lit = 1.0 - exp(-bright*3.0);
 
-    // The glint takes the colour of the light that made it: green under
-    // the fireflies, warm under the orb, and the blue of the water when
-    // neither is near.
-    vec3 glint = mix(GLINT, here/max(bright, 0.001), 0.45);
-    float sink = 1.0 - exp(-depth*SINK);
-    float top = exp(-depth*SURFACE_FALL);
+    vec2 pix = floor(cell/PIX);                          // the pixel it is in
+    float tick = max(FPS, 1.0);
+    float t = FPS > 0.5 ? floor(seconds*FPS)/FPS : seconds;   // and its frame
 
-    vec3 col = under*mix(vec3(1.0), DEEP, sink);
+    // The bands that scroll: the whole of a sprite sheet's water in one
+    // line. Two of them, at odds, so the pattern does not repeat soon.
+    float band = 0.55*sin(pix.y*BAND - t*RUSH + pix.x*0.11)
+               + 0.45*sin(pix.x*BAND*0.38 + t*RUSH*0.55);
 
-    // The world above the surface, mirrored into it. The sample is of the
-    // picture the light already drew, so a dark shore stays a dark shore;
-    // what this brings the pond is the firefly and the orb, upside down
-    // and wavering, which is what still water does at night.
-    float up = depth/step_cells;
-    float wob = sin(cell.y*0.9 + seconds*1.3)
-              + 0.6*sin(cell.x*0.23 - seconds*0.8);
-    vec2 above = fragTexCoord + vec2(
-        wob*MIRROR_WOBBLE/step_cells*texel.x,
-        -2.0*up*texel.y);
-    vec3 sky = texture(texture0, clamp(above, vec2(0.0), vec2(1.0))).rgb;
-    col += sky*MIRROR*exp(-depth*MIRROR_FALL);
+    // Depth walks down the ramp; the light walks it back up.
+    float level = TOP - depth*FALL + band*SWELL - (1.0 - lit)*GLOOM;
 
-    // The caustic net on what lies under, and the shimmer at the surface.
-    // Both are scaled by the light the CPU already gave the texel, so the
-    // shader brightens no water the world left dark.
-    float ripple = 0.6 + 0.4*sin(cell.x*0.5 - seconds*2.6)
-                       *sin(cell.x*0.13 + seconds*0.7);
+    // The dither: the fraction between two steps of the ramp is spent on
+    // a threshold pattern instead of a blend.
+    int bx = int(mod(pix.x, 4.0));
+    int by = int(mod(pix.y, 4.0));
+    float thr = (BAYER[by*4 + bx] - 0.5)*DITHER + 0.5;
+    int idx = int(clamp(floor(level + thr), 0.0, 7.0));
 
-    // A few points of the surface catch the light and let it go: each
-    // two-cell run has its own phase, and the pow keeps all but the
-    // crest of each pulse dark, so the line twinkles instead of glowing.
-    float wink = pow(0.5 + 0.5*sin(seconds*2.3 + 6.2831*w_hash(
-        vec2(floor(cell.x*0.5), 3.7))), 18.0);
+    vec3 col = RAMP[idx];
 
-    col += glint*lit*(caustic(cell, seconds)*CAUSTIC_LIGHT
-                          *mix(0.22, 1.0, exp(-depth*CAUSTIC_FALL))
-                      + top*(ripple*SURFACE_LIGHT + wink*0.55));
+    // The surface is a bright line broken into runs that shift on every
+    // frame, which is how a sprite sheet says "water".
+    if (depth < LINE) {
+        float run = d_hash(vec2(floor(pix.x*0.5), floor(t*tick)*0.13));
+        col = run > 0.42 ? RAMP[6] : RAMP[5];
+        if (run > 0.93) col = RAMP[7];
+        col *= mix(0.35, 1.0, lit);
+    }
+
+    // A sparkle: one pixel, one frame, and gone.
+    float spark = d_hash(pix + floor(t*tick)*7.31);
+    if (spark > 1.0 - SPARK && lit > 0.25 && depth < 26.0) col = RAMP[7];
 
     finalColor = vec4(col, 1.0)*colDiffuse*fragColor;
 }

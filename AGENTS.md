@@ -353,9 +353,13 @@ through its own dam the moment the world starts -- and for the water
 shader; read it before changing `src/pond.odin`, `src/water.odin`,
 `millpond()` in `tools/seed_homelands.py` or `data/shaders/water.fs`.
 `docs/water_lab.md` is the note for `web/water-lab/`, one page that runs
-seventeen water shaders side by side in a browser -- the shipped one,
-nine drawn as schools of art and eight as models of what water is -- and
-times them; read it before drawing a new design for the water.
+seventeen water shaders side by side in a browser -- nine drawn as
+schools of art and eight as models of what water is -- times them, and
+holds the controls the shipped water was tuned with. The water the game
+draws is Plate VI of that page, and its constants are set there and
+copied back into `data/shaders/water.fs` whole. Read it before drawing a
+new design for the water, and change the water's numbers there rather
+than by hand.
 `docs/physics.md` is the note for the sandbox: what a cell of matter
 does next, and in particular the two sections that are the fluid
 simulation. "The reach is the flatness" is how far a liquid or a gas

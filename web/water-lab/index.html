@@ -662,7 +662,7 @@ tr.ref .bar i { background: var(--parch-dk); }
       of modelling the water itself. Every panel below is a real fragment
       shader running on your machine against the same picture the game
       hands its water pass &mdash; the lit cells, and a byte a texel saying
-      how deep the water is there. Only the first is in the game.</p>
+      how deep the water is there. Plate VI is the one the game draws.</p>
   </div>
 </header>
 
@@ -709,17 +709,21 @@ tr.ref .bar i { background: var(--parch-dk); }
     and the game draws that water. The pond under them is drawn here in the
     browser, from the colours in <code>data/materials.txt</code>, because a
     shader can only be judged against a picture.</p>
-  <p><strong>Plate VI has controls.</strong> Its ramp and its eleven
-    constants are on sliders, and moving one rewrites that shader's tuning
-    block and recompiles it on the spot &mdash; so the panel, the water and
-    the source under it never disagree, and the file you copy is the one
-    you tuned. Your settings are kept in this browser.</p>
-  <p><strong>Plate I is the shader in the game today.</strong> It is here as
-    the mark to beat, and the sixteen after it are attempts at a new one.
-    They come in two sets. The first nine each commit to a school of art:
-    what water should <em>look</em> like in a game made of coloured cells.
-    The eight after those commit to a model: what water <em>is</em>, and
-    what falls out of the arithmetic once you have said so.</p>
+  <p><strong>Plate VI is the shader the game draws.</strong> It was chosen
+    off this page and tuned on it: its ramp and its eleven constants are on
+    sliders, and moving one rewrites that shader's tuning block and
+    recompiles it on the spot, so the panel, the water and the source under
+    it never disagree. What is set there now is what stands in
+    <code>data/shaders/water.fs</code>, to the digit. Your own changes are
+    kept in this browser, and <em>Reset</em> puts the shipped numbers
+    back.</p>
+  <p><strong>Plate I is what the game shipped with</strong> &mdash; the
+    wave, the sink and the caustic net &mdash; kept here because a lab
+    should hold what it replaced. The seventeen come in two sets. The
+    first nine each commit to a school of art: what water should
+    <em>look</em> like in a game made of coloured cells. The eight after
+    those commit to a model: what water <em>is</em>, and what falls out of
+    the arithmetic once you have said so.</p>
 </section>
 
 <section class="setband">
@@ -1648,15 +1652,16 @@ void main()
 </script>
 
 <script type="x-shader/x-fragment" id="fs-plate-6">
-// Plate VI. The demake. Water as a machine with eight colours and no
-// blending would have drawn it: one ramp, a four by four ordered dither
-// between its steps, chunky pixels, and a clock that ticks a few times
-// a second. The game is a grid of coloured cells already, so this plate
-// is the one that argues it should look like one.
+// The water. Eight colours and no blending: one ramp, a four by four
+// ordered dither between its steps, chunky pixels, and a clock that
+// ticks a few times a second. The world is a grid of coloured cells
+// already, and this draws its water like one.
 //
-// Everything between the two tuning marks below is set by the controls
-// on the page, and what you read here is what is running. Copy it and
-// it is a whole data/shaders/water.fs, tuned the way you left it.
+// Every number between the two tuning marks below is set by hand in the
+// water lab -- `web/water-lab/index.html`, Plate VI -- where sliders
+// write this block and compile it as they move, and the file is copied
+// back here whole. `docs/water_lab.md` says how that works and
+// `docs/water.md` says what the pass is given and what it does with it.
 
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -1676,26 +1681,26 @@ out vec4 finalColor;
 // The ramp, dark to light. The middle of it is the Water row of
 // data/materials.txt.
 const vec3 RAMP[8] = vec3[8](
-    vec3(0.024, 0.063, 0.110),
-    vec3(0.051, 0.133, 0.200),
-    vec3(0.086, 0.224, 0.310),
-    vec3(0.141, 0.345, 0.431),
-    vec3(0.227, 0.486, 0.647),
-    vec3(0.435, 0.702, 0.808),
-    vec3(0.749, 0.914, 0.949),
-    vec3(0.949, 0.984, 1.000));
+    vec3(0.024, 0.051, 0.094),
+    vec3(0.059, 0.118, 0.200),
+    vec3(0.106, 0.208, 0.314),
+    vec3(0.173, 0.322, 0.451),
+    vec3(0.290, 0.498, 0.639),
+    vec3(0.498, 0.702, 0.812),
+    vec3(0.651, 0.776, 1.000),
+    vec3(0.275, 0.643, 0.780));
 
-const float PIX = 8.0;         // screen units to one drawn pixel
-const float FPS = 6.0;         // frames a second; 0 runs the clock smooth
-const float DITHER = 1.0;      // how much of the 4x4 threshold is spent
-const float TOP = 6.4;         // the step of the ramp the surface sits on
-const float FALL = 0.115;      // steps of ramp a cell of depth costs
+const float PIX = 4.0;         // screen units to one drawn pixel
+const float FPS = 24.0;        // frames a second; 0 runs the clock smooth
+const float DITHER = 1.6;      // how much of the 4x4 threshold is spent
+const float TOP = 4.3;         // the step of the ramp the surface sits on
+const float FALL = 0.075;      // steps of ramp a cell of depth costs
 const float SWELL = 0.85;      // how far the scrolling bands move the step
-const float BAND = 0.55;       // how tall one band is
-const float RUSH = 3.1;        // how fast the bands scroll
-const float GLOOM = 3.2;       // steps the ramp drops where nothing is lit
-const float LINE = 2.0;        // cells of surface drawn as the bright line
-const float SPARK = 0.0025;    // the share of pixels that catch the light
+const float BAND = 0.15;       // how tall one band is
+const float RUSH = 1.3;        // how fast the bands scroll
+const float GLOOM = 4.5;       // steps the ramp drops where nothing is lit
+const float LINE = 0.0;        // cells of surface drawn as the bright line
+const float SPARK = 0.02;      // the share of pixels that catch the light
 // <<< tuning
 
 const float BAYER[16] = float[16](
@@ -2896,7 +2901,7 @@ const PLATES = [
     set: "school",
     id: 1, num: "Plate I", title: "Ripple and net",
     work: "two 3×3 seam searches, run twice",
-    school: "The one in the game",
+    school: "What it shipped with",
     note: "The wave from the raylib example bends what lies under the surface; depth pulls the colour toward blue by a multiply, so water in the gloom stays in the gloom; a net of caustics is drawn from the seams of a drifting cell pattern; and the world above is mirrored faintly in. It adds no light the world did not already put there.",
     how: [
       ["Surface", "A cosine on one axis, a sine on the other"],
@@ -2961,7 +2966,7 @@ const PLATES = [
     set: "school",
     id: 6, num: "Plate VI", title: "Eight colours",
     work: "a dither lookup and two hashes; no noise",
-    school: "Pixel art",
+    school: "Pixel art \u2014 the one in the game",
     note: "What a machine with eight colours and no blending would have drawn: one ramp, a four by four ordered dither between its steps, chunky pixels, and a clock that ticks a few times a second. The middle of the ramp is the Water row of data/materials.txt. The game is a grid of coloured cells already, and this is the plate that argues it should look like one. It is also the one with controls: the panel above writes this shader\u2019s constants and the page compiles them as you drag, so the source below, the water above it and what Copy hands you are always the same text.",
     how: [
       ["Ramp", "Eight colours you pick, no blend between them"],
@@ -3227,37 +3232,38 @@ function el(tag, cls, text) {
 
 const TUNER = {
   id: 6,
-  ramp: ["#06101c", "#0d2233", "#16394f", "#24586e",
-         "#3a7ca5", "#6fb3ce", "#bfe9f2", "#f2fbff"],
+  ramp: ["#060d18", "#0f1e33", "#1b3550", "#2c5273",
+         "#4a7fa3", "#7fb3cf", "#a6c6ff", "#46a4c7"],
   knobs: [
-    { key: "PIX",    label: "Pixel",        min: 2, max: 24, step: 1, value: 8,
+    { key: "PIX",    label: "Pixel",        min: 2, max: 24, step: 1, value: 4,
       gloss: "screen units to one drawn pixel",
       fmt: v => v + " units" },
-    { key: "FPS",    label: "Frames",       min: 0, max: 24, step: 1, value: 6,
+    { key: "FPS",    label: "Frames",       min: 0, max: 24, step: 1, value: 24,
       gloss: "frames a second; 0 runs the clock smooth",
       fmt: v => v < 0.5 ? "smooth" : v + " a second" },
-    { key: "DITHER", label: "Dither",       min: 0, max: 1.6, step: 0.05, value: 1,
+    { key: "DITHER", label: "Dither",       min: 0, max: 1.6, step: 0.05, value: 1.6,
       gloss: "how much of the 4x4 threshold is spent" },
-    { key: "TOP",    label: "Ramp top",     min: 1, max: 8, step: 0.1, value: 6.4,
+    { key: "TOP",    label: "Ramp top",     min: 1, max: 8, step: 0.1, value: 4.3,
       gloss: "the step of the ramp the surface sits on" },
-    { key: "FALL",   label: "Depth",        min: 0, max: 0.4, step: 0.005, value: 0.115,
+    { key: "FALL",   label: "Depth",        min: 0, max: 0.4, step: 0.005, value: 0.075,
       gloss: "steps of ramp a cell of depth costs" },
     { key: "SWELL",  label: "Band swell",   min: 0, max: 2.5, step: 0.05, value: 0.85,
       gloss: "how far the scrolling bands move the step" },
-    { key: "BAND",   label: "Band height",  min: 0.05, max: 1.6, step: 0.05, value: 0.55,
+    { key: "BAND",   label: "Band height",  min: 0.05, max: 1.6, step: 0.05, value: 0.15,
       gloss: "how tall one band is" },
-    { key: "RUSH",   label: "Band speed",   min: 0, max: 8, step: 0.1, value: 3.1,
+    { key: "RUSH",   label: "Band speed",   min: 0, max: 8, step: 0.1, value: 1.3,
       gloss: "how fast the bands scroll" },
-    { key: "GLOOM",  label: "Gloom",        min: 0, max: 7, step: 0.1, value: 3.2,
+    { key: "GLOOM",  label: "Gloom",        min: 0, max: 7, step: 0.1, value: 4.5,
       gloss: "steps the ramp drops where nothing is lit" },
-    { key: "LINE",   label: "Surface line", min: 0, max: 6, step: 0.5, value: 2,
+    { key: "LINE",   label: "Surface line", min: 0, max: 6, step: 0.5, value: 0,
       gloss: "cells of surface drawn as the bright line" },
-    { key: "SPARK",  label: "Sparkle",      min: 0, max: 0.02, step: 0.0005, value: 0.0025,
+    { key: "SPARK",  label: "Sparkle",      min: 0, max: 0.02, step: 0.0005, value: 0.02,
       gloss: "the share of pixels that catch the light",
       fmt: v => (v*100).toFixed(2) + "% of pixels" }
   ],
   presets: {
-    "Shipped":   ["#06101c", "#0d2233", "#16394f", "#24586e", "#3a7ca5", "#6fb3ce", "#bfe9f2", "#f2fbff"],
+    "Shipped":   ["#060d18", "#0f1e33", "#1b3550", "#2c5273", "#4a7fa3", "#7fb3cf", "#a6c6ff", "#46a4c7"],
+    "Demake":    ["#06101c", "#0d2233", "#16394f", "#24586e", "#3a7ca5", "#6fb3ce", "#bfe9f2", "#f2fbff"],
     "Frostbite": ["#060d18", "#0f1e33", "#1b3550", "#2c5273", "#4a7fa3", "#7fb3cf", "#c2e3f0", "#ffffff"],
     "Bogwater":  ["#0b0f08", "#16200f", "#24331a", "#3a4d24", "#587038", "#86a35a", "#bccb8c", "#eef0cf"],
     "Cathode":   ["#000c04", "#02160a", "#052613", "#0a3d1e", "#10602c", "#1d8f3f", "#43c96a", "#b4ffc9"],

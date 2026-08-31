@@ -2,8 +2,9 @@
 
 `web/water-lab/index.html` is one page that draws a pond seventeen
 times, once for each of seventeen water shaders, and runs them all at
-once in a browser. Plate I is the shader the game ships. The sixteen
-after it are new designs, in two sets.
+once in a browser. **Plate VI is the shader the game ships**, and its
+numbers are the ones the controls on that plate were left at. Plate I is
+the shader it replaced. The seventeen come in two sets.
 
 **Plates I to IX, the schools.** Each commits to a way of picturing
 water rather than to a way of modelling it: a woodblock print, a heap of
@@ -67,7 +68,8 @@ which is what `app_draw_water` does inside `BeginShaderMode`.
 
 ## Plate VI has controls
 
-The eight colour plate is tunable on the page. Its ramp and its eleven
+The eight colour plate is the one the game draws, and it is tunable on
+the page. Its ramp and its eleven
 constants are on sliders, and moving one does not feed a uniform into
 the shader: it writes the shader's own tuning block, the part between
 `// >>> tuning` and `// <<< tuning`, and compiles the result. The panel,
@@ -92,7 +94,9 @@ Four things worth knowing about it:
 
 - **The plate is still a whole `water.fs`.** Nothing was added to the
   contract to make it tunable, so a tuning reaches the game the way any
-  other plate does: copy it over the file.
+  other plate does: copy it over the file. The shipped numbers came back
+  that way, and the defaults on the page are what stands in the file, to
+  the digit -- so *Reset* is the game's water and nothing else.
 - **A tuning that will not compile leaves the last good one running**
   and says so under the sliders, which is the courtesy `water_load`
   gives the game.
