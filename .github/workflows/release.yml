@@ -16,11 +16,12 @@
 # the four ANDROID_* secrets below to sign with a key of your own; see
 # tools/build-apk.sh.
 #
-# A runner is a fresh checkout, so a build with no secrets set makes a
-# new key, and an APK signed with a new key will not install over the
-# last release: Android refuses the update and says only "App not
-# installed". The release note below says which key signed the APK and
-# what to do about it, because the phone will not.
+# A runner is a fresh checkout, so the key cannot be made on the runner:
+# an APK signed with a new key will not install over the last release,
+# and Android says only "App not installed". The key is
+# android/debug.keystore, which is in the repository, so every release
+# signs with the same one and each installs over the one before. The
+# release note carries the certificate, because the phone will not.
 name: release
 
 on:
@@ -145,11 +146,9 @@ jobs:
         run: |
           mv android/build/the-game.apk "the-game-${{ steps.version.outputs.name }}.apk"
           if [ -n "${{ steps.apk.outputs.own }}" ]; then
-            key="Signed with the project's key."
+            key="Signed with the project's own key."
           else
-            key="$(printf '%s\n\n%s' \
-              "Signed with a key this build made for itself, which is a different key every time." \
-              "**It will not install over an older release.** Android refuses an update signed by another key and says only \"App not installed\". Uninstall the old one first -- \`adb uninstall com.example.thegame\`, or hold the icon and uninstall -- then install this. Setting the four ANDROID_* secrets signs every release with one key and ends this; see docs/web.md, \"The release\".")"
+            key="Signed with the debug key in the repository, the same one every release, so this installs over the release before it. It is good enough to sideload and not good enough to publish; see docs/web.md, \"The release\"."
           fi
           gh release create "${{ steps.version.outputs.tag }}" \
             --title "The Game ${{ steps.version.outputs.name }}" \
@@ -158,7 +157,7 @@ jobs:
               "$(git log -1 --pretty=%s)" \
               "The APK is the page in a WebView: install it with \`adb install -r\`, or from the phone with unknown sources on." \
               "$key" \
-              "Certificate SHA-256 \`${{ steps.apk.outputs.cert }}\`." \
+              "Certificate SHA-256 \`${{ steps.apk.outputs.cert }}\`. If the install is refused, a build signed by another key is still on the phone: \`adb uninstall com.example.thegame\`, or hold the icon and uninstall, then install this." \
               "Built from ${{ github.sha }}.")" \
             "the-game-${{ steps.version.outputs.name }}.apk" \
             "the-game-web.zip"

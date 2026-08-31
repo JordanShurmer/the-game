@@ -18,25 +18,29 @@
 #
 #   sdkmanager "platforms;android-34" "build-tools;34.0.0"
 #
-# The APK is signed with a debug key, which the script makes if it is
-# not there and keeps at android/debug.keystore. That key is good enough
-# to sideload and to play. It is not good enough to publish: a release
-# needs a key of your own, and the package name in AndroidManifest.xml
-# is an example on purpose. Point the script at a key of your own with
-# four variables:
+# **The key decides whether an APK will install.** Android takes an
+# update only from the key that installed the app: where the key
+# differs it refuses, and says no more than "App not installed". A key
+# made per build is therefore a build nobody can update to.
+#
+# So the key is not made per build. `android/debug.keystore` is in the
+# repository, alias `thegame`, password `android`, and every build that
+# is not given another key signs with it -- this machine's, a
+# contributor's, the runner's. They all install over each other.
+#
+# That keystore is a published private key and is treated as one. It is
+# good enough to sideload and to play. It can never be good enough to
+# publish, because anyone holding the repository can sign an APK with
+# it; a released app needs a key that has never been anywhere, and the
+# package name in AndroidManifest.xml is an example on purpose. Point
+# the script at a key of your own with four variables:
 #
 #   ANDROID_KEYSTORE=my.jks ANDROID_KEYSTORE_PASS=... \
 #   ANDROID_KEY_ALIAS=thegame ANDROID_KEY_PASS=... tools/build-apk.sh
 #
-# A keystore that is there is never overwritten, and only the one this
-# script makes for itself carries the password everybody knows.
-#
-# **The key decides whether an APK will install.** Android refuses to
-# install one build over another unless both were signed by the same
-# key, and it says no more than "App not installed". So a build on a
-# fresh checkout -- every CI run is one -- signs with a key nothing else
-# has, and what it makes cannot be installed over what came before it.
-# Keep the keystore, or hand the script one, or uninstall first.
+# A keystore that is there is never overwritten. The script still makes
+# one if it is pointed somewhere empty, and says so, because a key made
+# on the spot is a key nothing else has.
 set -eu
 
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
@@ -87,9 +91,9 @@ javac -source 17 -target 17 -nowarn -classpath "$JAR" \
 (cd "$OUT" && "$BT/aapt" add -f base.apk classes.dex >/dev/null)
 
 say "sign"
-# Not under $OUT: this script wipes that directory on every run, and a
-# keystore that is thrown away is a keystore that signs every build
-# differently.
+# The repository's own key, and not under $OUT: this script wipes that
+# directory on every run, and a keystore that is thrown away is a
+# keystore that signs every build differently.
 KEYSTORE="${ANDROID_KEYSTORE:-android/debug.keystore}"
 ALIAS="${ANDROID_KEY_ALIAS:-thegame}"
 STOREPASS="${ANDROID_KEYSTORE_PASS:-android}"
@@ -119,11 +123,11 @@ printf 'signed with %s\ncertificate SHA-256 %s\n' "$KEYSTORE" "$CERT"
 if [ -n "$MADE" ]; then
 	{
 		printf '\n'
-		printf 'There was no keystore, so this build made one at %s.\n' "$KEYSTORE"
-		printf 'Keep it. An APK signed with one key will not install over an APK\n'
-		printf 'signed with another, and Android says only "App not installed".\n'
-		printf 'Set ANDROID_KEYSTORE and its passwords to sign with a key of your\n'
-		printf 'own instead. See docs/web.md, "The release".\n'
+		printf 'There was no keystore at %s, so this build made one.\n' "$KEYSTORE"
+		printf 'Nothing else has that key, so this APK will not install over any\n'
+		printf 'other build, and Android will say only "App not installed". The\n'
+		printf 'key the repository ships is android/debug.keystore; a key of your\n'
+		printf 'own goes in ANDROID_KEYSTORE. See docs/web.md, "The release".\n'
 	} >&2
 fi
 

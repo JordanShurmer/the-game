@@ -224,7 +224,7 @@ of the whole world.
 | `docs/` | the design notes and the toolchain |
 | `.github/workflows/` | the release: every push to `main` builds the APK and publishes it |
 | `web/` | the page, its manifest and its icons; `web/build` is what `make web` writes; `web/water-lab` is the water shader lab |
-| `android/` | the APK: a manifest, one WebView, and the page in its assets |
+| `android/` | the APK: a manifest, one WebView, the page in its assets, and the debug key every build signs with |
 | `tools/` | the toolchain installs, the APK build, the tile seeder, the wizard and drudge seeders, the gallery seeders, and the Laboratory map seeder |
 
 ## The page, and the APK

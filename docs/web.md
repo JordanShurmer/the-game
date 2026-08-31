@@ -247,26 +247,37 @@ cached under `.toolchain` against the hash of
 `tools/install-web-toolchain.sh`: a change to what that script installs
 is a change to what is cached, and nothing else rebuilds it.
 
-The key is the debug key `tools/build-apk.sh` makes for itself, which
-is good enough to sideload and not good enough to publish, so every
-release so far is a sideload.
+### The key, and why an APK will not install
 
-**A key made for one build signs only that build.** A runner is a fresh
-checkout, so every release built without a key of its own is signed by a
-key nothing else has, and Android will not install one over another: it
-refuses the update and says no more than "App not installed". The cure
-in the moment is to uninstall the old one first --
+Android takes an update only from the key that installed the app. Where
+the key differs it refuses, and it says no more than "App not
+installed": not which key, not that a key is the reason. So a key made
+per build is a build nobody can update to, and a runner is a fresh
+checkout, which is where a build would make one.
+
+The key is therefore in the repository: `android/debug.keystore`, alias
+`thegame`, password `android`. Every build that is not handed another
+key signs with that one -- yours, a contributor's, the runner's -- so
+every release installs over the release before it, and a local build
+installs over a release.
+
+**It is a published private key, and it is only good for sideloading.**
+Anyone who has the repository can sign an APK with it, so it can never
+be the key a real app is released under. That is the trade it was picked
+for: no setup, and every build installs.
+
+Two things follow from it. A release built before this key was committed
+was signed by a key of its own, so the first install after it still
+needs the old app off the phone:
 
 ```sh
 adb uninstall com.example.thegame     # or hold the icon and uninstall
 adb install the-game-0.1.N.apk
 ```
 
--- and the cure for good is a key of its own. The release note carries
-the certificate's SHA-256 and says which of the two it was, so the
-answer is on the release page rather than on the phone. Locally the
-script keeps its key at `android/debug.keystore`, outside the directory
-it wipes, so one machine's builds do install over each other.
+And the release note carries the certificate's SHA-256 and says which
+key signed the APK, so when an install is refused the answer is on the
+release page rather than nowhere.
 
 Four secrets give the build a key of its own, and it uses them the
 moment they are there:
@@ -278,7 +289,8 @@ moment they are there:
 | `ANDROID_KEY_ALIAS` | the key inside it |
 | `ANDROID_KEY_PASS` | that key's password, if it differs |
 
-Make one, and read it into the secrets, once:
+That is the key a published app needs: one that has never been in a
+repository. Make it, and read it into the secrets, once:
 
 ```sh
 keytool -genkeypair -keystore the-game.jks -alias thegame \

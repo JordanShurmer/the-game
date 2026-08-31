@@ -47,8 +47,3 @@ __pycache__/
 web/build/
 android/build/
 node_modules
-
-# The debug key tools/build-apk.sh makes for itself. It is not a
-# secret -- the password is in the script -- but it is per-machine, and
-# it decides whether one build installs over another.
-android/debug.keystore
