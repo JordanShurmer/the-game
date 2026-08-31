@@ -19,16 +19,24 @@
 #   sdkmanager "platforms;android-34" "build-tools;34.0.0"
 #
 # The APK is signed with a debug key, which the script makes if it is
-# not there. That key is good enough to sideload and to play. It is not
-# good enough to publish: a release needs a key of your own, and the
-# package name in AndroidManifest.xml is an example on purpose. Point
-# the script at a key of your own with four variables:
+# not there and keeps at android/debug.keystore. That key is good enough
+# to sideload and to play. It is not good enough to publish: a release
+# needs a key of your own, and the package name in AndroidManifest.xml
+# is an example on purpose. Point the script at a key of your own with
+# four variables:
 #
 #   ANDROID_KEYSTORE=my.jks ANDROID_KEYSTORE_PASS=... \
 #   ANDROID_KEY_ALIAS=thegame ANDROID_KEY_PASS=... tools/build-apk.sh
 #
 # A keystore that is there is never overwritten, and only the one this
 # script makes for itself carries the password everybody knows.
+#
+# **The key decides whether an APK will install.** Android refuses to
+# install one build over another unless both were signed by the same
+# key, and it says no more than "App not installed". So a build on a
+# fresh checkout -- every CI run is one -- signs with a key nothing else
+# has, and what it makes cannot be installed over what came before it.
+# Keep the keystore, or hand the script one, or uninstall first.
 set -eu
 
 SDK="${ANDROID_HOME:-$HOME/android-sdk}"
@@ -79,15 +87,20 @@ javac -source 17 -target 17 -nowarn -classpath "$JAR" \
 (cd "$OUT" && "$BT/aapt" add -f base.apk classes.dex >/dev/null)
 
 say "sign"
-KEYSTORE="${ANDROID_KEYSTORE:-$OUT/debug.keystore}"
+# Not under $OUT: this script wipes that directory on every run, and a
+# keystore that is thrown away is a keystore that signs every build
+# differently.
+KEYSTORE="${ANDROID_KEYSTORE:-android/debug.keystore}"
 ALIAS="${ANDROID_KEY_ALIAS:-thegame}"
 STOREPASS="${ANDROID_KEYSTORE_PASS:-android}"
 KEYPASS="${ANDROID_KEY_PASS:-$STOREPASS}"
+MADE=""
 if [ ! -f "$KEYSTORE" ]; then
 	keytool -genkeypair -keystore "$KEYSTORE" -alias "$ALIAS" \
 		-storepass "$STOREPASS" -keypass "$KEYPASS" \
 		-keyalg RSA -keysize 2048 -validity 10000 \
 		-dname "CN=The Game, OU=None, O=None, L=None, S=None, C=ZZ" >/dev/null
+	MADE=yes
 fi
 
 "$BT/zipalign" -f 4 "$OUT/base.apk" "$OUT/aligned.apk"
@@ -95,7 +108,24 @@ fi
 	--ks "$KEYSTORE" --ks-key-alias "$ALIAS" \
 	--ks-pass "pass:$STOREPASS" --key-pass "pass:$KEYPASS" \
 	--out "$OUT/the-game.apk" "$OUT/aligned.apk"
-"$BT/apksigner" verify --print-certs "$OUT/the-game.apk" | head -2
+
+# Which key signed it, in a form a release note can carry: two APKs with
+# different digests here will not install over one another.
+CERT="$("$BT/apksigner" verify --print-certs "$OUT/the-game.apk" |
+	sed -n 's/^Signer #1 certificate SHA-256 digest: //p')"
+printf '%s\n' "$CERT" > "$OUT/cert.txt"
+printf 'signed with %s\ncertificate SHA-256 %s\n' "$KEYSTORE" "$CERT"
+
+if [ -n "$MADE" ]; then
+	{
+		printf '\n'
+		printf 'There was no keystore, so this build made one at %s.\n' "$KEYSTORE"
+		printf 'Keep it. An APK signed with one key will not install over an APK\n'
+		printf 'signed with another, and Android says only "App not installed".\n'
+		printf 'Set ANDROID_KEYSTORE and its passwords to sign with a key of your\n'
+		printf 'own instead. See docs/web.md, "The release".\n'
+	} >&2
+fi
 
 rm -f "$OUT/base.apk" "$OUT/aligned.apk" "$OUT/classes.dex"
 rm -rf "$OUT/classes" "$OUT/res" "$OUT/assets"

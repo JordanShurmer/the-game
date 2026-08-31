@@ -249,8 +249,27 @@ is a change to what is cached, and nothing else rebuilds it.
 
 The key is the debug key `tools/build-apk.sh` makes for itself, which
 is good enough to sideload and not good enough to publish, so every
-release so far is a sideload. Four secrets change that, and the build
-uses them the moment they are there:
+release so far is a sideload.
+
+**A key made for one build signs only that build.** A runner is a fresh
+checkout, so every release built without a key of its own is signed by a
+key nothing else has, and Android will not install one over another: it
+refuses the update and says no more than "App not installed". The cure
+in the moment is to uninstall the old one first --
+
+```sh
+adb uninstall com.example.thegame     # or hold the icon and uninstall
+adb install the-game-0.1.N.apk
+```
+
+-- and the cure for good is a key of its own. The release note carries
+the certificate's SHA-256 and says which of the two it was, so the
+answer is on the release page rather than on the phone. Locally the
+script keeps its key at `android/debug.keystore`, outside the directory
+it wipes, so one machine's builds do install over each other.
+
+Four secrets give the build a key of its own, and it uses them the
+moment they are there:
 
 | Secret | What it is |
 | --- | --- |
@@ -258,6 +277,19 @@ uses them the moment they are there:
 | `ANDROID_KEYSTORE_PASS` | its password |
 | `ANDROID_KEY_ALIAS` | the key inside it |
 | `ANDROID_KEY_PASS` | that key's password, if it differs |
+
+Make one, and read it into the secrets, once:
+
+```sh
+keytool -genkeypair -keystore the-game.jks -alias thegame \
+    -keyalg RSA -keysize 2048 -validity 10000 \
+    -dname "CN=The Game, OU=None, O=None, L=None, S=None, C=ZZ"
+base64 -w0 the-game.jks        # -> ANDROID_KEYSTORE_BASE64
+```
+
+Keep that file. It is the app's identity from then on: a phone will take
+an update only from the key that installed it, and a key that is lost
+cannot be replaced, only started again under another package name.
 
 A published APK also needs a package name that is yours: the manifest
 says `com.example.thegame` on purpose, and the first release under a

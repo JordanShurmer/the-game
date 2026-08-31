@@ -15,6 +15,12 @@
 # enough to sideload and to play, and not good enough to publish. Set
 # the four ANDROID_* secrets below to sign with a key of your own; see
 # tools/build-apk.sh.
+#
+# A runner is a fresh checkout, so a build with no secrets set makes a
+# new key, and an APK signed with a new key will not install over the
+# last release: Android refuses the update and says only "App not
+# installed". The release note below says which key signed the APK and
+# what to do about it, because the phone will not.
 name: release
 
 on:
@@ -105,6 +111,7 @@ jobs:
       # A key of your own if the secrets are set, and the debug key the
       # script makes for itself if they are not.
       - name: The APK
+        id: apk
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
@@ -116,6 +123,12 @@ jobs:
             export ANDROID_KEYSTORE="$RUNNER_TEMP/release.jks"
           fi
           tools/build-apk.sh
+          # Which key signed it, and whether it was one of ours, so the
+          # release note can say so.
+          {
+            echo "cert=$(cat android/build/cert.txt)"
+            echo "own=${ANDROID_KEYSTORE_BASE64:+yes}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: The page, as one file
         run: |
@@ -131,12 +144,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mv android/build/the-game.apk "the-game-${{ steps.version.outputs.name }}.apk"
+          if [ -n "${{ steps.apk.outputs.own }}" ]; then
+            key="Signed with the project's key."
+          else
+            key="$(printf '%s\n\n%s' \
+              "Signed with a key this build made for itself, which is a different key every time." \
+              "**It will not install over an older release.** Android refuses an update signed by another key and says only \"App not installed\". Uninstall the old one first -- \`adb uninstall com.example.thegame\`, or hold the icon and uninstall -- then install this. Setting the four ANDROID_* secrets signs every release with one key and ends this; see docs/web.md, \"The release\".")"
+          fi
           gh release create "${{ steps.version.outputs.tag }}" \
             --title "The Game ${{ steps.version.outputs.name }}" \
             --latest \
-            --notes "$(printf '%s\n\n%s\n\n%s\n' \
+            --notes "$(printf '%s\n\n%s\n\n%s\n\n%s\n\n%s\n' \
               "$(git log -1 --pretty=%s)" \
-              "The APK is the page in a WebView, signed with a debug key: install it with \`adb install -r\`, or from the phone with unknown sources on." \
+              "The APK is the page in a WebView: install it with \`adb install -r\`, or from the phone with unknown sources on." \
+              "$key" \
+              "Certificate SHA-256 \`${{ steps.apk.outputs.cert }}\`." \
               "Built from ${{ github.sha }}.")" \
             "the-game-${{ steps.version.outputs.name }}.apk" \
             "the-game-web.zip"
