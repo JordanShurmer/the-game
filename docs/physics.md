@@ -1112,8 +1112,9 @@ and the commit must say so.
    redrawn: only face cells changed, air to rock, and the reel still
    plays. Measured after it, on the 2048 square after 300 ticks:
    Sandcave 10.4 ms to 7.1, Coalmine 3.1 to 2.8. The world after 300
-   ticks went from 158 ms to 150, which says the same thing the awake
-   map says: the seams were a cost, and the map borders are the cost.
+   ticks went from 158 ms to 150 and after 1000 from 278 to 255,
+   which says the same thing the awake map says: the seams were a
+   cost, and the map borders are the cost.
 2. **The map rests every region on ground it keeps.** A rule for
    `data/biome_map.png`, held by a test the way the Laboratory map is
    held: no powder region over a liquid region, no liquid region over
