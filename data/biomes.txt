@@ -153,6 +153,14 @@ color     = 0xFF6B6B6B
 generator = uniform
 fill_0    = Rock
 
+# The basin. Nothing in the reaction table touches Bedrock and nothing
+# digs it, so it is what the acid pool stands in. See tools/seed_map.py.
+
+[Bedrock]
+color     = 0xFF343240
+generator = uniform
+fill_0    = Bedrock
+
 # The homelands: the surface strip the wizard starts on. Six regions of
 # field and cottage, drawn from a set of twelve pictures, and a seventh
 # region east of them that opens into the coal. See docs/homelands.md.

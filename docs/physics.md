@@ -1119,16 +1119,17 @@ and the commit must say so.
    ticks went from 158 ms to 150 and after 1000 from 278 to 255,
    which says the same thing the awake map says: the seams were a
    cost, and the map borders are the cost.
-2. **The map rests every region on ground it keeps.** A rule for
-   `data/biome_map.png`, held by a test the way the Laboratory map is
-   held: no powder region over a liquid region, no liquid region over
-   a material it reacts with, no liquid region beside a wang region
-   whose caves it can drain into. On the shipped map that is the
-   Oilfield under the Sandcave, the Lake in it, and the Acidpool on
-   the rock. A band of Deep_Rock between them is the smallest edit.
-   Measure the world again after it; the expectation from the table
-   is that the Sandcave and Oilfield rows go quiet and the world
-   settles toward the coal's number, which would be near 10 ms.
+2. **The map rests every region on ground it keeps.** Done.
+   `tools/seed_map.py` draws `data/biome_map.png` from a grid of
+   letters and `--check` holds the file to four rules: every pixel a
+   biome, no two touching regions that react, a liquid resting on and
+   beside uniform solid regions only, a powder touching no liquid.
+   The old map broke them 76 times. The lake is a rock basin now, the
+   oil lies under a shelf of Deep_Rock, and the acid stands in
+   Bedrock, a new uniform biome nothing in the reaction table
+   touches. Measured: the world after 300 ticks went from 150 ms a
+   tick to 35, and every liquid region reads a dot on the awake map.
+   What is left awake is the Sandcave and the coal.
 3. **Then the step, on what is honestly awake.** Not before: the
    figures above are the cost of authoring, and a quicker step would
    only make the sand pour faster. When the map is right, the rung to
