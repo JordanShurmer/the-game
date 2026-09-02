@@ -218,7 +218,7 @@ of the whole world.
 | `cmd/bench/` | what a tick costs, on a real region |
 | `cmd/web/` | the game in a browser: the boot, and the heap it allocates from |
 | `data/rooms/` | the painted regions: the galleries, the homelands, the cavemouth |
-| `data/biome_map*.png` | the two worlds: the ordinary one, and the Laboratory |
+| `data/biome_map*.png` | the two worlds: the ordinary one (`tools/seed_map.py` draws it), and the Laboratory |
 | `data/shaders/materials/` | one shader a material, and the prelude they share |
 | `data/` | materials, biomes, the biome maps, the tile sets, the sprites, the shaders |
 | `docs/` | the design notes and the toolchain |
@@ -261,6 +261,21 @@ on one target only:
 
 Every push to `main` runs the suite, builds the page, wraps it in an
 APK and publishes it. See `docs/web.md`, "The release".
+
+## The map
+
+`tools/seed_map.py` draws `data/biome_map.png` from a grid of letters
+at the top of the script, and `--check` holds the file to the rules
+in its header: no two touching regions react, a liquid rests on and
+beside uniform solid regions only, and a powder touches no liquid. A
+world that breaks them starts moving on its first tick and never
+stops -- `docs/physics.md`, "The whole world", measured it. Read the
+header before painting a region, and run `--check` after.
+
+```sh
+tools/seed_map.py           # draw data/biome_map.png
+tools/seed_map.py --check   # hold the file to the rules
+```
 
 ## The two worlds
 
