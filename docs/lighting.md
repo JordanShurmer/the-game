@@ -153,15 +153,19 @@ never paints.
 2. **A picture is the check.** `bin/shot` draws the light through the
    same procedures the window draws through. `player=1` turns it on and
    `light=0` turns it off, so any change can be judged from a terminal.
-3. **The sandbox already forgets.** Leave the 2048 cell square and the
-   sandbox is re-opened on the new one, taking the digging with it. The
-   light follows exactly that rule rather than inventing a second one.
+3. **The light has a square of its own.** `LIGHT_SQUARE` (2048) cells
+   on a side, snapped to a grid of that size, and everything outside
+   the square he is in is dark. The sandbox used to be that square too
+   and forgot the digging on the way out; it is the whole map now and
+   forgets nothing, and the light kept the square, because a grid over
+   the whole map is sixteen times the samples for a wizard who lights
+   a screen of it.
 
 ## Two lights, one grid
 
 Both lights write into a grid of light samples, one sample per
-`LIGHT_CELL` (4) cells, covering the same 2048 cell square the play
-sandbox covers. There are two such grids:
+`LIGHT_CELL` (4) cells, covering the `LIGHT_SQUARE` (2048) cell square
+he is in. There are two such grids:
 
 | Grid | Holds | Cleared |
 | --- | --- | --- |
@@ -422,8 +426,9 @@ per `Sim`.
   them nor stops them. Nothing can catch one, and one can catch
   nothing.
 - **The light does not survive the square.** Walk 2048 cells and the
-  crystals behind you are forgotten along with the digging, because
-  they live in the same square the sandbox does.
+  crystals behind you are forgotten. The digging is not, any more:
+  the sandbox is the whole map, and the light square is the one thing
+  left that ends at a line.
 - **The editor is unlit.** `TAB` and the tile editor draw the world
   flat, because terrain is authored by looking at it and gloom is not
   the thing being judged there.

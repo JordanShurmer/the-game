@@ -1,5 +1,6 @@
 package game
 
+import "core:strings"
 import testing "check"
 
 MATERIALS_PATH :: "data/materials.txt"
@@ -12,13 +13,7 @@ SANDBOX_DEFAULT_WIDTH  :: 128
 SANDBOX_DEFAULT_HEIGHT :: 72
 SANDBOX_DEFAULT_DELAY  :: 2
 
-SANDBOX_PLAY_SIZE :: 2048
-
-#assert(
-	SANDBOX_PLAY_SIZE <= SANDBOX_MAX_WIDTH && SANDBOX_PLAY_SIZE <= SANDBOX_MAX_HEIGHT,
-	"the play sandbox must be a size sandbox_make will build",
-)
-#assert(SANDBOX_PLAY_SIZE % SANDBOX_CHUNK == 0, "the play sandbox must be a whole number of chunks")
+#assert(LIGHT_SQUARE % SANDBOX_CHUNK == 0, "the light square must be a whole number of chunks")
 
 Sim :: struct {
 	world:     World,
@@ -294,19 +289,27 @@ sim_play_begin :: proc(s: ^Sim) {
 	sim_follow_player(s)
 }
 
+// The play sandbox is the whole world. It opens once, the first time
+// he is followed, and never again: there is no square to walk out of,
+// so nothing he dug is ever forgotten and no border ever stops a flow.
+// See docs/physics.md, "The whole world".
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
 
 	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
 
-	ox := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-	oy := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	if sim_sandbox_is_world(s) do return
+	sim_open_world(s)
+}
 
-	already_there := s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE &&
-		s.sandbox.origin_x == ox && s.sandbox.origin_y == oy
-	if already_there do return
+sim_open_world :: proc(s: ^Sim) -> Sim_Error {
+	x, y, w, h := world_rect(s.world)
+	return sim_open_sandbox(s, w, h, x, y, s.sandbox.seed, s.queue.delay)
+}
 
-	sim_open_sandbox(s, SANDBOX_PLAY_SIZE, SANDBOX_PLAY_SIZE, ox, oy, s.sandbox.seed, s.queue.delay)
+sim_sandbox_is_world :: proc(s: ^Sim) -> bool {
+	x, y, w, h := world_rect(s.world)
+	return s.sandbox.width == w && s.sandbox.height == h && s.sandbox.origin_x == x && s.sandbox.origin_y == y
 }
 
 load_or_create_tile_set :: proc(biomes: Biome_Table, materials: Material_Table) -> (set: Tile_Set, ok: bool) {
@@ -622,81 +625,82 @@ test_sim_load_leaves_following_off_so_a_hand_opened_sandbox_stays_put :: proc(t:
 }
 
 @(test)
-test_sim_play_begin_opens_the_sandbox_on_the_players_square :: proc(t: ^testing.T) {
+test_sim_play_begin_opens_the_sandbox_on_the_whole_world :: proc(t: ^testing.T) {
 	s := new_sim(t)
 	defer sim_unload(&s)
 
 	sim_play_begin(&s)
 
-	want_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-	want_y := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-
+	x, y, w, h := world_rect(s.world)
 	testing.expect(t, s.follow_player, "sim_play_begin must turn following on")
 	testing.expectf(
-		t, s.sandbox.width == SANDBOX_PLAY_SIZE && s.sandbox.height == SANDBOX_PLAY_SIZE,
-		"the play sandbox must be SANDBOX_PLAY_SIZE square, got %dx%d", s.sandbox.width, s.sandbox.height,
+		t, s.sandbox.width == w && s.sandbox.height == h,
+		"the play sandbox must be the whole map, got %dx%d want %dx%d", s.sandbox.width, s.sandbox.height, w, h,
 	)
 	testing.expectf(
-		t, s.sandbox.origin_x == want_x && s.sandbox.origin_y == want_y,
-		"the sandbox must snap to the square he spawned in, got %d,%d want %d,%d",
-		s.sandbox.origin_x, s.sandbox.origin_y, want_x, want_y,
+		t, s.sandbox.origin_x == x && s.sandbox.origin_y == y,
+		"and start at the map's corner, got %d,%d want %d,%d", s.sandbox.origin_x, s.sandbox.origin_y, x, y,
 	)
 	testing.expectf(
 		t,
-		i32(s.player.x) >= s.sandbox.origin_x &&
-		i32(s.player.x) < s.sandbox.origin_x + SANDBOX_PLAY_SIZE &&
-		i32(s.player.y) >= s.sandbox.origin_y &&
-		i32(s.player.y) < s.sandbox.origin_y + SANDBOX_PLAY_SIZE,
-		"and he must be inside it: he is at %v,%v and it starts at %d,%d",
-		s.player.x, s.player.y, s.sandbox.origin_x, s.sandbox.origin_y,
+		i32(s.player.x) >= x && i32(s.player.x) < x + w && i32(s.player.y) >= y && i32(s.player.y) < y + h,
+		"and he must be inside it: he is at %v,%v", s.player.x, s.player.y,
 	)
 }
 
+// There is no square to walk out of any more. Wherever he goes, the
+// sandbox he is in is the one he started in, tick and all, so nothing
+// he dug is ever forgotten by a step across a line.
 @(test)
-test_sim_follow_player_re_snaps_the_sandbox_when_he_leaves_the_square :: proc(t: ^testing.T) {
+test_sim_follow_player_never_reopens_the_sandbox :: proc(t: ^testing.T) {
 	s := new_sim(t)
 	defer sim_unload(&s)
 	sim_play_begin(&s)
-	before_x := s.sandbox.origin_x
-
-	s.player.x += f32(SANDBOX_PLAY_SIZE)
-	sim_follow_player(&s)
-
-	want_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-	testing.expectf(
-		t, s.sandbox.origin_x == want_x,
-		"leaving the square must re-snap the sandbox origin, got %d want %d", s.sandbox.origin_x, want_x,
-	)
-	testing.expect(t, s.sandbox.origin_x != before_x, "the origin must actually have moved")
-}
-
-@(test)
-test_sim_follow_player_holds_across_a_region_border :: proc(t: ^testing.T) {
-	s := new_sim(t)
-	defer sim_unload(&s)
-	sim_play_begin(&s)
-
-	cpp := s.world.biomes.cells_per_pixel
-	room := testing.expectf(
-		t, cpp < SANDBOX_PLAY_SIZE,
-		"this test means nothing unless a region (%d) is smaller than the sandbox (%d)",
-		cpp, SANDBOX_PLAY_SIZE,
-	)
-	if !room do return
+	sim_run(&s, 3)
 
 	before_x := s.sandbox.origin_x
 	before_tick := s.sandbox.tick
+	cpp := s.world.biomes.cells_per_pixel
 
-	s.player.x = f32(before_x + cpp)
-	sim_follow_player(&s)
+	for step in ([]i32{cpp, LIGHT_SQUARE, -3 * cpp}) {
+		s.player.x += f32(step)
+		sim_follow_player(&s)
+		testing.expectf(
+			t, s.sandbox.origin_x == before_x && s.sandbox.tick == before_tick,
+			"moving him %d cells must not re-open the sandbox: origin %d want %d, tick %d want %d",
+			step, s.sandbox.origin_x, before_x, s.sandbox.tick, before_tick,
+		)
+	}
+}
 
+// The map is one field a region: a sandbox just opened is awake in every
+// chunk, so a region it covers whole reads 64, a region it covers half
+// of reads 32, and a region it does not touch reads a dot.
+@(test)
+test_the_awake_map_counts_the_chunks_of_each_region :: proc(t: ^testing.T) {
+	s := new_sim(t)
+	defer sim_unload(&s)
+
+	cpp := s.world.biomes.cells_per_pixel
+	// One region whole and the left half of the one east of it, both
+	// on the map's row of coal.
+	ox := -s.world.biomes.origin_pixel_x * cpp
+	oy := (4 - s.world.biomes.origin_pixel_y) * cpp
+	sim_open_sandbox(&s, cpp + cpp / 2, cpp, ox, oy, 1, 0)
+
+	got := sandbox_awake_map(&s.sandbox, s.world, context.temp_allocator)
+	lines := strings.split_lines(got, context.temp_allocator)
+	testing.expectf(t, len(lines) == int(s.world.biome_map.height) + 1, "one line a map row, got %d", len(lines))
+
+	row := lines[4]
+	testing.expectf(t, strings.has_prefix(row, "C 64C 32C  ."), "coal whole, coal half, coal asleep: got %q", row)
+	testing.expectf(t, strings.has_prefix(lines[0], "S  ."), "a region the sandbox does not touch reads a dot: got %q", lines[0])
+
+	sandbox_step(&s.sandbox, s.world.materials)
+	sandbox_step(&s.sandbox, s.world.materials)
 	testing.expectf(
-		t, s.sandbox.origin_x == before_x,
-		"crossing a region border must not move the sandbox, got %d want %d", s.sandbox.origin_x, before_x,
-	)
-	testing.expect(
-		t, s.sandbox.tick == before_tick,
-		"and must not re-open it, which would reset the tick and forget what he dug",
+		t, prof.count[.Chunks_Awake] > 0,
+		"the step must count the chunks it walked, got %d", prof.count[.Chunks_Awake],
 	)
 }
 

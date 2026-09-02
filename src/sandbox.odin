@@ -1,12 +1,16 @@
 package game
 
+import "core:fmt"
 import "core:math"
 import "core:mem"
 import "core:slice"
+import "core:strings"
 import testing "check"
 
-SANDBOX_MAX_WIDTH  :: 2048
-SANDBOX_MAX_HEIGHT :: 2048
+// The largest sandbox is the whole map: 16 regions of 512 cells on a
+// side. See docs/physics.md, "The whole world".
+SANDBOX_MAX_WIDTH  :: 8192
+SANDBOX_MAX_HEIGHT :: 8192
 
 SANDBOX_CHUNK :: 64
 
@@ -685,6 +689,55 @@ sandbox_throw :: proc(sb: ^Sandbox, table: Material_Table, material: Cell, tx, t
 	if sb.cells[i] != MATERIAL_AIR do return
 	sandbox_put(sb, table, i, debris)
 	sb.moved[i] = true
+}
+
+// Where the work is. One field a region of the map: the first letter of
+// its biome, then how many of the region's chunks will be stepped next
+// tick, or a dot where none will. A region is 8 chunks by 8, so 64 is
+// a region wholly awake. A sandbox on the whole world settles region
+// by region, and this says which regions never do, which is the
+// question to answer before making the step quicker. See
+// docs/physics.md, "The whole world".
+sandbox_awake_map :: proc(sb: ^Sandbox, world: World, allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
+	cpp := world.biomes.cells_per_pixel
+	m := world.biome_map
+
+	for py in i32(0) ..< m.height {
+		for px in i32(0) ..< m.width {
+			id := biome_map_at(m, px, py)
+			letter := id == BIOME_EMPTY ? '.' : rune(world.biomes.names[id][0])
+
+			x0 := (px - world.biomes.origin_pixel_x) * cpp - sb.origin_x
+			y0 := (py - world.biomes.origin_pixel_y) * cpp - sb.origin_y
+			awake := sandbox_chunks_awake(sb, x0, y0, x0 + cpp - 1, y0 + cpp - 1)
+
+			// Odin's %3d pads with zeros, and 064 does not read as a count.
+			switch {
+			case awake == 0: fmt.sbprintf(&b, "%c  .", letter)
+			case awake < 10: fmt.sbprintf(&b, "%c  %d", letter, awake)
+			case:            fmt.sbprintf(&b, "%c %d", letter, awake)
+			}
+		}
+		fmt.sbprintln(&b)
+	}
+	return strings.to_string(b)
+}
+
+// How many chunks meeting a box of sandbox cells will be stepped next
+// tick. A box that lies off the sandbox counts nothing.
+sandbox_chunks_awake :: proc(sb: ^Sandbox, x0, y0, x1, y1: i32) -> (awake: int) {
+	cx0 := max(x0, 0) / SANDBOX_CHUNK
+	cy0 := max(y0, 0) / SANDBOX_CHUNK
+	cx1 := min(x1, sb.width - 1) / SANDBOX_CHUNK
+	cy1 := min(y1, sb.height - 1) / SANDBOX_CHUNK
+	for cy in cy0 ..= cy1 {
+		for cx in cx0 ..= cx1 {
+			r := sb.next_dirty[int(cy * sb.chunks_x + cx)]
+			awake += int(r.min_x <= r.max_x)
+		}
+	}
+	return awake
 }
 
 sandbox_census :: proc(sb: ^Sandbox, counts: []int) {

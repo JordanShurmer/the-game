@@ -6,8 +6,13 @@ import testing "check"
 import rl "vendor:raylib"
 
 LIGHT_CELL :: 4
-LIGHT_W :: SANDBOX_PLAY_SIZE / LIGHT_CELL
-LIGHT_H :: SANDBOX_PLAY_SIZE / LIGHT_CELL
+// The light is thrown into a square this many cells on a side, snapped
+// to a grid of that size, and moves with the wizard square by square.
+// It was the play sandbox's square once; the sandbox is the whole world
+// now and the light keeps the square. See docs/lighting.md.
+LIGHT_SQUARE :: 2048
+LIGHT_W :: LIGHT_SQUARE / LIGHT_CELL
+LIGHT_H :: LIGHT_SQUARE / LIGHT_CELL
 LIGHT_SAMPLES :: LIGHT_W * LIGHT_H
 LIGHT_QUEUE :: 1 << 16
 
@@ -190,8 +195,8 @@ light_move :: proc(l: ^Light, t: Terrain, origin_x, origin_y: i32) {
 
 light_follow :: proc(l: ^Light, t: Terrain, x, y: i32) {
 	if l.stat == nil do return
-	origin_x := floor_div(x, SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-	origin_y := floor_div(y, SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	origin_x := floor_div(x, LIGHT_SQUARE) * LIGHT_SQUARE
+	origin_y := floor_div(y, LIGHT_SQUARE) * LIGHT_SQUARE
 	if l.origin_x == origin_x && l.origin_y == origin_y do return
 	light_move(l, t, origin_x, origin_y)
 }
@@ -1412,9 +1417,9 @@ test_leaving_the_square_forgets_the_light_the_way_the_sandbox_forgets_the_diggin
 	if !testing.expect(t, s.light.count > 0, "walking must shake crystals out of the orb") do return
 
 	before := s.light.origin_x
-	light_follow(&s.light, sim_terrain(&s), before + SANDBOX_PLAY_SIZE, s.light.origin_y)
+	light_follow(&s.light, sim_terrain(&s), before + LIGHT_SQUARE, s.light.origin_y)
 
-	testing.expect(t, s.light.origin_x == before + SANDBOX_PLAY_SIZE, "the grid must move with him")
+	testing.expect(t, s.light.origin_x == before + LIGHT_SQUARE, "the grid must move with him")
 	testing.expect(t, s.light.count == 0, "the crystals of the square he left must be forgotten")
 
 	for v in s.light.stat {

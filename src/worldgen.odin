@@ -41,6 +41,18 @@ region_offset :: proc(w, cpp: i32) -> i32 {
 	return w - floor_div(w, cpp) * cpp
 }
 
+// The rectangle of cells the map paints. Every cell outside it is the
+// off-map biome, which is one material all the way out, so a sandbox
+// on this rectangle holds everything in the world that can move.
+world_rect :: proc(world: World) -> (x, y, w, h: i32) {
+	cpp := world.biomes.cells_per_pixel
+	x = -world.biomes.origin_pixel_x * cpp
+	y = -world.biomes.origin_pixel_y * cpp
+	w = world.biome_map.width * cpp
+	h = world.biome_map.height * cpp
+	return
+}
+
 world_biome_at :: proc(world: World, wx, wy: i32) -> Biome_Id {
 	cpp := world.biomes.cells_per_pixel
 	map_x := floor_div(wx, cpp) + world.biomes.origin_pixel_x

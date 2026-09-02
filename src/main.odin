@@ -1391,7 +1391,7 @@ test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
 	app: App
 	app.light = light_make(7)
 	defer light_destroy(&app.light)
-	app.light.origin_x = -SANDBOX_PLAY_SIZE
+	app.light.origin_x = -LIGHT_SQUARE
 	app.light.origin_y = 0
 
 	// A little landscape of light, off both grids, bright and faint.
@@ -1428,7 +1428,7 @@ test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
 	views := []World_View {
 		{x = app.light.origin_x - 10, y = -9, w = w, h = h, step = 1},
 		{x = app.light.origin_x + 200, y = 300, w = w, h = h, step = 1},
-		{x = app.light.origin_x + SANDBOX_PLAY_SIZE - 30, y = SANDBOX_PLAY_SIZE - 20, w = w, h = h, step = 1},
+		{x = app.light.origin_x + LIGHT_SQUARE - 30, y = LIGHT_SQUARE - 20, w = w, h = h, step = 1},
 	}
 	for view in views {
 		for i in 0 ..< len(app.cells) do app.cells[i] = Cell(i % 53)

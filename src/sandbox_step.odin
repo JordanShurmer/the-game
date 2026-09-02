@@ -68,6 +68,7 @@ sandbox_step :: proc(sb: ^Sandbox, table: Material_Table) {
 
 	for r, ci in sb.dirty {
 		if r.min_x > r.max_x do continue
+		prof.count[.Chunks_Awake] += 1
 		width := int(r.max_x - r.min_x + 1)
 		base_y := i32(ci) / sb.chunks_x * SANDBOX_CHUNK
 		for bits := sb.dirty_rows[ci]; bits != 0; bits &= bits - 1 {

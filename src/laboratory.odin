@@ -629,7 +629,7 @@ LABORATORY_LIGHT_MARGIN :: 256
 
 // The whole Laboratory is one light square.
 //
-// The light is a square SANDBOX_PLAY_SIZE on a side, snapped to a grid
+// The light is a square LIGHT_SQUARE on a side, snapped to a grid
 // of that size, and everything outside the square the wizard is in is
 // drawn black -- see docs/lighting.md. A world laid against the edge of
 // that square shows the edge, and sky in the dark reads as a hole in
@@ -658,12 +658,12 @@ test_the_whole_laboratory_is_one_light_square :: proc(t: ^testing.T) {
 
 	// The square the wizard lands in, which is the square the light is
 	// thrown into. light_follow snaps to this grid.
-	square_x := floor_div(i32(s.player.x), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
-	square_y := floor_div(i32(s.player.y), SANDBOX_PLAY_SIZE) * SANDBOX_PLAY_SIZE
+	square_x := floor_div(i32(s.player.x), LIGHT_SQUARE) * LIGHT_SQUARE
+	square_y := floor_div(i32(s.player.y), LIGHT_SQUARE) * LIGHT_SQUARE
 
 	in_square :: proc(x, y, square_x, square_y: i32) -> bool {
-		return x >= square_x && x < square_x + SANDBOX_PLAY_SIZE &&
-			y >= square_y && y < square_y + SANDBOX_PLAY_SIZE
+		return x >= square_x && x < square_x + LIGHT_SQUARE &&
+			y >= square_y && y < square_y + LIGHT_SQUARE
 	}
 
 	// Every corner of the museum, and the top of the cutting over it.
@@ -690,14 +690,14 @@ test_the_whole_laboratory_is_one_light_square :: proc(t: ^testing.T) {
 		west - square_x,
 	)
 	testing.expectf(
-		t, (square_x + SANDBOX_PLAY_SIZE - 1) - east >= LABORATORY_LIGHT_MARGIN,
+		t, (square_x + LIGHT_SQUARE - 1) - east >= LABORATORY_LIGHT_MARGIN,
 		"and of the east edge, and it is %d cells from it",
-		(square_x + SANDBOX_PLAY_SIZE - 1) - east,
+		(square_x + LIGHT_SQUARE - 1) - east,
 	)
 	testing.expectf(
-		t, (square_y + SANDBOX_PLAY_SIZE - 1) - floor >= LABORATORY_LIGHT_MARGIN,
+		t, (square_y + LIGHT_SQUARE - 1) - floor >= LABORATORY_LIGHT_MARGIN,
 		"and of the bottom edge, and it is %d cells from it",
-		(square_y + SANDBOX_PLAY_SIZE - 1) - floor,
+		(square_y + LIGHT_SQUARE - 1) - floor,
 	)
 }
 
