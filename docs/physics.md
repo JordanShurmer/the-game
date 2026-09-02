@@ -1028,6 +1028,10 @@ of it is an open question at the end of this section.
 | 5 | 52 ms | 41k | 0.9M | 0.4M |
 | 300 | 158 ms | 103k | 2.9M | 1.6M |
 | 1000 | 278 ms | 151k | 5.1M | 3.0M |
+| 3000 | 235 ms | | | |
+
+It eases a little after a thousand ticks, as the first sand reaches
+the floor of the oil, and no further: the columns keep coming.
 
 For scale, the 2048 square the game used to play on costs 3.7 ms a
 tick on the coal and 13.3 ms on the lake.
