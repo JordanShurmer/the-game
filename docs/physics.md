@@ -84,7 +84,7 @@ reader knows the gap is a decision and not an oversight.
   byte a cell -- which way this fluid is going and how fast -- swapped
   along with the cell, read by `sandbox_flow` in place of the side
   hash, and gained and spent by the moves themselves. It costs one
-  byte a cell, which is four megabytes at `SANDBOX_PLAY_SIZE`, and it
+  byte a cell, which is 64 megabytes on the whole map, and it
   has to be expressible in the vector intent pass.
 - **No temperature field.** A number per cell for heat would cost as
   much memory as the cells and buy behaviour that the reaction table
@@ -499,7 +499,7 @@ false, and APPLY never runs.
 | Homelands, 300 ticks | 1.371 | 1.509 (+10%) |
 | Cavemouth, 300 ticks | 4.031 | 4.655 (+15%) |
 
-Plus one byte a cell, which is four megabytes at `SANDBOX_PLAY_SIZE`.
+Plus one byte a cell, which is 64 megabytes on the whole map.
 
 Lake is the honest worst case and is not a place: it is a whole region
 of nothing but water and oil, all of it awake and separating. **In the
@@ -979,54 +979,180 @@ Reading the sandbox is **cheaper** than reading the generator: one
 array index against a biome lookup and five hashes. The join makes the
 wizard faster where he stands, not slower.
 
-**The sandbox is the square he is in.** It is
-`SANDBOX_PLAY_SIZE` cells square, on a lattice of its own, and a
-region has nothing to do with it. When he leaves the square, the
-sandbox refills from the generator at the next one.
+**The sandbox is the whole map.** `sim_play_begin` opens it on
+`world_rect`, which is every cell the biome map paints -- 8192 square
+on the shipped map -- and `sim_follow_player` never opens another:
+there is no square to walk out of. The light keeps a square of its own
+(`LIGHT_SQUARE`, see `docs/lighting.md`), because a light grid over
+the whole map would be sixteen times the samples for a wizard who
+lights one screen of it.
 
-It used to be the region, snapped to the region corner, which tied the
-physics to `cells_per_pixel`: a map painted at a larger region could
-not be followed at all, and there was a runtime check and a silent
-fallback here to say so. How much world moves at once and how much
-world one map pixel owns are two different questions. The sandbox now
-answers only the first, so the check is an assert beside the constant
-and the biome map is free to change without asking the physics.
+It used to be a 2048 cell square on a lattice of its own, and before
+that the region. Both forgot: walk out of the square and back and the
+hole you dug had closed, because the square was generated again. Both
+stopped matter at their edge: a flow reached the border and met a
+wall that was not in the world. Two tests hold the new shape --
+`test_sim_play_begin_opens_the_sandbox_on_the_whole_world` and
+`test_sim_follow_player_never_reopens_the_sandbox`.
 
 ```odin
-sim_play_begin  :: proc(s: ^Sim)  // open the play sandbox on his square
-sim_follow_player :: proc(s: ^Sim) // refill it when he leaves that square
+sim_play_begin    :: proc(s: ^Sim)  // open the play sandbox on the whole map
+sim_follow_player :: proc(s: ^Sim)  // move the light with him; the sandbox stays
+sim_open_world    :: proc(s: ^Sim) -> Sim_Error
 ```
 
 `sim_load` does not change. The MCP server and every test that opens a
 sandbox by hand keep the sandbox they asked for. Only a caller that
-says `sim_play_begin` gets the following one.
+says `sim_play_begin` gets the whole world.
 
-**What this costs, said plainly.** A square you walk out of and back
-into is generated again, so the hole you dug in it closes. The rung
-that fixes it outright is a store of the squares that have been
-touched, keyed by their corner, written when the sandbox slides off
-one. What the size buys instead is distance: the edge is 2048 cells
-away, 157 of his own heights, where at 512 it was four regions closer
-and an ordinary walk out of a cave and back could reach it.
+### The whole world
 
-**What it costs at the frame.** Measured on the shipped map, with the
-sandbox settled under him where he spawns: 0.57 ms a tick against a
-16.7 ms frame, 16 chunks of 1024 still moving, 16 MB of memory. A
-crossing re-opens and refills, which is 11 ms, one frame, about every
-27 seconds of running flat out in one direction.
+What it costs was measured before anything was made quicker, because
+the measurement says where the cost is, and it is not where a guess
+would put it. `./bin/bench world=1` opens the play sandbox the game
+plays on; `warm=N` settles it N ticks first, and `debug=2` prints the
+awake map: one field a region, the biome's first letter and how many of
+the region's 64 chunks the next tick will walk.
 
-The measurement also says where this stops, and it is not where a
-guess would put it. 4096 costs 31 ms a tick and 8192, the whole map,
-costs 140 and never settles. But a 4096 square of nothing but mine
-settles at 7 ms, and one region of Lake left alone settles to nothing
-at all. The cost is not the cells. It is that a liquid region beside a
-cave system drains into it for ever, and a quarter of the shipped map
-is liquid. Simulating the whole world is a question about what the map
-is made of before it is a question about the speed of the step.
+**Memory.** 64M cells at five bytes a cell -- the material, the
+lifetime, the moved flag, the head -- is 320 MB. Opening it is 4.1 s
+on this machine: the generate, the lifetime fill, the head fill and
+the first tick over every chunk. That is a loading screen, and the
+page (`docs/web.md`) starts at 192 MB and grows, so what a phone makes
+of it is an open question at the end of this section.
 
-**A blast at the sandbox border stops at the border.** The sandbox
-ends there and the generator behind it does not move. Bedrock at the
-edge of the gallery hides it.
+**A tick, over time.** The world does not settle. It wakes up:
+
+| Ticks settled first | A tick | Rows stepped | Cells loaded | `sandbox_react` calls |
+| --- | --- | --- | --- | --- |
+| 5 | 52 ms | 41k | 0.9M | 0.4M |
+| 300 | 158 ms | 103k | 2.9M | 1.6M |
+| 1000 | 278 ms | 151k | 5.1M | 3.0M |
+
+For scale, the 2048 square the game used to play on costs 3.7 ms a
+tick on the coal and 13.3 ms on the lake.
+
+**Where the work is.** The awake map after 300 ticks, with the sky
+rows and the deep rock rows that read all dots left out:
+
+```
+H  .H  4H  .H  3H  .H  2C 31C  7C  4C 22C  4C  2C  4C 15C  5C  2
+C  4C  3C  4C  3C  1C  3C 21C  3C  5C 12C  3C  4C 11C 19C  8C  2
+C  7C  4C  6C 26C  6C  7C  8C  4C  5C  7C  8C  3C 10C  3C  5C  5
+C  8C 12C 13C 12C  9C  8C  8C 12C 11C 12C 14C 16C  6C 15C 10C 10
+S 19S 20S 22S 24S 22S 19S 25S 21S 20S 17L 36L 35L 17L 38S 22S 21
+S 12S 23S 24S 19S 15S 28S 22S 16S 16S 29L 38L 36L 26L 32S 18S 20
+S 14S 16S 17S 21S 26S 27S 32S 18S 17S 15S 39S 35S 26S 22S 18S 23
+O 12O 17O 13O 15O 29O 26O 31O 28O 16O 16O 29O 14O 25O 13O 11O 26
+O  .O  8A  8A  .A  8O  7O  .O  .O  .O  .O  .O  .O  .O  .O  .O  .
+O  .O  8A 43A 40A 43O  8O  .O  .O  .O  .O  .O  .O  .O  .O  .O  .
+D  .D  1D  8D  8D  8D  1D  .D  .D  .D  .D  .D  .D  .V  .D  .D  .
+```
+
+The three rows of Sandcave, the Lake set into them, the Oilfield row
+under them and the Acidpool are the world's cost. The coal is nearly
+quiet: after 1000 ticks every Coalmine region reads under 10 but the
+handful next to the cavemouth, and Coalmine alone on a 2048 square
+settles to 3.1 ms. Each of the others alone, the same square, after
+300 ticks:
+
+| Biome, 2048 square | A tick | Chunks awake | Cells loaded | `sandbox_react` calls |
+| --- | --- | --- | --- | --- |
+| Coalmine | 3.1 ms | 99 | 75k | 36k |
+| Sandcave | 10.4 ms | 255 | 208k | 82k |
+| Oilfield | 22.6 ms | 133 | 380k | 301k |
+| Lake | 28.0 ms | 348 | 546k | 290k |
+| Acidpool | 34.6 ms | 185 | 567k | 451k |
+
+Two numbers in that table say what a tick is made of. An awake row of
+liquid costs about 60 ns a cell, nearly all of it the HOT pass:
+water, oil and acid all have a row in the reaction table, so
+`sandbox_react` walks the four sides of every cell of an awake wet
+row. And a liquid region is awake in rows of 64 -- the dirty rect is
+the chunk's -- so one grain sinking through oil keeps 64 cells of oil
+paying for it on every row it passes.
+
+**What keeps it awake.** Read at the picture, not the counts:
+`./bin/shot x=-1536 y=512 w=512 h=1024 light=0 ticks=300` is a
+Sandcave region standing on the Oilfield, at rest and after 300
+ticks, and the zoom `./bin/shot x=-1320 y=-140 w=96 h=200 scale=6
+ticks=300` is one tile edge in it.
+
+1. **The tile seams had no crust.** A Sandcave tile is loose sand
+   with a three cell face of rock wherever the mass meets a cave --
+   `to_materials` in `tools/seed_tiles.py`. The face is drawn from
+   how near a cell is to air, and a band cell may only look at its
+   own four rows (the seam rule, at the head of that script), so a
+   solid band over a cave in the tile's own interior stayed sand: a
+   flat sand floor, no rock under it, and a cave beneath. It poured
+   for the life of the world, and the same shape in the coal set was
+   a flat dirt line that read as the lattice. The interior draws that
+   face now: an open interior cell within `WALL` of a solid band cell
+   is rock (`solid_band_near`). The band does not change, so the seam
+   rule holds and `--check` still passes.
+2. **A powder biome stands on a liquid biome.** The map puts three
+   rows of Sandcave straight onto the Oilfield, and a Lake inside the
+   Sandcave. Sand is heavier than oil and water, so every sand cell
+   on the border sinks, in a column, to the floor of the oil three
+   regions down, and the sand behind it follows. Nothing in a tile
+   can fix that: the outermost row of a band is sand because the
+   biome is, and what is past it belongs to another biome. It is a
+   rule about the map, and it is the next rung, below.
+3. **The acid pool eats its floor.** `Acid + Rock -> Air + Air` at 10
+   in 255, and the Acidpool stands on Deep_Rock. It dissolves down
+   into the rock for ever, and every row of it is a wet row.
+
+### The order of work, measured
+
+Each rung is one commit, and the bench numbers above are what it is
+measured against. The checksum moves with the world on the first two
+and the commit must say so.
+
+1. **The seam crust.** Done, in the tile seeder, and both sets
+   redrawn: only face cells changed, air to rock, and the reel still
+   plays. Measured after it, on the 2048 square after 300 ticks:
+   Sandcave 10.4 ms to 7.1, Coalmine 3.1 to 2.8. The world after 300
+   ticks went from 158 ms to 150, which says the same thing the awake
+   map says: the seams were a cost, and the map borders are the cost.
+2. **The map rests every region on ground it keeps.** A rule for
+   `data/biome_map.png`, held by a test the way the Laboratory map is
+   held: no powder region over a liquid region, no liquid region over
+   a material it reacts with, no liquid region beside a wang region
+   whose caves it can drain into. On the shipped map that is the
+   Oilfield under the Sandcave, the Lake in it, and the Acidpool on
+   the rock. A band of Deep_Rock between them is the smallest edit.
+   Measure the world again after it; the expectation from the table
+   is that the Sandcave and Oilfield rows go quiet and the world
+   settles toward the coal's number, which would be near 10 ms.
+3. **Then the step, on what is honestly awake.** Not before: the
+   figures above are the cost of authoring, and a quicker step would
+   only make the sand pour faster. When the map is right, the rung to
+   take first is the one the per-biome table names: a wet row pays
+   `sandbox_react` on every cell, and an awake row of one liquid with
+   the same liquid on every side of every cell has no partner to find.
+   A run of one material along the row can answer for all its cells
+   at once, the way `sandbox_load_weights` already loads them. Measure
+   it on `biome=Lake` and `biome=Oilfield`, where it is 60% of the tick.
+4. **The wake is a row of 64.** A grain falling through a pond wakes
+   its chunk row edge to edge. A narrower rect -- the chunk already
+   keeps a bit a row; a `min_x, max_x` a row is 256 bytes a chunk --
+   would keep a still pond still around one moving grain. Measure it
+   on `biome=Lake` after rung 3, when it is what is left.
+5. **The opening.** 4.1 s to open the world is a loading screen. It
+   is four passes over 64M cells and any of them can go: the
+   lifetime fill can be a table lookup in `generate`, the head fill
+   only needs the wet regions, and the first tick's walk over every
+   chunk is what `sandbox_mark_all` asks for. Measure each.
+6. **The page.** 320 MB is more than a phone will give a tab. The
+   rung is not a smaller world but a smaller cell: `lifetime` is an
+   `i16` for every cell so that fire can count, and nearly every cell
+   is rock with nothing to count. Whether the page keeps the whole
+   map or a store of touched regions is a question to ask after the
+   desktop tick is right, with its own measurement.
+
+**A blast at the sandbox border stops at the border.** The border is
+the edge of the map now, and past it is the off-map biome, one
+material all the way out, so nothing that can move ever reaches it.
 
 ## The wizard on the queue
 
@@ -1288,8 +1414,8 @@ two builds rather than running one after the other.
 
 | Constant | Value | What it does |
 | --- | --- | --- |
-| `SANDBOX_PLAY_SIZE` | 2048 | the play sandbox, on a lattice of its own |
-| `SANDBOX_MAX_WIDTH` | 2048 | the largest sandbox `sandbox_make` will build |
+| `SANDBOX_MAX_WIDTH` | 8192 | the largest sandbox `sandbox_make` will build: the whole map |
+| `LIGHT_SQUARE` | 2048 | the light's square, which the play sandbox used to share |
 | `PLAYER_DIG_POWER` | 8 | hardness he can remove; rock is exactly 8 |
 | `PLAYER_DIG_RANGE` | 26 | cells the cut carries |
 | `PLAYER_DIG_WIDTH` | 15 | cells across the kerf |

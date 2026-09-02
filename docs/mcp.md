@@ -205,10 +205,9 @@ sandbox is following him.
 calls `sim_step_player` that many times, the same procedure the game
 window's fixed step calls and a queued `move` command applies
 (docs/player.md, "one path for a hand and a model"). The first call
-turns on following (`sim_play_begin`), which snaps the play sandbox to
-the 2048 cell square he stands in so his feet rest on the running
-physics rather than on a picture of it; later calls keep it following
-him when he leaves that square on their own.
+turns on following (`sim_play_begin`), which opens the play sandbox on
+the whole map so his feet rest on the running physics rather than on
+a picture of it. It opens once: there is no square to leave.
 
 ```
 player_status

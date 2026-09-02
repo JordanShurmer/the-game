@@ -20,20 +20,22 @@ import "core:time"
 
 import game "../../src"
 
-USAGE :: `usage: bench [biome=NAME] [size=N] [ticks=N] [warm=N] [seed=N] [debug=0..3]
+USAGE :: `usage: bench [biome=NAME] [size=N] [world=1] [ticks=N] [warm=N] [seed=N] [debug=0..3]
 
   biome  a name in data/biomes.txt      (Coalmine)
-  size   the sandbox edge, in cells     (the play size)
+  size   the sandbox edge, in cells     (2048)
+  world  1 opens the sandbox on the whole map instead, which is what the game plays on
   ticks  how many ticks to time         (100)
   warm   how many ticks to throw away   (10)
   seed   which world to open; seed=0x1AB is the Laboratory
-  debug  0 the result, 1 the steps, 2 the phase table, 3 everything
+  debug  0 the result, 1 the steps, 2 the phase table and the awake map, 3 everything
 
 Run it from the repository root: the data paths are relative to it.`
 
 Options :: struct {
 	biome: string,
 	size:  i32,
+	world: bool,
 	ticks: int,
 	warm:  int,
 	seed:  Maybe(u64),
@@ -42,7 +44,7 @@ Options :: struct {
 main :: proc() {
 	options := Options {
 		biome = "Coalmine",
-		size  = game.SANDBOX_PLAY_SIZE,
+		size  = 2048,
 		ticks = 100,
 		warm  = 10,
 	}
@@ -71,6 +73,11 @@ main :: proc() {
 		os.exit(1)
 	}
 
+	label := options.biome
+	if options.world {
+		x, y, options.size, _ = game.world_rect(sim.world)
+		label = "World"
+	}
 	if err := game.sim_open_sandbox(&sim, options.size, options.size, x, y, 7, 0); err != .None {
 		fmt.eprintfln("a %dx%d sandbox could not be opened: %v", options.size, options.size, err)
 		os.exit(1)
@@ -88,7 +95,7 @@ main :: proc() {
 
 	fmt.printfln(
 		"%s %dx%d: %.3f ms a tick, over %d ticks (checksum 0x%016x)",
-		options.biome,
+		label,
 		options.size,
 		options.size,
 		spent / f64(options.ticks),
@@ -103,6 +110,8 @@ main :: proc() {
 	// phase and wants it exact.
 	if game.noise_level() >= game.NOISE_DETAIL {
 		fmt.eprint(game.prof_report(game.prof, context.temp_allocator))
+		// Where the work is: which regions of the map are still awake.
+		fmt.eprint(game.sandbox_awake_map(&sim.sandbox, sim.world, context.temp_allocator))
 	}
 }
 
@@ -137,6 +146,9 @@ read_options :: proc(options: ^Options) -> bool {
 		case "size":
 			v, ok = number(key, value, 1)
 			options.size = i32(v)
+		case "world":
+			v, ok = number(key, value, 0)
+			options.world = v != 0
 		case "ticks":
 			v, ok = number(key, value, 1)
 			options.ticks = int(v)

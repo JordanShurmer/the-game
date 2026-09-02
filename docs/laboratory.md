@@ -152,7 +152,7 @@ would fail every candidate for being a candidate.
 
 ## Why it sits where it sits
 
-The light is drawn a square `SANDBOX_PLAY_SIZE` on a side at a time,
+The light is drawn a square `LIGHT_SQUARE` on a side at a time,
 snapped to a grid of that size, and everything outside the square the
 wizard is in is black — see `docs/lighting.md`. World x 0 to 2047 by y
 -4096 to -2049 is one of those squares.

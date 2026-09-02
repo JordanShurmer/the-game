@@ -125,11 +125,11 @@ body: 13 cells for a sideways move and 8 for a vertical one, never the
 whole 104 cell box.
 
 **What this costs, said plainly:** he only falls with ground that is
-in a `Sandbox`. `sim_play_begin` opens one on the 2048 cell square he
-stands in and slides it with him when he leaves it, and only a caller
-that asks for that gets it: the MCP server and most tests still build a
-`Terrain` with `sandbox = nil`, and there the world is exactly the
-static picture it always was.
+in a `Sandbox`. `sim_play_begin` opens one on the whole map, once, and
+only a caller that asks for that gets it: the MCP server and most tests
+still build a `Terrain` with `sandbox = nil`, and there the world is
+exactly the static picture it always was. What a sandbox on the whole
+map costs is in `docs/physics.md`, "The whole world".
 
 ## A fixed step driven by held buttons
 
@@ -543,9 +543,9 @@ world he digs.
 Two things this note used to name here are closed, and one is not:
 
 - **The world moves under him, where a `Sandbox` is following him.**
-  `sim_play_begin` opens one on the square he stands in, sixteen
-  regions of it, and the window steps it every tick alongside him; dig
-  a hole in it and the sand above falls.
+  `sim_play_begin` opens one on the whole map, and the window steps it
+  every tick alongside him; dig a hole in it and the sand above falls,
+  and the hole is still there however far he walks.
   See `docs/physics.md`, "The wizard meets the sandbox".
 - **The sandbox and the player meet, the same way.** A caller that
   never asks to follow — the MCP server, most tests that open a

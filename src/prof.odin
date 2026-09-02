@@ -41,6 +41,7 @@ Prof_Phase :: enum u8 {
 // An increment costs nothing worth measuring, so they stay on always,
 // and the report turns them into "per tick" numbers beside the times.
 Prof_Count :: enum u8 {
+	Chunks_Awake, // chunks with a dirty rect, which the step walks
 	Rows_Stepped, // sandbox_step_row calls
 	Cells_Loaded, // cells the row loads brought in
 	Hot_Rows,     // rows that held work: lifetime, fire or reactions
@@ -132,6 +133,7 @@ prof_line :: proc(b: ^strings.Builder, p: Prof, phase: Prof_Phase) {
 // to fit on a line.
 prof_count_word :: proc(c: Prof_Count) -> string {
 	switch c {
+	case .Chunks_Awake: return "awake"
 	case .Rows_Stepped: return "rows"
 	case .Cells_Loaded: return "cells"
 	case .Hot_Rows:     return "hot"

@@ -885,7 +885,14 @@ def to_materials(grid, base, rock, ore, ore_rate, rng, wall=WALL):
     for y in range(TILE):
         for x in range(TILE):
             if grid[y][x] == OPEN:
-                pix[y][x] = AIR
+                # A cave that reaches a solid band without opening into
+                # it is faced from this side, because the band cannot
+                # face it: band_materials sees only its own four rows,
+                # so a solid band cell over a cave stays the base
+                # material. In a sand set that is loose sand with no
+                # rock under it, and it pours into the cave for the
+                # life of the world. See "THE RULE IT MUST NOT BREAK".
+                pix[y][x] = rock if band_of(x, y) is None and solid_band_near(grid, x, y, wall) else AIR
                 continue
             near = False
             for dy in range(-wall, wall + 1):
@@ -912,6 +919,25 @@ def to_materials(grid, base, rock, ore, ore_rate, rng, wall=WALL):
             x = min(TILE - 1, max(0, x + rng.randint(-1, 1)))
             y = min(TILE - 1, max(0, y + rng.randint(-1, 1)))
     return pix
+
+
+def solid_band_near(grid, x, y, wall):
+    """Whether a solid band cell lies within `wall` of an interior cell.
+
+    Only the bands can be that close: the interior is at least SEAM
+    from the edge on every side, so a cell that far in sees no band
+    at all and answers no at once.
+    """
+    if SEAM + wall <= x < TILE - SEAM - wall and SEAM + wall <= y < TILE - SEAM - wall:
+        return False
+    for dy in range(-wall, wall + 1):
+        for dx in range(-wall, wall + 1):
+            px, py = x + dx, y + dy
+            if px < 0 or py < 0 or px >= TILE or py >= TILE:
+                continue
+            if grid[py][px] == SOLID and band_of(px, py) is not None:
+                return True
+    return False
 
 
 # ------------------------------------------------------------------ the rooms
