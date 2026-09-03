@@ -200,7 +200,8 @@ tools/seed_tiles.py --check                # hold the files to the seam rule
 It reads `data/materials.txt` and `data/biomes.txt`, so a biome only
 needs `generator = wang` and a `tiles` prefix there to be seeded. The
 `STYLES` table in the script says which materials a biome is made of,
-and the constants above it say how open the caves are. With no
+and the constants above it say how wide the main tunnel is and how
+open the caves off it are. With no
 `--seed` it draws the tiles that are in the repository, exactly, so a
 change to the tool shows up as a change to the data.
 
