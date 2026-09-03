@@ -13,8 +13,6 @@ SANDBOX_DEFAULT_WIDTH  :: 128
 SANDBOX_DEFAULT_HEIGHT :: 72
 SANDBOX_DEFAULT_DELAY  :: 2
 
-#assert(LIGHT_SQUARE % SANDBOX_CHUNK == 0, "the light square must be a whole number of chunks")
-
 Sim :: struct {
 	world:     World,
 	player:    Player,
@@ -112,7 +110,6 @@ sim_load :: proc(
 
 	editor_init(s)
 
-	s.light = light_make(world_seed)
 	s.player = player_spawn(&s.world)
 
 	s.flies = firefly_gather(&s.world, i32(s.player.x), i32(s.player.y))
@@ -126,7 +123,12 @@ sim_load :: proc(
 		s.drudges = drudge_place(&s.world, i32(s.player.x), i32(s.player.y))
 	}
 
-	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
+	// The light covers the whole map, like the sandbox, and is placed
+	// once: there is no square for the day to stop at. The day is thrown
+	// against the authored world here; digging re-throws it on a stride.
+	rx, ry, rw, rh := world_rect(s.world)
+	s.light = light_make(world_seed, rw, rh)
+	light_move(&s.light, sim_terrain(s), rx, ry)
 	s.loaded = true
 
 	sim_open_sandbox(s, SANDBOX_DEFAULT_WIDTH, SANDBOX_DEFAULT_HEIGHT, 0, 0, 1, SANDBOX_DEFAULT_DELAY)
@@ -292,12 +294,10 @@ sim_play_begin :: proc(s: ^Sim) {
 // The play sandbox is the whole world. It opens once, the first time
 // he is followed, and never again: there is no square to walk out of,
 // so nothing he dug is ever forgotten and no border ever stops a flow.
-// See docs/physics.md, "The whole world".
+// See docs/physics.md, "The whole world". The light was placed over
+// the same rectangle at load, so nothing here moves it.
 sim_follow_player :: proc(s: ^Sim) {
 	if !s.follow_player do return
-
-	light_follow(&s.light, sim_terrain(s), i32(s.player.x), i32(s.player.y))
-
 	if sim_sandbox_is_world(s) do return
 	sim_open_world(s)
 }
@@ -662,7 +662,7 @@ test_sim_follow_player_never_reopens_the_sandbox :: proc(t: ^testing.T) {
 	before_tick := s.sandbox.tick
 	cpp := s.world.biomes.cells_per_pixel
 
-	for step in ([]i32{cpp, LIGHT_SQUARE, -3 * cpp}) {
+	for step in ([]i32{cpp, 2048, -3 * cpp}) {
 		s.player.x += f32(step)
 		sim_follow_player(&s)
 		testing.expectf(

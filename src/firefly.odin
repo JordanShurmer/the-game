@@ -152,8 +152,8 @@ firefly_power :: proc(table: Material_Table, f: Firefly, clock: f32) -> u8 {
 firefly_test_sim :: proc(t: ^testing.T, s: ^Sim) -> bool {
 	if !testing.expect(t, sim_load(s) == .None, "the world must load") do return false
 	// The pond is underground now, so a test about the light of the
-	// swarm walks him down to it first: flies outside the light square
-	// throw nothing, and a swarm nobody is near is dark on purpose.
+	// swarm walks him down to it first: a swarm nobody is near is dark
+	// on purpose.
 	if !testing.expect(t, sim_stand_by_the_swarm(s), "the pond must have a shore to stand on") {
 		sim_unload(s)
 		return false

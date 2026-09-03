@@ -6,15 +6,9 @@ import testing "check"
 import rl "vendor:raylib"
 
 LIGHT_CELL :: 4
-// The light is thrown into a square this many cells on a side, snapped
-// to a grid of that size, and moves with the wizard square by square.
-// It was the play sandbox's square once; the sandbox is the whole world
-// now and the light keeps the square. See docs/lighting.md.
-LIGHT_SQUARE :: 2048
-LIGHT_W :: LIGHT_SQUARE / LIGHT_CELL
-LIGHT_H :: LIGHT_SQUARE / LIGHT_CELL
-LIGHT_SAMPLES :: LIGHT_W * LIGHT_H
-LIGHT_QUEUE :: 1 << 16
+// The flood queue. The day seeds it with the line where the sky meets
+// the ground across the whole map, two thousand columns of it.
+LIGHT_QUEUE :: 1 << 18
 
 LIGHT_FAINT :: 2
 LIGHT_RESPONSE_GAMMA :: 0.65
@@ -131,6 +125,12 @@ Crystal :: struct {
 
 #assert(size_of(Crystal) == 12)
 
+// The light grid covers the whole map, one sample a LIGHT_CELL square,
+// the way the sandbox covers it: it is placed once, at load, and
+// nothing about it moves. It used to be a 2048 cell square snapped to a
+// lattice and re-thrown when he crossed into the next one, and the
+// edge of that square was a line in the world where the day stopped.
+// See docs/lighting.md.
 Light :: struct {
 	stat:     []u8,
 	live:     []u8,
@@ -138,8 +138,17 @@ Light :: struct {
 	flood:    []i32,
 	crystals: []Crystal,
 
+	// The sky throw's scratch, one entry a column: how deep the sky
+	// reached, what it carries, and whether it is still falling.
+	column_depth: []i32,
+	column_power: []u8,
+	column_open:  []bool,
+
+	// Where the grid starts, in world cells, and its size in samples.
 	origin_x: i32,
 	origin_y: i32,
+	w:        i32,
+	h:        i32,
 
 	live_x:  i32,
 	live_y:  i32,
@@ -157,13 +166,23 @@ Light :: struct {
 	seed: u64,
 }
 
-light_make :: proc(seed: u64) -> Light {
+// `width` and `height` are the cells the grid covers; the game hands it
+// the whole map (`world_rect`), a test hands it what it needs.
+light_make :: proc(seed: u64, width, height: i32) -> Light {
+	w := (width + LIGHT_CELL - 1) / LIGHT_CELL
+	h := (height + LIGHT_CELL - 1) / LIGHT_CELL
+	samples := int(w) * int(h)
 	return Light {
-		stat = make([]u8, LIGHT_SAMPLES),
-		live = make([]u8, LIGHT_SAMPLES),
-		day = make([]u8, LIGHT_SAMPLES),
+		stat = make([]u8, samples),
+		live = make([]u8, samples),
+		day = make([]u8, samples),
 		flood = make([]i32, LIGHT_QUEUE),
 		crystals = make([]Crystal, LIGHT_CRYSTALS),
+		column_depth = make([]i32, w),
+		column_power = make([]u8, w),
+		column_open = make([]bool, w),
+		w = w,
+		h = h,
 		seed = seed,
 	}
 }
@@ -174,9 +193,15 @@ light_destroy :: proc(l: ^Light) {
 	delete(l.day)
 	delete(l.flood)
 	delete(l.crystals)
+	delete(l.column_depth)
+	delete(l.column_power)
+	delete(l.column_open)
 	l^ = {}
 }
 
+// Place the grid with its corner at a world cell, forget everything in
+// it, and throw the day over it. The game does this once, at load, over
+// the whole map.
 light_move :: proc(l: ^Light, t: Terrain, origin_x, origin_y: i32) {
 	if l.stat == nil do return
 	l.origin_x = origin_x
@@ -193,17 +218,9 @@ light_move :: proc(l: ^Light, t: Terrain, origin_x, origin_y: i32) {
 	l.sky_age = 0
 }
 
-light_follow :: proc(l: ^Light, t: Terrain, x, y: i32) {
-	if l.stat == nil do return
-	origin_x := floor_div(x, LIGHT_SQUARE) * LIGHT_SQUARE
-	origin_y := floor_div(y, LIGHT_SQUARE) * LIGHT_SQUARE
-	if l.origin_x == origin_x && l.origin_y == origin_y do return
-	light_move(l, t, origin_x, origin_y)
-}
-
-// The day is thrown with the square, but a wizard digs, and a hole he
+// The day is thrown once at load, but a wizard digs, and a hole he
 // opens to the sky must let the day in. Re-throwing it every tick would
-// cost a flood over the whole square sixty times a second, so it is
+// cost a flood over the whole surface sixty times a second, so it is
 // re-thrown on a stride: often enough that a hole lights up while he is
 // still standing in it, rarely enough to be free.
 LIGHT_SKY_STRIDE :: 20
@@ -223,8 +240,8 @@ light_day_at :: proc(l: ^Light, wx, wy: i32) -> u8 {
 	if l.day == nil do return 0
 	lx := light_slot(wx - l.origin_x)
 	ly := light_slot(wy - l.origin_y)
-	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
-	return l.day[int(ly) * LIGHT_W + int(lx)]
+	if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return 0
+	return l.day[int(ly) * int(l.w) + int(lx)]
 }
 
 light_orb_at :: proc(p: Player) -> (x, y: f32) {
@@ -254,14 +271,14 @@ light_dense_at :: proc(l: ^Light, t: Terrain, lx, ly: i32) -> bool {
 	return player_solid_at(t, wx, wy)
 }
 
-light_clear_box :: proc(grid: []u8, lx, ly, reach: i32) {
+light_clear_box :: proc(l: ^Light, grid: []u8, lx, ly, reach: i32) {
 	x0 := max(lx - reach, 0)
 	y0 := max(ly - reach, 0)
-	x1 := min(lx + reach, LIGHT_W - 1)
-	y1 := min(ly + reach, LIGHT_H - 1)
+	x1 := min(lx + reach, l.w - 1)
+	y1 := min(ly + reach, l.h - 1)
 
 	for y in y0 ..= y1 {
-		row := grid[int(y) * LIGHT_W + int(x0):][:x1 - x0 + 1]
+		row := grid[int(y) * int(l.w) + int(x0):][:x1 - x0 + 1]
 		mem.zero_slice(row)
 	}
 }
@@ -306,12 +323,12 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 	// cells of a row are neighbours. Two hundred and eighteen thousand
 	// of these are asked to throw the day over a surface square: 1.94
 	// ms down the columns, 1.23 ms across the rows.
-	depth: [LIGHT_W]i32
-	power: [LIGHT_W]u8
-	open: [LIGHT_W]bool
+	depth := l.column_depth
+	power := l.column_power
+	open := l.column_open
 
 	lit := false
-	for lx in i32(0) ..< LIGHT_W {
+	for lx in i32(0) ..< l.w {
 		depth[lx] = -1
 		power[lx] = light_sky_at(l, t, lx)
 		open[lx] = power[lx] > 0
@@ -319,10 +336,10 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 	}
 	if !lit do return
 
-	for ly in i32(0) ..< LIGHT_H {
-		row := int(ly) * LIGHT_W
+	for ly in i32(0) ..< l.h {
+		row := int(ly) * int(l.w)
 		reaching := false
-		for lx in i32(0) ..< LIGHT_W {
+		for lx in i32(0) ..< l.w {
 			if !open[lx] do continue
 			l.day[row + int(lx)] = power[lx]
 			depth[lx] = ly
@@ -341,27 +358,26 @@ light_throw_sky :: proc(l: ^Light, t: Terrain) {
 	// other lit sample has nothing but full daylight around it and
 	// nowhere to spread to, so pushing it would only be work.
 	tail := 0
-	for lx in i32(0) ..< LIGHT_W {
+	for lx in i32(0) ..< l.w {
 		if depth[lx] < 0 do continue
 
 		shallowest := depth[lx]
 		if lx > 0 do shallowest = min(shallowest, depth[lx - 1] < 0 ? 0 : depth[lx - 1])
-		if lx < LIGHT_W - 1 do shallowest = min(shallowest, depth[lx + 1] < 0 ? 0 : depth[lx + 1])
+		if lx < l.w - 1 do shallowest = min(shallowest, depth[lx + 1] < 0 ? 0 : depth[lx + 1])
 
 		for ly in max(shallowest - 1, 0) ..= depth[lx] {
 			if tail >= len(l.flood) do break
-			l.flood[tail] = i32(int(ly) * LIGHT_W + int(lx))
+			l.flood[tail] = i32(int(ly) * int(l.w) + int(lx))
 			tail += 1
 		}
 	}
 
-	light_spread(l, l.day, t, tail, 0, 0, LIGHT_W - 1, LIGHT_H - 1, LIGHT_DAY_FALL)
+	light_spread(l, l.day, t, tail, 0, 0, l.w - 1, l.h - 1, LIGHT_DAY_FALL)
 }
 
-// What the sky over one column throws, read at the top of the square.
-// Zero says this column has no sky over it at all, which is the whole
-// of why a light square deep in the coal costs nothing: every column
-// answers zero and there is nothing to walk.
+// What the sky over one column throws, read at the top of the grid.
+// Zero says this column has no sky over it at all, and a column that
+// answers zero costs nothing more: there is nothing to walk.
 @(private = "file")
 light_sky_at :: proc(l: ^Light, t: Terrain, lx: i32) -> u8 {
 	wx := l.origin_x + lx * LIGHT_CELL + LIGHT_CELL / 2
@@ -374,14 +390,14 @@ light_sky_at :: proc(l: ^Light, t: Terrain, lx: i32) -> u8 {
 light_flood :: proc(l: ^Light, grid: []u8, t: Terrain, wx, wy: i32, power: u8, reach: i32, fall: Light_Fall) {
 	start_x := light_slot(wx - l.origin_x)
 	start_y := light_slot(wy - l.origin_y)
-	if start_x < 0 || start_y < 0 || start_x >= LIGHT_W || start_y >= LIGHT_H do return
+	if start_x < 0 || start_y < 0 || start_x >= l.w || start_y >= l.h do return
 
 	x0 := max(start_x - reach, 0)
 	y0 := max(start_y - reach, 0)
-	x1 := min(start_x + reach, LIGHT_W - 1)
-	y1 := min(start_y + reach, LIGHT_H - 1)
+	x1 := min(start_x + reach, l.w - 1)
+	y1 := min(start_y + reach, l.h - 1)
 
-	start := int(start_y) * LIGHT_W + int(start_x)
+	start := int(start_y) * int(l.w) + int(start_x)
 	if grid[start] >= power do return
 	grid[start] = power
 
@@ -418,8 +434,8 @@ light_spread :: proc(
 		value := u32(grid[at])
 		if value <= LIGHT_FAINT do continue
 
-		ax := i32(at % LIGHT_W)
-		ay := i32(at / LIGHT_W)
+		ax := i32(at % int(l.w))
+		ay := i32(at / int(l.w))
 		dense := at != source && light_dense_at(l, t, ax, ay)
 
 		for dy in i32(-1) ..= 1 {
@@ -441,7 +457,7 @@ light_spread :: proc(
 				next := value * step / 256
 				if next <= LIGHT_FAINT do continue
 
-				ni := int(ny) * LIGHT_W + int(nx)
+				ni := int(ny) * int(l.w) + int(nx)
 				if u32(grid[ni]) >= next do continue
 				grid[ni] = u8(next)
 
@@ -454,8 +470,8 @@ light_spread :: proc(
 }
 
 light_corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
-	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
-	i := int(ly) * LIGHT_W + int(lx)
+	if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return 0
+	i := int(ly) * int(l.w) + int(lx)
 	return u32(max(l.stat[i], l.live[i], l.day[i]))
 }
 
@@ -475,8 +491,8 @@ light_live_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
 	if l.live == nil do return 0
 	lx := light_slot(wx - l.origin_x)
 	ly := light_slot(wy - l.origin_y)
-	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
-	return l.live[int(ly) * LIGHT_W + int(lx)]
+	if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return 0
+	return l.live[int(ly) * int(l.w) + int(lx)]
 }
 
 // The day on a world cell, read the same interpolated way `light_lux`
@@ -493,8 +509,8 @@ light_sky_lux :: proc(l: ^Light, wx, wy: i32) -> u8 {
 	ty := u32(fy - ly * LIGHT_CELL)
 
 	corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
-		return u32(l.day[int(ly) * LIGHT_W + int(lx)])
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return 0
+		return u32(l.day[int(ly) * int(l.w) + int(lx)])
 	}
 
 	top := corner(l, lx, ly) * (LIGHT_CELL - tx) + corner(l, lx + 1, ly) * tx
@@ -596,13 +612,13 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 	// field in the day must not lay one.
 	if light_day_at(l, x, y) >= LIGHT_ORB_WAKES do return
 
-	// Nothing falls outside the light square: the orb hangs above him,
-	// so he can stand in the top rows with the staff head over the
-	// edge, and a crystal recorded out there would have no flood
-	// behind it.
+	// Nothing falls outside the grid: the orb hangs above him, so he
+	// can stand in the top rows of the map with the staff head over the
+	// edge, and a crystal recorded out there would have no flood behind
+	// it.
 	lx := light_slot(x - l.origin_x)
 	ly := light_slot(y - l.origin_y)
-	if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return
+	if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return
 
 	// A crystal falls where the trail has run out, and nowhere else:
 	// never beside one that already hangs, however dark the rock
@@ -626,7 +642,7 @@ light_drop :: proc(l: ^Light, t: Terrain, p: Player) {
 light_throw :: proc(l: ^Light, t: Terrain, p: Player, flies: ^Firefly_Swarm = nil, pots: ^Pot_Bag = nil, enemy_pots: ^Pot_Bag = nil, drudges: ^Drudge_Bag = nil) {
 	table := t.world.materials
 
-	if l.live_on do light_clear_box(l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
+	if l.live_on do light_clear_box(l, l.live, l.live_x, l.live_y, LIGHT_ORB_REACH)
 	light_forget_flies(l, flies)
 	light_forget_pots(l, pots)
 	light_forget_pots(l, enemy_pots)
@@ -663,7 +679,7 @@ light_forget_flies :: proc(l: ^Light, flies: ^Firefly_Swarm) {
 	for i in 0 ..< int(flies.count) {
 		f := &flies.flies[i]
 		if !f.lit do continue
-		light_clear_box(l.live, f.lx, f.ly, FIREFLY_REACH)
+		light_clear_box(l, l.live, f.lx, f.ly, FIREFLY_REACH)
 		f.lit = false
 	}
 }
@@ -679,7 +695,7 @@ light_throw_flies :: proc(l: ^Light, t: Terrain, flies: ^Firefly_Swarm) {
 
 		lx := light_slot(x - l.origin_x)
 		ly := light_slot(y - l.origin_y)
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do continue
 
 		light_flood(l, l.live, t, x, y, firefly_power(t.world.materials, f^, flies.clock), FIREFLY_REACH, FIREFLY_FALL)
 		f.lx = lx
@@ -698,7 +714,7 @@ light_forget_drudges :: proc(l: ^Light, drudges: ^Drudge_Bag) {
 	for i in 0 ..< int(drudges.count) {
 		d := &drudges.drudges[i]
 		if !d.lamp_lit do continue
-		light_clear_box(l.live, d.lx, d.ly, DRUDGE_LAMP_REACH)
+		light_clear_box(l, l.live, d.lx, d.ly, DRUDGE_LAMP_REACH)
 		d.lamp_lit = false
 	}
 }
@@ -721,7 +737,7 @@ light_throw_drudges :: proc(l: ^Light, t: Terrain, drudges: ^Drudge_Bag, player:
 
 		lx := light_slot(x - l.origin_x)
 		ly := light_slot(y - l.origin_y)
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do continue
 
 		light_flood(l, l.live, t, x, y, light_lumens(table, table.fire), DRUDGE_LAMP_REACH, DRUDGE_LAMP_FALL)
 		d.lx = lx
@@ -737,7 +753,7 @@ light_forget_pots :: proc(l: ^Light, pots: ^Pot_Bag) {
 	for i in 0 ..< int(pots.count) {
 		p := &pots.pots[i]
 		if !p.lit do continue
-		light_clear_box(l.live, p.lx, p.ly, POT_FUSE_REACH)
+		light_clear_box(l, l.live, p.lx, p.ly, POT_FUSE_REACH)
 		p.lit = false
 	}
 }
@@ -757,7 +773,7 @@ light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 
 		lx := light_slot(x - l.origin_x)
 		ly := light_slot(y - l.origin_y)
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do continue
 
 		light_flood(l, l.live, t, x, y, light_lumens(table, table.fire), POT_FUSE_REACH, POT_FUSE_FALL)
 		p.lx = lx
@@ -770,7 +786,7 @@ light_throw_pots :: proc(l: ^Light, t: Terrain, pots: ^Pot_Bag) {
 light_bang_slot :: proc(l: ^Light, sb: ^Sandbox, b: Bang) -> (lx, ly: i32, on: bool) {
 	lx = light_slot(sb.origin_x + b.x - l.origin_x)
 	ly = light_slot(sb.origin_y + b.y - l.origin_y)
-	return lx, ly, lx >= 0 && ly >= 0 && lx < LIGHT_W && ly < LIGHT_H
+	return lx, ly, lx >= 0 && ly >= 0 && lx < l.w && ly < l.h
 }
 
 @(private = "file")
@@ -783,7 +799,7 @@ light_forget_bangs :: proc(l: ^Light, t: Terrain) {
 		if b.life < 0 do continue
 		lx, ly, on := light_bang_slot(l, t.sandbox, b)
 		if !on do continue
-		light_clear_box(l.live, lx, ly, BANG_REACH)
+		light_clear_box(l, l.live, lx, ly, BANG_REACH)
 	}
 }
 
@@ -817,7 +833,7 @@ light_forget_sparks :: proc(l: ^Light, t: Terrain) {
 
 	for &sp in t.sandbox.sparks.sparks {
 		if !sp.lit do continue
-		light_clear_box(l.live, sp.lx, sp.ly, SPARKLE_REACH)
+		light_clear_box(l, l.live, sp.lx, sp.ly, SPARKLE_REACH)
 		sp.lit = false
 	}
 }
@@ -835,7 +851,7 @@ light_throw_sparks :: proc(l: ^Light, t: Terrain) {
 		y := sb.origin_y + sp.y
 		lx := light_slot(x - l.origin_x)
 		ly := light_slot(y - l.origin_y)
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do continue
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do continue
 
 		light_flood(l, l.live, t, x, y, spark_power(table, sp), SPARKLE_REACH, SPARKLE_FALL)
 		sp.lx = lx
@@ -1131,7 +1147,7 @@ test_the_gloom_cools_a_colour_and_never_swallows_it :: proc(t: ^testing.T) {
 
 @(test)
 test_light_outside_the_grid_reads_as_the_gloom :: proc(t: ^testing.T) {
-	l := light_make(1)
+	l := light_make(1, 2048, 2048)
 	defer light_destroy(&l)
 
 	testing.expect(t, light_lux(&l, -9000, -9000) == 0, "a cell the grid does not hold must hold no light")
@@ -1192,11 +1208,11 @@ test_a_flood_never_leaves_the_box_its_reach_allows :: proc(t: ^testing.T) {
 	centre_x := light_slot(1024)
 	centre_y := light_slot(1024)
 
-	for i in 0 ..< LIGHT_SAMPLES {
+	for i in 0 ..< len(s.light.live) {
 		if s.light.live[i] == 0 do continue
 
-		lx := i32(i % LIGHT_W)
-		ly := i32(i / LIGHT_W)
+		lx := i32(i % int(s.light.w))
+		ly := i32(i / int(s.light.w))
 		testing.expectf(
 			t,
 			abs(lx - centre_x) <= LIGHT_ORB_REACH && abs(ly - centre_y) <= LIGHT_ORB_REACH,
@@ -1405,8 +1421,10 @@ test_the_trail_he_leaves_never_outshines_the_orb_he_carries :: proc(t: ^testing.
 	)
 }
 
+// The light is the whole map now, so a walk of any length forgets
+// nothing: the crystals he dropped are where he dropped them.
 @(test)
-test_leaving_the_square_forgets_the_light_the_way_the_sandbox_forgets_the_digging :: proc(t: ^testing.T) {
+test_walking_any_distance_forgets_no_crystal :: proc(t: ^testing.T) {
 	s: Sim
 	if !testing.expect(t, sim_load(&s) == .None, "the world must load") do return
 	defer sim_unload(&s)
@@ -1415,16 +1433,15 @@ test_leaving_the_square_forgets_the_light_the_way_the_sandbox_forgets_the_diggin
 
 	for _ in 0 ..< 240 do sim_step_player(&s, {.Right, .Run}, false)
 	if !testing.expect(t, s.light.count > 0, "walking must shake crystals out of the orb") do return
+	dropped := s.light.count
+	origin := s.light.origin_x
 
-	before := s.light.origin_x
-	light_follow(&s.light, sim_terrain(&s), before + LIGHT_SQUARE, s.light.origin_y)
+	s.player.x += 2048
+	sim_follow_player(&s)
+	sim_step_player(&s, {}, false)
 
-	testing.expect(t, s.light.origin_x == before + LIGHT_SQUARE, "the grid must move with him")
-	testing.expect(t, s.light.count == 0, "the crystals of the square he left must be forgotten")
-
-	for v in s.light.stat {
-		if !testing.expect(t, v == 0, "the light of the square he left must be forgotten with them") do return
-	}
+	testing.expect(t, s.light.origin_x == origin, "the grid must not move: it is the whole map")
+	testing.expectf(t, s.light.count >= dropped, "the crystals must still hang, got %d of %d", s.light.count, dropped)
 }
 
 @(test)

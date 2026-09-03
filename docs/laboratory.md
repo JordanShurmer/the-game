@@ -152,10 +152,12 @@ would fail every candidate for being a candidate.
 
 ## Why it sits where it sits
 
-The light is drawn a square `LIGHT_SQUARE` on a side at a time,
-snapped to a grid of that size, and everything outside the square the
-wizard is in is black — see `docs/lighting.md`. World x 0 to 2047 by y
--4096 to -2049 is one of those squares.
+When this was laid out, the light was drawn a square 2048 cells on a
+side at a time, snapped to a grid of that size, and everything
+outside the square the wizard was in was black. World x 0 to 2047 by
+y -4096 to -2049 was one of those squares. The light is the whole map
+now (`docs/lighting.md`) and the edge is gone, but the layout below
+was made for it and still reads well, so it stays.
 
 The museum used to be at world x 0 to 1023, y -2560 to -2049, which is
 the corner of that square, so its west wall and its floor lay along two
@@ -165,7 +167,7 @@ have been.
 
 It is laid in the middle of a square now: 512 cells of lit rock west of
 it, 512 east, 512 under it, and the cutting filling the rest above.
-`test_the_whole_laboratory_is_one_light_square` holds it there. The one
+The one
 edge with no margin is the top of the cutting, and one tank of fuel
 lifts him about 260 cells of the 1024 he would need to reach it.
 
@@ -240,9 +242,8 @@ make shot
 ./bin/shot seed=0x1AB x=0 y=-4096 w=342 h=342 step=6 out=shots/lab.png      # the whole world
 ```
 
-That last one is the whole world in one picture, because the whole
-world is the one light square: the museum at the bottom of the
-cutting, and lit rock all round both. Every shot command in
+That last one is the whole world in one picture: the museum at the
+bottom of the cutting, and lit rock all round both. Every shot command in
 `docs/physics.md` and `docs/alchemy.md` wants `seed=0x1AB` in front of
 it, because that is the world those rectangles are in.
 

@@ -982,10 +982,9 @@ wizard faster where he stands, not slower.
 **The sandbox is the whole map.** `sim_play_begin` opens it on
 `world_rect`, which is every cell the biome map paints -- 8192 square
 on the shipped map -- and `sim_follow_player` never opens another:
-there is no square to walk out of. The light keeps a square of its own
-(`LIGHT_SQUARE`, see `docs/lighting.md`), because a light grid over
-the whole map would be sixteen times the samples for a wizard who
-lights one screen of it.
+there is no square to walk out of. The light covers the same rectangle
+(see `docs/lighting.md`), so nothing the runtime draws has an edge the
+generator needed.
 
 It used to be a 2048 cell square on a lattice of its own, and before
 that the region. Both forgot: walk out of the square and back and the
@@ -1436,7 +1435,6 @@ two builds rather than running one after the other.
 | Constant | Value | What it does |
 | --- | --- | --- |
 | `SANDBOX_MAX_WIDTH` | 8192 | the largest sandbox `sandbox_make` will build: the whole map |
-| `LIGHT_SQUARE` | 2048 | the light's square, which the play sandbox used to share |
 | `PLAYER_DIG_POWER` | 8 | hardness he can remove; rock is exactly 8 |
 | `PLAYER_DIG_RANGE` | 26 | cells the cut carries |
 | `PLAYER_DIG_WIDTH` | 15 | cells across the kerf |

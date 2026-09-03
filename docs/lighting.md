@@ -76,7 +76,7 @@ sky is the one that does.
 
 **Sunlight is not thrown from a point, so it is not flooded like one.**
 It falls straight down and open air costs it nothing. `light_throw_sky`
-walks each column of the grid from the top of the square, holding full
+walks each column of the grid from the top of the map, holding full
 power the whole way down while the air is open, and stops at the first
 solid sample -- which takes the light, because that is the ground the
 sun lands on. Nothing under it is under the sky.
@@ -98,11 +98,11 @@ crystals -- neither moves -- but the orb reads the day to know whether
 to burn, and with the two mixed a trail of crystals reads as daylight
 and puts out the very lamp that dropped them.
 
-It is thrown when the wizard enters a square and again every
-`LIGHT_SKY_STRIDE` (20) ticks, so a hole he digs to the sky lights up
-while he is still standing in it. Over a surface square that costs
-1.2 ms; over a square with no sky in it, 0.008 ms, because every column
-answers "no sky here" at once and there is nothing to walk.
+It is thrown once at load and again every `LIGHT_SKY_STRIDE` (20)
+ticks, so a hole he digs to the sky lights up while he is still
+standing in it. The grid is the whole map, so every throw walks every
+column of the surface: the walk stops at the ground, and the deep
+rows under it are never visited.
 
 The walk goes **a row at a time, not a column at a time**, carrying a
 flag per column for whether the sky has reached it yet. Same walk, same
@@ -153,23 +153,24 @@ never paints.
 2. **A picture is the check.** `bin/shot` draws the light through the
    same procedures the window draws through. `player=1` turns it on and
    `light=0` turns it off, so any change can be judged from a terminal.
-3. **The light has a square of its own.** `LIGHT_SQUARE` (2048) cells
-   on a side, snapped to a grid of that size, and everything outside
-   the square he is in is dark. The sandbox used to be that square too
-   and forgot the digging on the way out; it is the whole map now and
-   forgets nothing, and the light kept the square, because a grid over
-   the whole map is sixteen times the samples for a wizard who lights
-   a screen of it.
+3. **The light is the whole map, like the sandbox.** One grid, placed
+   once at load over `world_rect`, and nothing about it moves. It used
+   to be a 2048 cell square snapped to a lattice, thrown again when he
+   crossed into the next one, and the edge of that square was a line
+   in the world where the day stopped and the crystals were forgotten.
+   Nothing the runtime draws may have a seam the generator needed: a
+   tile is for drawing the world, not for playing in it. What it costs
+   is three grids of four million samples, twelve megabytes.
 
 ## Two lights, one grid
 
 Both lights write into a grid of light samples, one sample per
-`LIGHT_CELL` (4) cells, covering the `LIGHT_SQUARE` (2048) cell square
-he is in. There are two such grids:
+`LIGHT_CELL` (4) cells, covering the whole map. There are two such
+grids:
 
 | Grid | Holds | Cleared |
 | --- | --- | --- |
-| `stat` | what the crystals left behind | only when he leaves the square |
+| `stat` | what the crystals left behind | never |
 | `live` | what the orb, the fireflies, the pots and the bangs throw this tick | every tick, over the boxes they wrote |
 
 A cell reads the brighter of the two, interpolated between the four
@@ -425,10 +426,9 @@ per `Sim`.
   over their pond on a fixed path, and rock in the way neither turns
   them nor stops them. Nothing can catch one, and one can catch
   nothing.
-- **The light does not survive the square.** Walk 2048 cells and the
-  crystals behind you are forgotten. The digging is not, any more:
-  the sandbox is the whole map, and the light square is the one thing
-  left that ends at a line.
+- **The crystals are forever.** Nothing forgets them now that the grid
+  is the map; a ring of `LIGHT_CRYSTALS` (1024) is the only bound, and
+  the oldest goes when it is full.
 - **The editor is unlit.** `TAB` and the tile editor draw the world
   flat, because terrain is authored by looking at it and gloom is not
   the thing being judged there.

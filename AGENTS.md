@@ -308,10 +308,9 @@ whole world, and `--check` holds the map to all three:
   joined roof at all.
 - **There is open sky the whole way up over both.** The roof is what
   the wizard walks on, and a roof with earth over it is a cellar.
-- **The sky stops where the museum stops.** The light is drawn a
-  square at a time and everything outside that square is black, so the
-  world is laid in the middle of one: rock in the dark reads as rock,
-  and sky in the dark reads as a hole in the world.
+- **The sky stops where the museum stops.** The museum is a cutting
+  in the rock, and rock all round it is what makes it read as one:
+  sky in the dark reads as a hole in the world.
 
 `test_the_wizard_walks_the_laboratory_into_both_galleries` plays the
 world through `sim_step_player`: down one door, back out on the

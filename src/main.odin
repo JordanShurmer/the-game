@@ -671,8 +671,8 @@ app_shade_fine :: proc(app: ^App, view: World_View) {
 	corners := int(floor_div(fx0 + view.w - 1, LIGHT_CELL) - lx0) + 2
 
 	day_corner :: #force_inline proc(l: ^Light, lx, ly: i32) -> u32 {
-		if lx < 0 || ly < 0 || lx >= LIGHT_W || ly >= LIGHT_H do return 0
-		return u32(l.day[int(ly) * LIGHT_W + int(lx)])
+		if lx < 0 || ly < 0 || lx >= l.w || ly >= l.h do return 0
+		return u32(l.day[int(ly) * int(l.w) + int(lx)])
 	}
 
 	for ty in i32(0) ..< view.h {
@@ -1389,13 +1389,13 @@ draw_hud :: proc(app: ^App) {
 @(test)
 test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
 	app: App
-	app.light = light_make(7)
+	app.light = light_make(7, 2048, 2048)
 	defer light_destroy(&app.light)
-	app.light.origin_x = -LIGHT_SQUARE
+	app.light.origin_x = -2048
 	app.light.origin_y = 0
 
 	// A little landscape of light, off both grids, bright and faint.
-	for i in 0 ..< LIGHT_SAMPLES {
+	for i in 0 ..< len(app.light.stat) {
 		app.light.stat[i] = u8((i * 37) % 251)
 		app.light.live[i] = u8((i * 101 + 13) % 249)
 	}
@@ -1428,7 +1428,7 @@ test_the_fine_shade_matches_light_lux :: proc(t: ^testing.T) {
 	views := []World_View {
 		{x = app.light.origin_x - 10, y = -9, w = w, h = h, step = 1},
 		{x = app.light.origin_x + 200, y = 300, w = w, h = h, step = 1},
-		{x = app.light.origin_x + LIGHT_SQUARE - 30, y = LIGHT_SQUARE - 20, w = w, h = h, step = 1},
+		{x = app.light.origin_x + 2048 - 30, y = 2048 - 20, w = w, h = h, step = 1},
 	}
 	for view in views {
 		for i in 0 ..< len(app.cells) do app.cells[i] = Cell(i % 53)
