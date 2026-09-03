@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed the Wang tile set of a biome: a cave system, roughly half air.
+"""Seed the Wang tile set of a biome: one main tunnel, and caves off it.
 
 The tiles in data/tiles are authored data. This draws a first set for a
 biome that has none, or draws a new one when the feel of a biome
@@ -15,10 +15,20 @@ exist there to be seeded. Run it from the repository root.
 
 WHAT IT DRAWS
 
-A tile is noise, cut at the level that leaves about half of it open,
-and smoothed until the edges are organic. What comes out is broad
-winding ground between large lobed masses, with the open and the solid
-both connected.
+A tile is one main tunnel, mouth to mouth across it, and noise around
+it. The tunnel is the way through: 88 to 112 cells across, seven of
+the wizard, walked through two bends so it winds, with a narrower
+branch to every other open mouth and sometimes one that leads nowhere
+(`carve_trunk`). The noise is cut at INTERIOR_OPEN, low enough that
+it reads as chambers and pockets off the way rather than as a second
+way, and smoothed until the edges are organic.
+
+It was noise alone once, cut at about half open. That is what the
+reference measures, and played it reads as a maze: every cave the
+same size, every passage the same width, and no way through that is
+more the way than another. A cave system has a main passage and the
+rest hangs off it, so the tunnel came first and the noise is what is
+left of the old drawing.
 
 This used to carve caves out of a solid block, on the argument that a
 cave system is space inside a mass. A capture of the Noita coal pits at
@@ -116,7 +126,7 @@ into was not.
     crawls the ceiling rock from where it meets the wall's outer face,
     and a down-pointing triangle -- water's mark -- is etched into the
     wall above the basin.
-  - coalmine_0101_1, the Magazine: a Rock vault, coursed in Gravel
+  - coalmine_0101_1, the Magazine: a Rock vault, coursed in Coal
     joints, east and west open. A beamed Wood ceiling rides four
     pillars, each with a base and a capital; Coal heaps sit against
     two of them, a Steel trough of Oil fills one bay and a Tnt cache,
@@ -185,6 +195,22 @@ MOUTH_LO, MOUTH_HI = 215, 296
 MOUTH_DEPTH = 64
 TRUNK_R = (24, 32)
 
+# The main tunnel, and what hangs off it.
+#
+# A tile used to be noise and nothing else, and noise is a network:
+# every cave the same size, every way through the same width, and the
+# player reads a maze. A real cave system has one way through it and
+# the rest hangs off that. So every tile carves one main tunnel first,
+# mouth to mouth across it (`carve_trunk`), wider than anything the
+# noise leaves -- MAIN_R is the radius, so the way is 88 to 112 cells
+# across, seven of him -- and then a branch to every other open mouth,
+# and sometimes one more that goes nowhere. The noise stays, at a
+# lower cut, and is what the branches open into.
+MAIN_R = (44, 56)
+BRANCH_R = (22, 30)
+BRANCH_STRAY = 0.4    # how often a tile grows a branch that leads nowhere
+BEND_OFF = (70, 130)  # cells a trunk swings off the straight line, at each of two bends
+
 # The cave texture: the shape off the reference, the size off the
 # wizard.
 #
@@ -218,7 +244,7 @@ TRUNK_R = (24, 32)
 GRAIN_X = 76          # cells across one lobe of the noise
 GRAIN_Y = 52          # and down, so the masses lie down
 GRAIN_DETAIL = 0.20   # a second octave at half the spacing, this strong
-INTERIOR_OPEN = 0.45  # of the middle of a tile
+INTERIOR_OPEN = 0.28  # of the middle of a tile, before the main tunnel is cut
 SMOOTH_PASSES = 2     # of a plain 3x3 majority, to make the edges organic
 BLEND = 80            # cells a band fades into the middle of its tile
 ORE_SEEDS = 85        # veins started per 100k cells of tile, before ore_rate
@@ -642,14 +668,7 @@ def connect(grid, sig, rng):
         return grid
     main = max(range(len(sizes)), key=lambda i: sizes[i])
 
-    mid = (MOUTH_LO + MOUTH_HI) // 2
-    inner = SEAM + MOUTH_DEPTH // 2
-    mouths = {
-        "N": (mid, inner),
-        "S": (mid, TILE - 1 - inner),
-        "W": (inner, mid),
-        "E": (TILE - 1 - inner, mid),
-    }
+    mouths = mouth_points()
 
     targets = []
     for side, color in zip("NESW", sig):
@@ -736,7 +755,103 @@ def carve_interior(sig, rng, sides, corner, cut):
                 for y in range(y0, y0 + MOUTH_DEPTH):
                     grid[y][x] = OPEN
 
+    carve_trunk(grid, sig, rng)
     return connect(grid, sig, rng)
+
+
+def mouth_points():
+    """Where each side's mouth is, just inside the band."""
+    mid = (MOUTH_LO + MOUTH_HI) // 2
+    inner = SEAM + MOUTH_DEPTH // 2
+    return {
+        "N": (mid, inner),
+        "S": (mid, TILE - 1 - inner),
+        "W": (inner, mid),
+        "E": (TILE - 1 - inner, mid),
+    }
+
+
+def bends(a, b, rng):
+    """Two points a third and two thirds of the way from a to b, each
+    pushed BEND_OFF cells off the line, opposite ways, and kept inside
+    the tile's middle."""
+    inner = SEAM + MOUTH_DEPTH // 2
+    far = TILE - 1 - inner
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    length = max(1.0, (dx * dx + dy * dy) ** 0.5)
+    nx, ny = -dy / length, dx / length
+    side = rng.choice((-1, 1))
+    out = []
+    for t in (1 / 3, 2 / 3):
+        off = side * rng.randint(*BEND_OFF)
+        x = a[0] + dx * t + nx * off
+        y = a[1] + dy * t + ny * off
+        out.append((int(min(far, max(inner, x))), int(min(far, max(inner, y)))))
+        side = -side
+    return out
+
+
+def carve_trunk(grid, sig, rng):
+    """One main tunnel through the tile, and a branch to every other mouth.
+
+    The trunk runs between two mouths: west to east where both are
+    open, else north to south, else whichever two are. A tile with one
+    mouth gets a trunk from it to a dead end deep in the far side, and
+    a tile with none gets a chamber between two points of its own, so
+    a sealed square is still a place when it is dug into.
+
+    Every mouth the trunk does not reach gets a branch from it to the
+    middle of the trunk, narrower. Then, one time in BRANCH_STRAY, a
+    branch from the trunk to nowhere in particular: a real system has
+    passages that end.
+    """
+    mouths = mouth_points()
+    open_sides = [side for side, color in zip("NESW", sig) if color == 1]
+    inner = SEAM + MOUTH_DEPTH // 2
+    far = TILE - 1 - inner
+
+    def deep_point():
+        return (rng.randint(inner + 40, far - 40), rng.randint(inner + 40, far - 40))
+
+    if "W" in open_sides and "E" in open_sides:
+        ends = ("W", "E")
+    elif "N" in open_sides and "S" in open_sides:
+        ends = ("N", "S")
+    else:
+        ends = tuple(open_sides[:2])
+
+    if len(ends) == 2:
+        a, b = mouths[ends[0]], mouths[ends[1]]
+    elif len(ends) == 1:
+        a = mouths[ends[0]]
+        opposite = {"N": "S", "S": "N", "W": "E", "E": "W"}[ends[0]]
+        ox, oy = mouths[opposite]
+        b = (ox + rng.randint(-60, 60), oy + rng.randint(-60, 60))
+        b = (min(far - 20, max(inner + 20, b[0])), min(far - 20, max(inner + 20, b[1])))
+    else:
+        a, b = deep_point(), deep_point()
+
+    # The way winds. carve_walk's swing is a fresh roll every step and
+    # averages out to a straight bore over a tile, so the trunk is
+    # walked through two waypoints pushed off the straight line
+    # instead, the way a stream takes the soft rock.
+    r = rng.randint(*MAIN_R)
+    carve_disc(grid, a[0], a[1], r)
+    at = a
+    for point in bends(a, b, rng) + [b]:
+        carve_walk(grid, at[0], at[1], point[0], point[1], r, rng, wobble=0.8)
+        at = point
+
+    middle = ((a[0] + b[0]) // 2 + rng.randint(-40, 40), (a[1] + b[1]) // 2 + rng.randint(-40, 40))
+    for side in open_sides:
+        if side in ends:
+            continue
+        mx, my = mouths[side]
+        carve_walk(grid, mx, my, middle[0], middle[1], rng.randint(*BRANCH_R), rng, wobble=0.7)
+
+    if rng.random() < BRANCH_STRAY:
+        px, py = deep_point()
+        carve_walk(grid, middle[0], middle[1], px, py, rng.randint(*BRANCH_R), rng, wobble=0.9)
 
 
 # ------------------------------------------------------------------ the bands
@@ -1488,14 +1603,19 @@ def place_glyph(overlay, colors, glyph_material, cx, cy, kind, size=25):
 
 
 def scatter_rubble(grid, overlay, colors, inside, floor_y, x0, x1, rng, count=12):
-    """A dozen lumps of Gravel and Rock on the floor: a floor that is a
-    perfect line is the last thing that says drawn."""
+    """A dozen lumps of Rock on the floor: a floor that is a perfect
+    line is the last thing that says drawn.
+
+    Rock, not Gravel, and the joints of the masonry and the rivets of
+    the tank are Coal for the same reason: Gravel is a powder, and a
+    powder drawn where air touches it pours the moment the world
+    starts. A room drawn through time has already poured, so it is
+    drawn of what stays."""
     for _ in range(count):
         cx = rng.randint(x0, x1)
         w = rng.randint(2, 5)
         h = rng.randint(4, 10)
-        mat = "Gravel" if rng.random() < 0.5 else "Rock"
-        fit_rect(grid, overlay, colors, mat, inside, cx - w, cx + w, floor_y - h, floor_y)
+        fit_rect(grid, overlay, colors, "Rock", inside, cx - w, cx + w, floor_y - h, floor_y)
 
 
 def room_cistern(grid, rng, colors):
@@ -1518,7 +1638,7 @@ def room_cistern(grid, rng, colors):
                skip=((MOUTH_LO - 4, MOUTH_HI + 4),))
 
     # the tank's own courses: a rivet seam and Rock hoops banding it
-    rivet_wall(overlay, colors, "Steel", "Gravel", "Rock", x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
+    rivet_wall(overlay, colors, "Steel", "Coal", "Rock", x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     # the tank's own rounded bottom is the basin: already round, already
     # steel-lined by the wall, so it only needs filling to a flat level
@@ -1580,7 +1700,7 @@ def room_magazine(grid, rng, colors):
     # coursed masonry over the whole shell -- the largest single change
     # a wall this size can carry
     margin = int(SHELL_T + max(top_ry, bot_ry) + 10)
-    course_masonry(overlay, colors, "Rock", "Gravel", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
+    course_masonry(overlay, colors, "Rock", "Coal", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
 
     for side in "EW":
         near, far, wall_at = {"W": (x0 - SHELL_T - 6, x0 + 30, x0), "E": (x1 + SHELL_T + 6, x1 - 30, x1)}[side]
@@ -1602,7 +1722,7 @@ def room_magazine(grid, rng, colors):
     # under it is not a sealed box either -- it opens to the same gap
     # at each end that the loft above the beam does.
     fit_rect(grid, overlay, colors, "Rock", inside, FX0, FX1, FLOOR, FLOOR + 20)
-    course_masonry(overlay, colors, "Rock", "Gravel", x0, x1, FLOOR, FLOOR + 20)
+    course_masonry(overlay, colors, "Rock", "Coal", x0, x1, FLOOR, FLOOR + 20)
 
     # the beam, hung off the lane rather than standing in it: carried
     # at the two ends only, by a short post against each end wall above
@@ -1679,7 +1799,7 @@ def room_well(grid, rng, colors):
     inside, shell_mask = build_shell(grid, overlay, colors, "Rock", rng, x0, x1, y0, y1, top_rx, top_ry, bot_rx, bot_ry)
 
     margin = int(SHELL_T + max(top_ry, bot_ry) + 10)
-    course_masonry(overlay, colors, "Rock", "Gravel", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
+    course_masonry(overlay, colors, "Rock", "Coal", x0 - margin, x1 + margin, y0 - margin, y1 + margin)
 
     for side in "NS":
         near, far, wall_at = {"N": (y0 - SHELL_T - 6, y0 + 30, y0), "S": (y1 + SHELL_T + 6, y1 - 30, y1)}[side]
@@ -1713,7 +1833,7 @@ def room_well(grid, rng, colors):
     FLOOR = 400
     MC0, MC1 = MOUTH_LO - 4, MOUTH_HI + 4
     fit_rect(grid, overlay, colors, "Rock", inside, x0 + WALL_T, x1 - WALL_T, FLOOR, FLOOR + 16)
-    course_masonry(overlay, colors, "Rock", "Gravel", x0, x1, FLOOR, FLOOR + 16)
+    course_masonry(overlay, colors, "Rock", "Coal", x0, x1, FLOOR, FLOOR + 16)
     fit_open(grid, overlay, inside, MC0, MC1, FLOOR, FLOOR + 16)
 
     # the bowl, with the floor running up to its rim on both sides --

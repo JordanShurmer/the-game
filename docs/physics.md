@@ -1130,7 +1130,22 @@ and the commit must say so.
    touches. Measured: the world after 300 ticks went from 150 ms a
    tick to 35, and every liquid region reads a dot on the awake map.
    What is left awake is the Sandcave and the coal.
-3. **Then the step, on what is honestly awake.** Not before: the
+3. **The tiles are drawn through time.** Done, in the seeder, with
+   the cave redrawn around it: every tile is one main tunnel now,
+   mouth to mouth, 88 to 112 cells across and walked through two
+   bends, with a branch to each other mouth and sometimes one that
+   ends, and the noise cut lower so it reads as chambers off the way
+   (`carve_trunk`; the header of `tools/seed_tiles.py`). What still
+   moved in the coal after that was the rooms: masonry jointed in
+   Gravel, a tank riveted in it, and lumps of it on a floor, and
+   Gravel is a powder, so it poured out of the Well's wall and heaped
+   on its shelves. The rooms are drawn of what stays -- Coal joints,
+   Rock rubble. Measured after both, the world after 300 ticks is
+   33 ms a tick and after 1000 31; Coalmine alone on the 2048
+   square is 2.1 ms and Sandcave 1.9, where they were 3.7 and 10.4
+   when this note began. What is left awake is
+   dirt and sand settling into the wider caves.
+4. **Then the step, on what is honestly awake.** Not before: the
    figures above are the cost of authoring, and a quicker step would
    only make the sand pour faster. When the map is right, the rung to
    take first is the one the per-biome table names: a wet row pays
@@ -1139,17 +1154,17 @@ and the commit must say so.
    A run of one material along the row can answer for all its cells
    at once, the way `sandbox_load_weights` already loads them. Measure
    it on `biome=Lake` and `biome=Oilfield`, where it is 60% of the tick.
-4. **The wake is a row of 64.** A grain falling through a pond wakes
+5. **The wake is a row of 64.** A grain falling through a pond wakes
    its chunk row edge to edge. A narrower rect -- the chunk already
    keeps a bit a row; a `min_x, max_x` a row is 256 bytes a chunk --
    would keep a still pond still around one moving grain. Measure it
-   on `biome=Lake` after rung 3, when it is what is left.
-5. **The opening.** 4.1 s to open the world is a loading screen. It
+   on `biome=Lake` after rung 4, when it is what is left.
+6. **The opening.** 4.1 s to open the world is a loading screen. It
    is four passes over 64M cells and any of them can go: the
    lifetime fill can be a table lookup in `generate`, the head fill
    only needs the wet regions, and the first tick's walk over every
    chunk is what `sandbox_mark_all` asks for. Measure each.
-6. **The page.** 320 MB is more than a phone will give a tab. The
+7. **The page.** 320 MB is more than a phone will give a tab. The
    rung is not a smaller world but a smaller cell: `lifetime` is an
    `i16` for every cell so that fire can count, and nearly every cell
    is rock with nothing to count. Whether the page keeps the whole
